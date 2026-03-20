@@ -1,0 +1,51 @@
+{
+  "name": "roast-me",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/genai": "^1.45.0",
+    "@react-three/drei": "^10.3.5",
+    "@react-three/fiber": "^9.1.2",
+    "autoprefixer": "^10.4.27",
+    "elevenlabs": "^1.57.0",
+    "next": "^16.1.6",
+    "postcss": "^8.5.8",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "simplex-noise": "^4.0.3",
+    "tailwindcss": "^3.4.19",
+    "three": "^0.175.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.175.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/ui": "^4.1.0",
+    "eslint": "^9",
+    "eslint-config-next": "^16.1.6",
+    "jsdom": "^29.0.0",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  }
+}
