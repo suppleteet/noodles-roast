@@ -5,11 +5,11 @@
  * Runs on the audio thread — no main-thread jank.
  */
 class MicCaptureProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
     this._buffer = [];
-    // 1600 samples = 100ms at 16kHz
-    this._chunkSize = 1600;
+    // Default 1600 samples = 100ms at 16kHz; override via processorOptions.chunkSize
+    this._chunkSize = options?.processorOptions?.chunkSize ?? 1600;
   }
 
   process(inputs) {

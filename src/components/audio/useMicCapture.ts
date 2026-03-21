@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useCallback } from "react";
-import { MIC_SAMPLE_RATE } from "@/lib/liveConstants";
+import { MIC_SAMPLE_RATE, MIC_CHUNK_SAMPLES } from "@/lib/liveConstants";
 
 export interface MicCaptureHandle {
   start(): Promise<void>;
@@ -42,7 +42,9 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
     await ctx.audioWorklet.addModule("/worklets/mic-capture-processor.js");
 
     const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, "mic-capture-processor");
+    const worklet = new AudioWorkletNode(ctx, "mic-capture-processor", {
+      processorOptions: { chunkSize: MIC_CHUNK_SAMPLES },
+    });
     workletRef.current = worklet;
 
     worklet.port.onmessage = (e: MessageEvent<{ pcm: Float32Array }>) => {

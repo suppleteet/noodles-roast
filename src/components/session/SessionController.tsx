@@ -109,7 +109,7 @@ export default function SessionController({
     const resp = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64, burnIntensity, mode }),
+      body: JSON.stringify({ imageBase64, burnIntensity, mode, persona: activePersona }),
       signal,
     });
     if (!resp.ok) {
@@ -272,7 +272,7 @@ export default function SessionController({
       }
       startLoop();
     } else if (phase === "stopped") {
-      stopLoop().then(() => setPhase("sharing"));
+      stopLoop(); // stays at "stopped" — user can restart or share from HUD
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);

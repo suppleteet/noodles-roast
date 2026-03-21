@@ -91,12 +91,66 @@ describe("observations", () => {
   });
 });
 
+describe("session mode", () => {
+  it("defaults to conversation mode", () => {
+    expect(useSessionStore.getState().sessionMode).toBe("conversation");
+  });
+
+  it("setSessionMode switches to monologue", () => {
+    useSessionStore.getState().setSessionMode("monologue");
+    expect(useSessionStore.getState().sessionMode).toBe("monologue");
+  });
+});
+
+describe("conversation state", () => {
+  it("setIsListening toggles listening state", () => {
+    useSessionStore.getState().setIsListening(true);
+    expect(useSessionStore.getState().isListening).toBe(true);
+    useSessionStore.getState().setIsListening(false);
+    expect(useSessionStore.getState().isListening).toBe(false);
+  });
+
+  it("setIsUserSpeaking toggles user speaking state", () => {
+    useSessionStore.getState().setIsUserSpeaking(true);
+    expect(useSessionStore.getState().isUserSpeaking).toBe(true);
+  });
+
+  it("setTranscript updates transcript text", () => {
+    useSessionStore.getState().setTranscript("hello world");
+    expect(useSessionStore.getState().transcript).toBe("hello world");
+  });
+});
+
+describe("persona", () => {
+  it("setActivePersona updates the active persona", () => {
+    useSessionStore.getState().setActivePersona("kvetch");
+    expect(useSessionStore.getState().activePersona).toBe("kvetch");
+  });
+});
+
+describe("scene and recording", () => {
+  it("setLastSceneJson stores scene data", () => {
+    useSessionStore.getState().setLastSceneJson('{"test":true}');
+    expect(useSessionStore.getState().lastSceneJson).toBe('{"test":true}');
+  });
+
+  it("setRecordedBlob stores a blob", () => {
+    const blob = new Blob(["test"], { type: "video/webm" });
+    useSessionStore.getState().setRecordedBlob(blob);
+    expect(useSessionStore.getState().recordedBlob).toBe(blob);
+  });
+});
+
 describe("reset", () => {
   it("returns all fields to initial values", () => {
     const store = useSessionStore.getState();
     store.setPhase("roasting");
+    store.setSessionMode("monologue");
     store.setBurnIntensity(5);
     store.setIsSpeaking(true);
+    store.setIsListening(true);
+    store.setIsUserSpeaking(true);
+    store.setTranscript("some transcript");
     store.setError("something went wrong");
     store.logTiming("log entry");
     store.setObservations(["obs1"]);
@@ -106,8 +160,12 @@ describe("reset", () => {
 
     const after = useSessionStore.getState();
     expect(after.phase).toBe("idle");
+    expect(after.sessionMode).toBe("conversation");
     expect(after.burnIntensity).toBe(3);
     expect(after.isSpeaking).toBe(false);
+    expect(after.isListening).toBe(false);
+    expect(after.isUserSpeaking).toBe(false);
+    expect(after.transcript).toBe("");
     expect(after.error).toBeNull();
     expect(after.timingLog).toHaveLength(0);
     expect(after.observations).toHaveLength(0);

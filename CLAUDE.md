@@ -18,29 +18,39 @@
 | simplex-noise | ^4.0.3 | |
 | tailwindcss | ^3.4.19 | |
 
-## AI Models in Use (from src/lib/constants.ts)
+## AI Models in Use
 
 | Constant | Model ID | Used For |
 |----------|----------|----------|
 | `VISION_MODEL` | `gemini-2.5-flash` | Webcam frame analysis (`/api/vision`, `/api/analyze`) |
 | `ROAST_MODEL` | `gemini-2.5-flash` | Roast + greeting generation (`/api/roast`, `/api/analyze`) |
-| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel |
+| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel (monologue mode) |
+| `LIVE_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | Live API bidirectional voice+video (`/api/live-token`) |
+| `LIVE_VOICE_NAME` | `Kore` | Gemini native audio voice (conversation mode) |
 
 > `@anthropic-ai/sdk` is installed (^0.39.0) but no routes use it yet. Future model would be `claude-sonnet-4-6` or `claude-opus-4-6`. When adding Anthropic routes, confirm the current model IDs — they update frequently.
 
 Run `/package-versions` before touching any API usage.
 
+## Session Modes
+
+The app supports two session modes (controlled by `sessionMode` in the store):
+
+- **`"monologue"`**: Original mode. Discrete cycle: capture frame → Gemini vision analysis → ElevenLabs TTS → play. No mic.
+- **`"conversation"`** (default): Always-on bidirectional voice via Gemini Live API. Mic + webcam stream continuously. ~320ms latency. Barge-in supported. Sessions rotate every 90s (audio+video limit is 2 min).
+
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, roast, tts, vision)
+src/app/api/           Next.js API routes (analyze, roast, tts, vision, live-token)
 src/components/puppet/ Three.js puppet inside R3F Canvas
-src/components/session/ Main orchestration loop (SessionController)
-src/components/audio/  Web Audio API (AudioPlayer)
+src/components/session/ SessionController (monologue), LiveSessionController (conversation)
+src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share)
-src/lib/               Pure utilities: spring.ts, jsonUtils.ts, constants.ts
+src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference
 src/store/             Zustand store (useSessionStore.ts)
+public/worklets/       AudioWorklet processors (mic-capture-processor.js)
 ```
 
 ## Key Invariants — Do Not Violate
@@ -50,6 +60,7 @@ src/store/             Zustand store (useSessionStore.ts)
 3. **ElevenLabs uses raw fetch**: TTS route uses `fetch()` to support streaming passthrough. Do not refactor to the SDK without testing streaming.
 4. **Zustand v5**: `create<SessionState>((set) => ...)` — no curried form.
 5. **No `any`**: strict mode is on. Comment-justify any type assertion.
+6. **LiveSessionController uses getState()**: All store access in WebSocket callbacks and long-lived closures must use `useSessionStore.getState()` to avoid stale closures. Only `phase` is subscribed via selector (for lifecycle).
 
 ## Commands
 

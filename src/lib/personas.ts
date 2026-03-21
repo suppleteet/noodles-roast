@@ -184,7 +184,7 @@ export const PERSONAS: Record<PersonaId, PersonaConfig> = {
 
 export const PERSONA_IDS: readonly PersonaId[] = ["kvetch", "hype", "sweetheart", "menace"];
 
-export const DEFAULT_PERSONA: PersonaId = "menace";
+export const DEFAULT_PERSONA: PersonaId = "kvetch";
 
 export function getPersona(id: PersonaId): PersonaConfig {
   return PERSONAS[id];

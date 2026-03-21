@@ -1,25 +1,35 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { MOTION_STATE_CONFIGS } from "@/lib/motionStates";
+import type { MotionState } from "@/lib/motionStates";
 import { useSessionStore } from "@/store/useSessionStore";
 import type { SpringTargets } from "./useSpringPhysics";
 
 /**
  * Reads activeMotionState + amplitude from store each frame.
  * Writes to the spring targets and returns stiffness/damping refs.
+ * Forces "sleeping" state when not actively roasting.
  */
 export function useMotionState(targets: React.MutableRefObject<SpringTargets>) {
   const stiffnessRef = useRef(40);
   const dampingRef = useRef(10);
   const timeRef = useRef(0);
+  const awakeRef = useRef(false); // latches true on first audible audio, resets when not roasting
 
   useFrame((_, delta) => {
     timeRef.current += delta;
     const t = timeRef.current;
-    const { activeMotionState, motionIntensity, audioAmplitude } =
+    const { activeMotionState, motionIntensity, audioAmplitude, phase } =
       useSessionStore.getState();
 
-    const cfg = MOTION_STATE_CONFIGS[activeMotionState];
+    // Latch awake on first audible audio; reset when phase leaves roasting
+    if (phase !== "roasting") awakeRef.current = false;
+    if (phase === "roasting" && audioAmplitude > 0.03) awakeRef.current = true;
+    const awake = awakeRef.current;
+    const effectiveState: MotionState = awake ? activeMotionState : "sleeping";
+    const effectiveIntensity = awake ? motionIntensity : 1.0;
+
+    const cfg = MOTION_STATE_CONFIGS[effectiveState];
 
     // Update spring params from motion state config
     stiffnessRef.current = cfg.stiffness;
@@ -31,10 +41,10 @@ export function useMotionState(targets: React.MutableRefObject<SpringTargets>) {
     const ampScale = 1 + audioAmplitude * 0.3;
 
     targets.current = {
-      pitch: (cfg.headPitch + osc * 0.5) * motionIntensity * ampScale,
-      yaw: (cfg.headYaw + osc * 0.3) * motionIntensity * ampScale,
-      roll: (cfg.headRoll + osc * 0.2) * motionIntensity * ampScale,
-      bobY: (cfg.bodyBob + osc) * motionIntensity * ampScale,
+      pitch: (cfg.headPitch + osc * 0.5) * effectiveIntensity * ampScale,
+      yaw: (cfg.headYaw + osc * 0.3) * effectiveIntensity * ampScale,
+      roll: (cfg.headRoll + osc * 0.2) * effectiveIntensity * ampScale,
+      bobY: (cfg.bodyBob + osc) * effectiveIntensity * ampScale,
     };
   });
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
 import { GoogleGenAI } from "@google/genai";
 import { getRoastSystemPrompt, getGreetingSystemPrompt } from "@/lib/prompts";
 import { ROAST_MODEL } from "@/lib/constants";
@@ -18,6 +19,27 @@ export async function POST(req: NextRequest) {
     }
 
     const personaId: PersonaId = PERSONA_IDS.includes(persona) ? persona : DEFAULT_PERSONA;
+
+    // Vision-only mode: fast, focused call that returns only observations
+    if (mode === "vision") {
+      const response = await ai.models.generateContent({
+        model: ROAST_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+              { text: "List 3-5 short, specific observations about what you see in this image. Return ONLY a JSON array of strings, e.g. [\"wearing headphones\", \"messy hair\"]." },
+            ],
+          },
+        ],
+        config: { maxOutputTokens: 200 },
+      });
+      const text = response.text ?? "[]";
+      const parsed = extractJson<string[]>(text, /\[[\s\S]*\]/, []);
+      const observations = Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+      return NextResponse.json({ sentences: [], observations });
+    }
 
     const systemPrompt =
       mode === "greeting"

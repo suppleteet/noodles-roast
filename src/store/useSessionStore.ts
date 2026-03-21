@@ -3,6 +3,33 @@ import type { MotionState } from "@/lib/motionStates";
 import type { BurnIntensity } from "@/lib/prompts";
 import { DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 
+export type ConversationEventType = "user-start" | "user-end" | "ai-speech" | "ai-done" | "interrupted" | "listening" | "rotate";
+
+export type TimelineRow = "user" | "gemini" | "tts" | "vision" | "session";
+
+export const TIMELINE_ROW_COLORS: Record<TimelineRow, string> = {
+  user: "#22d3ee",
+  gemini: "#fb923c",
+  tts: "#a78bfa",
+  vision: "#60a5fa",
+  session: "#94a3b8",
+};
+
+export interface TimelineSpan {
+  id: string;
+  row: TimelineRow;
+  label: string;
+  startTs: number;
+  endTs: number | null;
+  color: string;
+}
+
+export interface ConversationEvent {
+  type: ConversationEventType;
+  text?: string;
+  ts: number;
+}
+
 export type SessionPhase =
   | "idle"
   | "consent"
@@ -36,6 +63,10 @@ interface SessionState {
   error: string | null;
   timingLog: string[];
   observations: string[];
+  conversationEvents: ConversationEvent[];
+  timeToFirstSpeechMs: number | null;
+  hasSpokenThisSession: boolean;
+  lastVisionCallTs: number | null;
 
   // actions
   setPhase: (phase: SessionPhase) => void;
@@ -54,6 +85,15 @@ interface SessionState {
   logTiming: (entry: string) => void;
   clearTimingLog: () => void;
   setObservations: (obs: string[]) => void;
+  addConversationEvent: (type: ConversationEvent["type"], text?: string) => void;
+  clearConversationEvents: () => void;
+  setTimeToFirstSpeechMs: (ms: number | null) => void;
+  setHasSpokenThisSession: (spoken: boolean) => void;
+  setLastVisionCallTs: (ts: number | null) => void;
+  timelineSpans: TimelineSpan[];
+  beginSpan: (row: TimelineRow, label: string, color?: string) => string;
+  endSpan: (id: string) => void;
+  clearTimelineSpans: () => void;
   reset: () => void;
 }
 
@@ -74,6 +114,11 @@ const initialState = {
   error: null,
   timingLog: [] as string[],
   observations: [] as string[],
+  conversationEvents: [] as ConversationEvent[],
+  timeToFirstSpeechMs: null as number | null,
+  hasSpokenThisSession: false,
+  lastVisionCallTs: null as number | null,
+  timelineSpans: [] as TimelineSpan[],
 };
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -97,5 +142,33 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({ timingLog: [...s.timingLog.slice(-49), entry] })),
   clearTimingLog: () => set({ timingLog: [] }),
   setObservations: (observations) => set({ observations }),
+  addConversationEvent: (type, text) =>
+    set((s) => ({
+      conversationEvents: [
+        ...s.conversationEvents.slice(-29),
+        { type, text, ts: Date.now() },
+      ],
+    })),
+  clearConversationEvents: () => set({ conversationEvents: [] }),
+  setTimeToFirstSpeechMs: (timeToFirstSpeechMs) => set({ timeToFirstSpeechMs }),
+  setHasSpokenThisSession: (hasSpokenThisSession) => set({ hasSpokenThisSession }),
+  setLastVisionCallTs: (lastVisionCallTs) => set({ lastVisionCallTs }),
+  beginSpan: (row, label, color) => {
+    const id = `${row}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    set((s) => ({
+      timelineSpans: [
+        ...s.timelineSpans.slice(-299),
+        { id, row, label, startTs: Date.now(), endTs: null, color: color ?? TIMELINE_ROW_COLORS[row] },
+      ],
+    }));
+    return id;
+  },
+  endSpan: (id) =>
+    set((s) => ({
+      timelineSpans: s.timelineSpans.map((span) =>
+        span.id === id ? { ...span, endTs: Date.now() } : span
+      ),
+    })),
+  clearTimelineSpans: () => set({ timelineSpans: [] }),
   reset: () => set(initialState),
 }));

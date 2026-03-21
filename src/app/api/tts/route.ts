@@ -3,7 +3,11 @@ import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   try {
-    const { text } = await req.json();
+    const {
+      text,
+      voiceId: overrideVoiceId,
+      voiceSettings: overrideSettings,
+    } = await req.json();
     if (!text) {
       return new Response(JSON.stringify({ error: "text required" }), { status: 400 });
     }
@@ -15,7 +19,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const voiceId = process.env.ELEVENLABS_VOICE_ID ?? ELEVENLABS_VOICE_ID;
+    const voiceId = overrideVoiceId ?? process.env.ELEVENLABS_VOICE_ID ?? ELEVENLABS_VOICE_ID;
+    const voiceSettings = overrideSettings ?? {
+      stability: 0.4,
+      similarity_boost: 0.8,
+      style: 0.5,
+      use_speaker_boost: true,
+    };
 
     // Use ElevenLabs REST streaming endpoint
     const response = await fetch(
@@ -30,12 +40,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           text,
           model_id: "eleven_turbo_v2_5",
-          voice_settings: {
-            stability: 0.4,
-            similarity_boost: 0.8,
-            style: 0.5,
-            use_speaker_boost: true,
-          },
+          voice_settings: voiceSettings,
         }),
       }
     );

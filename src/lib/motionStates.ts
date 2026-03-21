@@ -7,7 +7,8 @@ export type MotionState =
   | "shocked"
   | "emphasis"
   | "thinking"
-  | "listening";
+  | "listening"
+  | "sleeping";
 
 export interface MotionStateConfig {
   /** Spring stiffness override (higher = snappier) */
@@ -118,5 +119,15 @@ export const MOTION_STATE_CONFIGS: Record<MotionState, MotionStateConfig> = {
     bodyBob: 0,
     oscFreq: 0.2,
     oscAmp: 0.006,
+  },
+  sleeping: {
+    stiffness: 15,
+    damping: 8,
+    headPitch: 0.65,   // nodded forward
+    headYaw: 0,
+    headRoll: 0.05,    // slight tilt
+    bodyBob: -0.08,    // slumped down
+    oscFreq: 0.15,     // slow breathing
+    oscAmp: 0.015,
   },
 };

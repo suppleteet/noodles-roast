@@ -1,9 +1,9 @@
 ---
 name: wrapup
-description: All-in-one finish line — runs code review, then maintenance audit, then full test suite sequentially. Use after completing a feature or before committing.
+description: All-in-one finish line — runs maintenance audit, code review, and full test suite sequentially, then updates CLAUDE.md and memory to reflect current state.
 ---
 
-Run all three checks in sequence. Each step must complete before the next begins.
+Run all steps in sequence. Each step must complete before the next begins.
 
 ## Step 1 — Maintenance Audit
 
@@ -23,9 +23,39 @@ Use the Skill tool to invoke the `test` skill. This runs typecheck, Vitest unit 
 
 Wait for results before proceeding.
 
-## Step 4 — Unified Report
+## Step 4 — Knowledge Base Sync
 
-Combine all three results into a single report:
+Using the findings from Steps 1–3, update the knowledge base to reflect current reality. Do this **before** writing the report.
+
+### 4a — CLAUDE.md sync
+
+Read `CLAUDE.md`. Apply only what the maintain audit flagged as `[STALE]`, `[NEW]`, or `[REMOVED]`:
+
+- **Package table**: update any `[STALE]` version ranges to match `package.json`; add `[NEW]` packages; remove `[REMOVED]` ones
+- **AI model table**: update any `[STALE]` model IDs or voice IDs to match `src/lib/constants.ts` / `src/lib/liveConstants.ts`
+- **Key Invariants**: if the review found a new invariant, add it; if a `[VIOLATED]` invariant was resolved, update its wording
+
+Do **not** rewrite narrative sections, rename headings, or change anything the audit did not flag. Surgical edits only.
+
+### 4b — Memory sync
+
+Read `C:\Users\tyler\.claude\projects\c--Projects-RoastMe\memory\MEMORY.md` and its linked files.
+
+Apply updates only for things that materially changed:
+
+- If a new architectural decision was made (new session mode, new API route, new invariant pattern), update or create the relevant project or feedback memory and update the MEMORY.md index
+- If a previously recorded fact is now stale (old model ID, removed feature), update or remove that memory
+- If the code review found a recurring pattern the user confirmed and it isn't already in memory, save it as a feedback memory
+
+Do **not** create memories for things already in CLAUDE.md or derivable from reading the code. Do **not** duplicate existing memories.
+
+### 4c — Report what changed
+
+List every file edited in this step and the specific change. If nothing needed updating, say "Knowledge base: already current — no changes."
+
+## Step 5 — Unified Report
+
+Combine all results into a single report:
 
 ```
 ═══════════════════════════════════════
@@ -33,7 +63,7 @@ Combine all three results into a single report:
 ═══════════════════════════════════════
 
 ## 1. Maintenance Audit
-[Key findings: STALE/MISSING/VIOLATED items]
+[Key findings: STALE/MISSING/VIOLATED items, or CLEAN]
 
 ## 2. Code Review
 [Verdict: APPROVE / REQUEST CHANGES]
@@ -42,6 +72,9 @@ Combine all three results into a single report:
 ## 3. Test Suite
 [Verdict: CLEAN / ISSUES]
 [Failures if any]
+
+## 4. Knowledge Base
+[Files updated and what changed, or "already current"]
 
 ───────────────────────────────────────
 OVERALL: SHIP IT ✓  |  NEEDS WORK ✗

@@ -15,7 +15,7 @@ export default function LandingScreen() {
     <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white px-4 text-center">
       <div className="mb-8">
         <h1 className="text-6xl font-black mb-4 tracking-tight">
-          🎭 ROAST ME
+          ROAST ME
         </h1>
         <p className="text-xl text-gray-400 max-w-md">
           An AI puppet comedian analyzes you through your webcam and delivers a

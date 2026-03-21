@@ -14,7 +14,7 @@ export function inferMotionFromTranscript(
   const lower = text.toLowerCase();
 
   // Laughter indicators
-  if (/\b(ha(ha)+|heh|lol|bwah|cackle|rofl)\b/.test(lower) || /😂|🤣/.test(text)) {
+  if (/(ha(ha)+|heh|lol|bwah|cackle|rofl)/i.test(lower) || /😂|🤣/.test(text)) {
     return ["laugh", Math.min(0.6 + audioEnergy, 1)];
   }
 
@@ -31,8 +31,8 @@ export function inferMotionFromTranscript(
     return ["conspiratorial", 0.6];
   }
 
-  // Smug / sarcasm
-  if (/\b(oh really|sure|right|clearly|obviously|of course|I mean)\b/.test(lower)) {
+  // Smug / sarcasm — require multi-word phrases to avoid false positives on "right", "sure"
+  if (/\b(oh really|oh sure|yeah right|clearly|obviously|of course|I mean come on)\b/.test(lower)) {
     return ["smug", 0.6];
   }
 

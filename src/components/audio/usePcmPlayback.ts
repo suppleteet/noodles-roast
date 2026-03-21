@@ -8,6 +8,8 @@ const AMPLITUDE_THRESHOLD = 0.01;
 
 export interface PcmPlaybackHandle {
   enqueueChunk(base64Pcm: string): void;
+  /** Decode a raw MP3/AAC ArrayBuffer and schedule it for playback. */
+  decodeAndEnqueue(arrayBuffer: ArrayBuffer): Promise<void>;
   flush(): void;
   getDestinationStream(): MediaStream | null;
   getAudioContext(): AudioContext | null;
@@ -69,6 +71,19 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     return () => cancelAnimationFrame(rafRef.current);
   }, [pollAmplitude]);
 
+  /** Schedule an already-decoded AudioBuffer for gapless playback. */
+  const scheduleBuffer = useCallback((buffer: AudioBuffer) => {
+    const ctx = getOrCreateContext();
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(analyserRef.current!);
+    const startTime = Math.max(ctx.currentTime, queueEndRef.current);
+    src.start(startTime);
+    queueEndRef.current = startTime + buffer.duration;
+    sourcesRef.current.add(src);
+    src.onended = () => sourcesRef.current.delete(src);
+  }, []);
+
   const enqueueChunk = useCallback((base64Pcm: string) => {
     const ctx = getOrCreateContext();
     if (ctx.state === "suspended") ctx.resume();
@@ -78,20 +93,15 @@ export function usePcmPlayback(): PcmPlaybackHandle {
 
     const buffer = ctx.createBuffer(1, float32.length, OUTPUT_SAMPLE_RATE);
     buffer.getChannelData(0).set(float32);
+    scheduleBuffer(buffer);
+  }, [scheduleBuffer]);
 
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(analyserRef.current!);
-
-    const startTime = Math.max(ctx.currentTime, queueEndRef.current);
-    src.start(startTime);
-    queueEndRef.current = startTime + buffer.duration;
-
-    sourcesRef.current.add(src);
-    src.onended = () => {
-      sourcesRef.current.delete(src);
-    };
-  }, []);
+  const decodeAndEnqueue = useCallback(async (arrayBuffer: ArrayBuffer): Promise<void> => {
+    const ctx = getOrCreateContext();
+    if (ctx.state === "suspended") await ctx.resume();
+    const buffer = await ctx.decodeAudioData(arrayBuffer);
+    scheduleBuffer(buffer);
+  }, [scheduleBuffer]);
 
   /** Flush all queued/playing audio — called on barge-in interrupt. */
   const flush = useCallback(() => {
@@ -122,6 +132,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
 
   return {
     enqueueChunk,
+    decodeAndEnqueue,
     flush,
     getDestinationStream: () => destRef.current?.stream ?? null,
     getAudioContext: () => ctxRef.current,

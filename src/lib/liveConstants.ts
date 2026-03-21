@@ -15,6 +15,7 @@ export const MIC_MIME_TYPE = "audio/pcm;rate=16000";
 
 // Streaming intervals
 export const WEBCAM_SEND_INTERVAL_MS = 1000; // send webcam frame every 1s (max 1fps)
+export const VISION_INTERVAL_MS = 3000;      // vision analyze call every 3s
 export const AUDIO_CHUNK_DURATION_MS = 100; // send mic audio every 100ms
 export const MIC_CHUNK_SAMPLES = MIC_SAMPLE_RATE * (AUDIO_CHUNK_DURATION_MS / 1000); // 1600
 
@@ -24,3 +25,11 @@ export const SESSION_ROTATE_MS = 90_000;
 
 // Default burn intensity for live sessions
 export const DEFAULT_LIVE_BURN_INTENSITY: BurnIntensity = 3;
+
+// Canned lines for mock voice sessions (debug/dev — no API tokens burned)
+export const MOCK_LINES = [
+  "Oh wow. You look like you got dressed in the dark and picked your outfit from a donation bin. I've seen better fashion sense on a scarecrow, and at least the scarecrow has an excuse.",
+  "I've analyzed your face with cutting-edge AI and the results came back inconclusive — which is honestly the most generous review I could give.",
+  "You know what's impressive? That you showed up today. Most people with your energy would've just stayed in bed and let the ceiling fan judge them.",
+  "I'm not saying you're boring, but if you were a color, you'd be the gray that comes out when you mix all the other grays together.",
+];

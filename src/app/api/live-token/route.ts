@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     const burnIntensity: BurnIntensity = ([1, 2, 3, 4, 5] as const).includes(body.burnIntensity)
       ? body.burnIntensity
       : 3;
+    const personaId: PersonaId = PERSONA_IDS.includes(body.persona) ? body.persona : DEFAULT_PERSONA;
 
     const ai = new GoogleGenAI({
       apiKey,
@@ -37,12 +38,15 @@ export async function POST(req: NextRequest) {
           model: LIVE_MODEL,
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: getLiveSystemPrompt(burnIntensity),
+            systemInstruction: getLiveSystemPrompt(burnIntensity, personaId),
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: { voiceName: LIVE_VOICE_NAME },
               },
             },
+            // Must be in constraints — client-side additions are ignored when token is used
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
           },
         },
       },
@@ -56,6 +60,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[live-token]", message);
-    return NextResponse.json({ error: "Token creation failed", detail: message }, { status: 500 });
+    return NextResponse.json({ error: "Token creation failed" }, { status: 500 });
   }
 }
