@@ -47,9 +47,9 @@ export default function ShareScreen() {
 
   async function handleShare() {
     if (!recordedBlob) return;
-    const file = new File([recordedBlob], "roast-me.webm", { type: "video/webm" });
+    const file = new File([recordedBlob], "roastie.webm", { type: "video/webm" });
     if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: "I got roasted by an AI puppet 🔥" });
+      await navigator.share({ files: [file], title: "I got roasted by Roastie 🔥" });
     }
   }
 
@@ -58,7 +58,7 @@ export default function ShareScreen() {
     // Use the server's clever name (swap extension to .webm — that's what the client blob is)
     const name = savedFilename
       ? savedFilename.replace(/\.\w+$/, ".webm")
-      : "roast-me.webm";
+      : "roastie.webm";
     const a = document.createElement("a");
     a.href = videoUrl;
     a.download = name;

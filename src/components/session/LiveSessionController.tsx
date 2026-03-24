@@ -60,6 +60,9 @@ export default function LiveSessionController({
   const drainRafRef = useRef<number>(0);
   const wasDrainedRef = useRef(true); // track edge: false → true
 
+  // Mic → recording mix (disconnect function returned by addInputToRecording)
+  const micRecordingDisconnectRef = useRef<(() => void) | null>(null);
+
   // Timeline span IDs
   const userSpeakingSpanRef = useRef<string | null>(null);
   const geminiWaitingSpanRef = useRef<string | null>(null);
@@ -438,9 +441,12 @@ export default function LiveSessionController({
   // ─── Audio stream for recording ────────────────────────────────────────────────
 
   function getRecordingAudioStream(): MediaStream | null {
-    // Use the TTS playback destination stream directly — it's already on the right
-    // AudioContext (OUTPUT_SAMPLE_RATE). Routing through a second AudioContext causes
-    // cross-rate resampling artifacts in the recorded WebM.
+    // Mix mic audio into the recording destination (TTS playback context).
+    // Routes mic → dest node only (NOT speakers) to avoid feedback.
+    const micStream = mic.getStream();
+    if (micStream) {
+      micRecordingDisconnectRef.current = playback.addInputToRecording(micStream);
+    }
     return playback.getDestinationStream();
   }
 
@@ -612,6 +618,8 @@ export default function LiveSessionController({
     if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
 
     cancelSpeech();
+    micRecordingDisconnectRef.current?.();
+    micRecordingDisconnectRef.current = null;
     mic.stop();
     playback.flush();
 

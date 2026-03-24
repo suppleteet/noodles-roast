@@ -26,7 +26,7 @@ function cleverBaseName(): string {
   return `${adj}-${noun}-${ts}`;
 }
 
-export const VIDEOS_FOLDER = join(tmpdir(), "roastme-videos");
+export const VIDEOS_FOLDER = join(tmpdir(), "roastie-videos");
 
 function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {

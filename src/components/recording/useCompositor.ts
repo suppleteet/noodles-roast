@@ -84,7 +84,7 @@ export function useCompositor(
       } else {
         ctx!.font = "bold 13px sans-serif";
         ctx!.fillStyle = "rgba(255,255,255,0.5)";
-        ctx!.fillText("roastme.app", 14, size - 14);
+        ctx!.fillText("roastie.app", 14, size - 14);
       }
 
       rafRef.current = requestAnimationFrame(draw);

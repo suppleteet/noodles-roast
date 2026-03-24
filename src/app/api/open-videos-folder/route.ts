@@ -4,7 +4,7 @@ import { mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const VIDEOS_FOLDER = join(tmpdir(), "roastme-videos");
+const VIDEOS_FOLDER = join(tmpdir(), "roastie-videos");
 
 export async function POST() {
   await mkdir(VIDEOS_FOLDER, { recursive: true });

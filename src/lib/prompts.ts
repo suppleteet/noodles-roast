@@ -136,14 +136,18 @@ Generate exactly 1 joke.`,
 The user answered a question. Generate 1-2 jokes roasting their answer.
 Use QUESTION ASKED and USER'S ANSWER from context.
 
+CRITICAL: Your jokes MUST directly reference and roast the USER'S ANSWER.
+Do NOT ignore the answer and make jokes about their appearance or background instead.
+The audience just heard them say something — roast THAT.
+
 Relevance check: If the user's answer is clearly off-topic, set "relevant": false and
 provide a witty redirect in "redirect" that acknowledges what they said but steers back.
 
 Follow-up: If the answer naturally invites a follow-up (surprising detail, interesting reveal),
 include a short punchy "followUp" question.
 
-Callback: If any CONVERSATION SO FAR entry connects naturally and funnily to this moment,
-include it as "callback". Only if genuinely funny — don't force it.
+Callback: Only if a previous joke connects naturally to THIS answer.
+Never callback to your greeting or opening lines. Set to null if nothing fits.
 
 Tags: Extract key facts from the answer as tags: "name:Mike", "job:dentist", "city:Florida".
 

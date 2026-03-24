@@ -15,6 +15,9 @@ export interface PcmPlaybackHandle {
   getAudioContext(): AudioContext | null;
   /** Returns true when all queued audio has finished playing. */
   isQueueEmpty(): boolean;
+  /** Route an external stream (e.g. mic) to the recording destination only
+   *  (NOT speakers — avoids feedback). Returns a disconnect function. */
+  addInputToRecording(stream: MediaStream): () => void;
 }
 
 /**
@@ -150,5 +153,12 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     },
     getAudioContext: () => ctxRef.current,
     isQueueEmpty,
+    addInputToRecording: (stream: MediaStream): (() => void) => {
+      const ctx = getOrCreateContext();
+      const source = ctx.createMediaStreamSource(stream);
+      // Route to recording destination ONLY — not speakers — to avoid feedback
+      source.connect(destRef.current!);
+      return () => { source.disconnect(); };
+    },
   };
 }
