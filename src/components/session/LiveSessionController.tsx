@@ -158,6 +158,10 @@ export default function LiveSessionController({
       useSessionStore.getState().setTimeToFirstSpeechMs(ttfs);
       useSessionStore.getState().logTiming(`brain: TTFS ${ttfs}ms`);
       useSessionStore.getState().setHasSpokenThisSession(true);
+      // Start recording now that the puppet is about to speak for the first time.
+      if (!mockMode && videoRecorderRef.current && compositorStream && isRunningRef.current) {
+        videoRecorderRef.current.start(compositorStream, getRecordingAudioStream());
+      }
     }
     useSessionStore.getState().setIsSpeaking(true);
   }
@@ -560,6 +564,15 @@ export default function LiveSessionController({
       });
       const session = await sessionPromise;
       await micPromise;
+
+      // Guard: stopLiveSession() may have run while we were awaiting (e.g. user
+      // clicked Stop, then immediately Start Session before the old stop finished).
+      if (!isRunningRef.current || !brainRef.current) {
+        try { session.close(); } catch { /* noop */ }
+        useSessionStore.getState().endSpan(connectSpanId);
+        return;
+      }
+
       sessionRef.current = session;
       useSessionStore.getState().endSpan(connectSpanId);
       useSessionStore.getState().logTiming("live: session + mic ready");
@@ -640,7 +653,11 @@ export default function LiveSessionController({
       }
     }
 
-    store.setPhase("sharing");
+    // Only navigate to sharing if the user hasn't already moved on (e.g. clicked
+    // "Start Session" again before this async stop finished).
+    if (useSessionStore.getState().phase === "stopped") {
+      store.setPhase("sharing");
+    }
 
     // Auto-save transcript for debugging
     saveTranscript(store);
@@ -668,18 +685,7 @@ export default function LiveSessionController({
 
   useEffect(() => {
     if (phase === "roasting") {
-      const sessionStart = mockMode ? startMockSession() : startLiveSession();
-      sessionStart.then(() => {
-        if (!mockMode && videoRecorderRef.current && compositorStream && isRunningRef.current) {
-          // Brief delay so captureStream(30) has at least one valid frame buffered
-          // before MediaRecorder starts — prevents empty/malformed EBML header.
-          setTimeout(() => {
-            if (videoRecorderRef.current && isRunningRef.current) {
-              videoRecorderRef.current.start(compositorStream, getRecordingAudioStream());
-            }
-          }, 500);
-        }
-      });
+      mockMode ? startMockSession() : startLiveSession();
     } else if (phase === "stopped") {
       stopLiveSession();
     }
