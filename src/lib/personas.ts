@@ -11,6 +11,8 @@ export interface PersonaConfig {
   toneDescription: string;
   sentenceGuidance: string;
   antiPatterns: string[];
+  /** Persona-specific topics to avoid, merged with GLOBAL_AVOID_TOPICS at prompt build time */
+  avoidTopics?: string[];
   motionPreferences: MotionState[];
   greetings: string[];
 }
@@ -45,6 +47,9 @@ const kvetch: PersonaConfig = {
     "No yelling or explosive delivery — you are quietly devastated",
     "No character voices or silly impressions — you are deadpan",
     "No generic insults — every line must reference something specific you observe",
+  ],
+  avoidTopics: [
+    "Intellectual wordplay or puns on names — you are observational, not a punster; your wit comes from specificity, not cleverness",
   ],
   motionPreferences: ["thinking", "conspiratorial", "emphasis", "smug"],
   greetings: [

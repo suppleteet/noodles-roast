@@ -1,4 +1,5 @@
 import { getPersona, type PersonaId, DEFAULT_PERSONA } from "@/lib/personas";
+import { getAvoidTopicsBlock } from "@/lib/avoidTopics";
 import type { JokeContext } from "@/app/api/generate-joke/route";
 
 export type BurnIntensity = 1 | 2 | 3 | 4 | 5;
@@ -59,6 +60,9 @@ Deliver a greeting (1-2 sentences) in your character voice, then make one sharp,
 ## What You NEVER Do
 ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 
+## What You NEVER Joke About
+${getAvoidTopicsBlock(p.avoidTopics)}
+
 Return ONLY a valid JSON object in exactly this shape:
 {
   "observations": ["brief thing you notice 1", "brief thing you notice 2"],
@@ -99,8 +103,10 @@ ${p.roastTechniques.map((t) => `- ${t}`).join("\n")}
 ## What You NEVER Do
 ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 - NEVER use profanity at intensity 1-2. Mild at 3. Allowed at 4-5.
-- NEVER make jokes about race, gender identity, disability, or religion.
-- Never output anything but valid JSON.`;
+- Never output anything but valid JSON.
+
+## What You NEVER Joke About
+${getAvoidTopicsBlock(p.avoidTopics)}`;
 
   const responseSchema = `
 Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
@@ -121,27 +127,27 @@ score: 1-10 self-assessed funniness (10 = best joke you've ever told)`;
 
   const contextInstructions: Record<JokeContext, string> = {
     greeting: `## Task: Opening Greeting
-Generate exactly 1 sentence — your punchy opening line for this specific person.
+Generate 1-2 sentences — your punchy opening for this specific person.
 If you can see them, reference something specific you notice immediately.
-Max 12 words. Punchline at the end. No fluff, no wind-up.
+Max 16 words per sentence. Punchline at the end of each. No wind-up.
 Set "relevant": true. No "followUp". No "redirect".
-Generate exactly 1 joke.`,
+Generate 1-2 jokes.`,
 
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
 Based on CURRENT OBSERVATIONS provided. Be specific — reference what you actually see.
-Max 12 words. Punchline at the end.
+Max 16 words. Punchline at the end.
 Set "relevant": true. No "followUp" needed.
 Generate exactly 1 joke.`,
 
     answer_roast: `## Task: Roast Response to User's Answer
-The user answered a question. Generate exactly 1 joke roasting their answer.
+The user answered a question. Generate 1-2 jokes roasting their answer.
 Use QUESTION ASKED and USER'S ANSWER from context.
 
-CRITICAL: Your joke MUST directly reference and roast the USER'S ANSWER.
+CRITICAL: Your jokes MUST directly reference and roast the USER'S ANSWER.
 Do NOT make jokes about their appearance, background, or room decor instead — roast THAT answer.
 
-SNAPPY FORMAT: 1 sentence, max 12 words, punchline at the end. No multi-sentence jokes.
+FORMAT: Max 16 words per sentence, punchline at the end. Each sentence self-contained.
 
 BACKGROUND RULE: Do NOT reference background items (furniture, decor, posters, room details) in ANY
 response unless BOTH "city:" AND "hometown:" tags appear in the CONVERSATION SO FAR. Without full
@@ -158,7 +164,7 @@ Never callback to your greeting or opening lines. Set to null if nothing fits.
 
 Tags: Extract key facts from the answer as tags: "name:Mike", "job:dentist", "city:Florida".
 
-Generate exactly 1 joke.`,
+Generate 1-2 jokes.`,
 
     vision_react: `## Task: React to Visual Change
 Something interesting changed on camera. Compare PREVIOUS OBSERVATIONS to CURRENT OBSERVATIONS.
@@ -169,7 +175,7 @@ Generate 1 joke.`,
     hopper: `## Task: Background Joke Generation
 Generate 2-3 candidate jokes for the joke hopper, inspired by any context provided.
 These are speculative — they may or may not be used. Prioritize quality over quantity.
-Each joke: max 12 words, punchline at the end, one sentence only.
+Each joke: max 16 words, punchline at the end, one sentence only.
 Score each joke honestly (score field). 8+ means "would interrupt the show to tell this."
 Can include a callback if context supports it.
 
@@ -209,6 +215,9 @@ ${p.sentenceGuidance}
 
 ## What You NEVER Do
 ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
+
+## What You NEVER Joke About
+${getAvoidTopicsBlock(p.avoidTopics)}
 
 ## Format Rules (CRITICAL — ALL PERSONAS)
 - Rapid-fire, one-liner-dense. No long stories or extended setups.

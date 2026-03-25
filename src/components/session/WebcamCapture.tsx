@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
-import { COMPOSITOR_SIZE } from "@/lib/constants";
+import { VISION_FRAME_SIZE } from "@/lib/constants";
 import { centerCropSquare } from "@/lib/videoUtils";
 
 export interface WebcamCaptureHandle {
@@ -31,7 +31,7 @@ const WebcamCapture = forwardRef<WebcamCaptureHandle, Props>(function WebcamCapt
       const canvas = canvasRef.current;
       if (!video || !canvas || video.readyState < 2) return null;
 
-      const size = COMPOSITOR_SIZE;
+      const size = VISION_FRAME_SIZE;
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext("2d");
@@ -40,7 +40,7 @@ const WebcamCapture = forwardRef<WebcamCaptureHandle, Props>(function WebcamCapt
       const { side, sx, sy } = centerCropSquare(video.videoWidth, video.videoHeight);
       ctx.drawImage(video, sx, sy, side, side, 0, 0, size, size);
 
-      return canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
+      return canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
     },
     getVideoElement(): HTMLVideoElement | null {
       return videoRef.current;
