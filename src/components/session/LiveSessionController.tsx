@@ -38,9 +38,10 @@ export default function LiveSessionController({
   prefetchedTokenPromise,
   mockMode = false,
 }: Props) {
-  // Only subscribe to phase for lifecycle — all other store access uses getState()
-  // to avoid stale closures in long-lived WebSocket callbacks.
+  // Only subscribe to phase + pendingDebugTranscription for lifecycle/debug.
+  // All other store access uses getState() to avoid stale closures.
   const phase = useSessionStore((s) => s.phase);
+  const pendingDebugTranscription = useSessionStore((s) => s.pendingDebugTranscription);
 
   const sessionRef = useRef<Session | null>(null);
   const isRunningRef = useRef(false);
@@ -89,6 +90,16 @@ export default function LiveSessionController({
 
   // ComedianBrain — instantiated when session starts
   const brainRef = useRef<ComedianBrain | null>(null);
+
+  // Debug: consume typed transcription and forward to brain (same as mic input)
+  useEffect(() => {
+    if (!pendingDebugTranscription || !brainRef.current) return;
+    const text = pendingDebugTranscription;
+    useSessionStore.getState().clearPendingDebugTranscription();
+    useSessionStore.getState().pushTranscriptEntry("user", text);
+    useSessionStore.getState().logTiming(`debug-input: "${text}"`);
+    brainRef.current.onInputTranscription(text);
+  }, [pendingDebugTranscription]);
 
   // ─── Brain helpers ────────────────────────────────────────────────────────────
 

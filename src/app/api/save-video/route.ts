@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile, unlink, mkdir } from "fs/promises";
-import { tmpdir } from "os";
 import { join } from "path";
 import { spawn } from "child_process";
+import { VIDEOS_FOLDER } from "@/lib/videoPaths";
 
 const ADJECTIVES = [
   "charred", "scorched", "roasted", "singed", "crispy",
@@ -25,8 +25,6 @@ function cleverBaseName(): string {
     .slice(0, 17); // "2026-03-24-142301"
   return `${adj}-${noun}-${ts}`;
 }
-
-export const VIDEOS_FOLDER = join(tmpdir(), "roastie-videos");
 
 function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {

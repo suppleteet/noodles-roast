@@ -23,6 +23,7 @@ export default function Home() {
   const setError = useSessionStore((s) => s.setError);
   const logTiming = useSessionStore((s) => s.logTiming);
   const timingLog = useSessionStore((s) => s.timingLog);
+  const setSessionStartTs = useSessionStore((s) => s.setSessionStartTs);
   const observations = useSessionStore((s) => s.observations);
   const timeToFirstSpeechMs = useSessionStore((s) => s.timeToFirstSpeechMs);
   const activePersona = useSessionStore((s) => s.activePersona);
@@ -189,6 +190,33 @@ export default function Home() {
     if (debugMode) setPhase("requesting-permissions");
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Start session timer + clear stale logs when roasting begins;
+  // save log to disk when session stops.
+  useEffect(() => {
+    if (phase === "roasting") {
+      const now = Date.now();
+      setSessionStartTs(now);
+      useSessionStore.getState().clearTimingLog();
+      useSessionStore.getState().clearTranscriptHistory();
+      useSessionStore.getState().clearConversationEvents();
+      useSessionStore.getState().clearTimelineSpans();
+      logTiming("session: roasting started");
+    }
+    if (phase === "stopped" || phase === "sharing") {
+      const s = useSessionStore.getState();
+      fetch("/api/save-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trigger: phase,
+          sessionStartTs: s.sessionStartTs,
+          timingLog: s.timingLog,
+          transcriptHistory: s.transcriptHistory,
+        }),
+      }).catch(() => {});
+    }
+  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Stop webcam tracks when session ends
   useEffect(() => {
     if ((phase === "sharing" || phase === "idle" || phase === "stopped") && webcamStream) {
@@ -256,7 +284,9 @@ export default function Home() {
       {phase === "consent" && <ConsentScreen />}
 
       {showPuppet && (
-        <div className={`relative w-full max-w-[560px] aspect-square transition-opacity duration-500 ${isThinking ? "opacity-40" : "opacity-100"}`}>
+        <div className="relative w-full max-w-[560px] aspect-square">
+          {/* Dark overlay while brain is generating — fades to black */}
+          <div className={`absolute inset-0 bg-black z-10 pointer-events-none transition-opacity duration-700 ${isThinking ? "opacity-60" : "opacity-0"}`} />
           <PuppetScene canvasRef={puppetCanvasRef} />
           {/* Webcam PIP — bottom-right, mirrored; hidden once stream stops */}
           <video

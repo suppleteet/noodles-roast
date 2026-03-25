@@ -47,21 +47,21 @@ describe("phase transitions", () => {
 });
 
 describe("timingLog", () => {
-  it("logTiming appends entries", () => {
+  it("logTiming appends entries with relative timestamp prefix", () => {
     const { logTiming } = useSessionStore.getState();
     logTiming("entry one");
     logTiming("entry two");
     const { timingLog } = useSessionStore.getState();
-    expect(timingLog).toContain("entry one");
-    expect(timingLog).toContain("entry two");
+    expect(timingLog.some((l) => l.includes("entry one"))).toBe(true);
+    expect(timingLog.some((l) => l.includes("entry two"))).toBe(true);
   });
 
-  it("caps at 50 entries (slice(-49) + 1 new)", () => {
+  it("caps at 500 entries (slice(-499) + 1 new)", () => {
     const { logTiming } = useSessionStore.getState();
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 510; i++) {
       logTiming(`entry ${i}`);
     }
-    expect(useSessionStore.getState().timingLog).toHaveLength(50);
+    expect(useSessionStore.getState().timingLog).toHaveLength(500);
   });
 
   it("clearTimingLog empties the log", () => {

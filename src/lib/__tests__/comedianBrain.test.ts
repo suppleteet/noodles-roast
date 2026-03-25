@@ -163,14 +163,15 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(brain.isListening()).toBe(true);
   });
 
-  it("transitions directly to wait_answer from ask_question (no question TTS)", () => {
+  it("transitions to wait_answer from ask_question after question TTS drains", () => {
     vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
     const deps = makeDeps();
     const brain = new ComedianBrain(deps);
     brain.start();
     brain.onTtsQueueDrained();
     brain.onVisionUpdate([]);
-    brain.onTtsQueueDrained(); // vision_jokes → ask_question → wait_answer (immediate, no TTS)
+    brain.onTtsQueueDrained(); // vision_jokes → ask_question (queues question TTS)
+    brain.onTtsQueueDrained(); // ask_question drain → wait_answer
 
     const states = getStates(deps);
     expect(states).toContain("ask_question");

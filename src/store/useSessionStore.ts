@@ -78,6 +78,15 @@ interface SessionState {
   // Transcript history for debug panel
   transcriptHistory: { role: "user" | "puppet"; text: string; ts: number }[];
 
+  // Session timer — set when phase enters "roasting"
+  sessionStartTs: number | null;
+  setSessionStartTs: (ts: number | null) => void;
+
+  // Debug: type a response instead of speaking (consumed by LiveSessionController)
+  pendingDebugTranscription: string | null;
+  submitDebugTranscription: (text: string) => void;
+  clearPendingDebugTranscription: () => void;
+
   // actions
   setPhase: (phase: SessionPhase) => void;
   setSessionMode: (mode: SessionMode) => void;
@@ -140,6 +149,8 @@ const initialState = {
   isUserLaughing: false,
   transcriptHistory: [] as { role: "user" | "puppet"; text: string; ts: number }[],
   timelineSpans: [] as TimelineSpan[],
+  sessionStartTs: null as number | null,
+  pendingDebugTranscription: null as string | null,
 };
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -160,7 +171,15 @@ export const useSessionStore = create<SessionState>((set) => ({
   setRecordedBlob: (recordedBlob) => set({ recordedBlob }),
   setError: (error) => set({ error }),
   logTiming: (entry) =>
-    set((s) => ({ timingLog: [...s.timingLog.slice(-49), entry] })),
+    set((s) => {
+      const rel = s.sessionStartTs !== null
+        ? `+${((Date.now() - s.sessionStartTs) / 1000).toFixed(2)}s`
+        : "--";
+      const line = `${rel} ${entry}`;
+      const next = [...s.timingLog.slice(-499), line];
+      try { localStorage.setItem("roastie-timing-log", JSON.stringify(next)); } catch { /* ignore */ }
+      return { timingLog: next };
+    }),
   clearTimingLog: () => set({ timingLog: [] }),
   setObservations: (observations) => set({ observations }),
   addConversationEvent: (type, text) =>
@@ -179,12 +198,11 @@ export const useSessionStore = create<SessionState>((set) => ({
   setUserAnswer: (userAnswer) => set({ userAnswer }),
   setIsUserLaughing: (isUserLaughing) => set({ isUserLaughing }),
   pushTranscriptEntry: (role, text) =>
-    set((s) => ({
-      transcriptHistory: [
-        ...s.transcriptHistory.slice(-49),
-        { role, text, ts: Date.now() },
-      ],
-    })),
+    set((s) => {
+      const next = [...s.transcriptHistory.slice(-199), { role, text, ts: Date.now() }];
+      try { localStorage.setItem("roastie-transcript", JSON.stringify(next)); } catch { /* ignore */ }
+      return { transcriptHistory: next };
+    }),
   beginSpan: (row, label, color) => {
     const id = `${row}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     set((s) => ({
@@ -203,5 +221,8 @@ export const useSessionStore = create<SessionState>((set) => ({
     })),
   clearTimelineSpans: () => set({ timelineSpans: [] }),
   clearTranscriptHistory: () => set({ transcriptHistory: [] }),
+  setSessionStartTs: (sessionStartTs) => set({ sessionStartTs }),
+  submitDebugTranscription: (text) => set({ pendingDebugTranscription: text }),
+  clearPendingDebugTranscription: () => set({ pendingDebugTranscription: null }),
   reset: () => set(initialState),
 }));

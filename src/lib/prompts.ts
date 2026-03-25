@@ -121,25 +121,31 @@ score: 1-10 self-assessed funniness (10 = best joke you've ever told)`;
 
   const contextInstructions: Record<JokeContext, string> = {
     greeting: `## Task: Opening Greeting
-Generate exactly 1-2 sentences — your punchy opening line(s) for this specific person.
+Generate exactly 1 sentence — your punchy opening line for this specific person.
 If you can see them, reference something specific you notice immediately.
-Short and sharp: max ~15 words per sentence. This is all the greeting — no fluff.
+Max 12 words. Punchline at the end. No fluff, no wind-up.
 Set "relevant": true. No "followUp". No "redirect".
-Generate 1-2 jokes.`,
+Generate exactly 1 joke.`,
 
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
 Based on CURRENT OBSERVATIONS provided. Be specific — reference what you actually see.
+Max 12 words. Punchline at the end.
 Set "relevant": true. No "followUp" needed.
 Generate exactly 1 joke.`,
 
     answer_roast: `## Task: Roast Response to User's Answer
-The user answered a question. Generate 1-2 jokes roasting their answer.
+The user answered a question. Generate exactly 1 joke roasting their answer.
 Use QUESTION ASKED and USER'S ANSWER from context.
 
-CRITICAL: Your jokes MUST directly reference and roast the USER'S ANSWER.
-Do NOT ignore the answer and make jokes about their appearance or background instead.
-The audience just heard them say something — roast THAT.
+CRITICAL: Your joke MUST directly reference and roast the USER'S ANSWER.
+Do NOT make jokes about their appearance, background, or room decor instead — roast THAT answer.
+
+SNAPPY FORMAT: 1 sentence, max 12 words, punchline at the end. No multi-sentence jokes.
+
+BACKGROUND RULE: Do NOT reference background items (furniture, decor, posters, room details) in ANY
+response unless BOTH "city:" AND "hometown:" tags appear in the CONVERSATION SO FAR. Without full
+location context, background details yield generic jokes. Focus on the answer, appearance, clothing.
 
 Relevance check: If the user's answer is clearly off-topic, set "relevant": false and
 provide a witty redirect in "redirect" that acknowledges what they said but steers back.
@@ -152,7 +158,7 @@ Never callback to your greeting or opening lines. Set to null if nothing fits.
 
 Tags: Extract key facts from the answer as tags: "name:Mike", "job:dentist", "city:Florida".
 
-Generate 1-2 jokes.`,
+Generate exactly 1 joke.`,
 
     vision_react: `## Task: React to Visual Change
 Something interesting changed on camera. Compare PREVIOUS OBSERVATIONS to CURRENT OBSERVATIONS.
@@ -163,8 +169,14 @@ Generate 1 joke.`,
     hopper: `## Task: Background Joke Generation
 Generate 2-3 candidate jokes for the joke hopper, inspired by any context provided.
 These are speculative — they may or may not be used. Prioritize quality over quantity.
+Each joke: max 12 words, punchline at the end, one sentence only.
 Score each joke honestly (score field). 8+ means "would interrupt the show to tell this."
 Can include a callback if context supports it.
+
+BACKGROUND RULE: Do NOT reference background items (furniture, decor, posters, room details) unless
+BOTH "city:" AND "hometown:" tags appear in the CONVERSATION SO FAR. Without full location context,
+focus on appearance, clothing, expression, or conversation facts.
+
 Set "relevant": true.
 Generate 2-3 jokes.`,
   };

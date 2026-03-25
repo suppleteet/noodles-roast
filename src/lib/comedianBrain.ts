@@ -155,6 +155,10 @@ export class ComedianBrain {
   private micAvailable = true;
   private cameraAvailable = true;
 
+  // Last delivered joke motion — used to match question inflection
+  private lastJokeMotion: import("@/lib/motionStates").MotionState = "emphasis";
+  private lastJokeIntensity = 0.75;
+
   // Greeting vision state
   private visionReadyForGreeting = false;
   private greetingTtsDrained = false;
@@ -179,7 +183,14 @@ export class ComedianBrain {
     }
     this.started = true;
 
-    this.shuffledQuestions = shuffle(QUESTION_BANK);
+    // Fixed prefix: establish identity before anything else.
+    // name → hometown → city must come first (in that order), then shuffle the rest.
+    const ORDERED_FIRST = ["name", "hometown", "city"];
+    const fixed = ORDERED_FIRST
+      .map((id) => QUESTION_BANK.find((q) => q.id === id))
+      .filter((q): q is ComedyQuestion => q !== undefined);
+    const rest = shuffle(QUESTION_BANK.filter((q) => !ORDERED_FIRST.includes(q.id)));
+    this.shuffledQuestions = [...fixed, ...rest];
     this.questionIndex = 0;
     this.ledger = [];
     this.jokeHopper = [];
@@ -258,6 +269,7 @@ export class ComedianBrain {
       this._clearTimers(); // reset silence timer
       this.answerBuffer = smartJoin(this.answerBuffer, text);
       this.deps.setUserAnswer(this.answerBuffer);
+      this.deps.logTiming(`brain: heard "${text}" → buffer now "${this.answerBuffer}" (${wordCount(this.answerBuffer)}w)`);
 
       // Start speculative generation once we have enough words
       if (
@@ -296,6 +308,9 @@ export class ComedianBrain {
         break;
       case "vision_jokes":
         this.enterAskQuestion();
+        break;
+      case "ask_question":
+        this.enterWaitAnswer();
         break;
       case "prodding":
         // Prod finished playing with no interruption — start next prod or skip
@@ -425,6 +440,8 @@ export class ComedianBrain {
       for (const joke of response.jokes) {
         this.deps.queueSpeak(joke.text, joke.motion, joke.intensity);
         this._addLedger("joke", joke.text, response.tags ?? []);
+        this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
+        this.lastJokeIntensity = joke.intensity;
       }
       this.previousObservations = [...observations];
     });
@@ -470,9 +487,9 @@ export class ComedianBrain {
     this.deps.setCurrentQuestion(this.currentQuestion.question);
     this._addLedger("question", this.currentQuestion.question, []);
 
-    // Don't speak the question as a separate TTS request — the inflection breaks flow.
-    // The question is tracked internally; the brain waits for the user to speak naturally.
-    this.enterWaitAnswer();
+    // Match the energy of the last delivered joke so the question flows naturally
+    this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
+    this.deps.queueSpeak(this.currentQuestion.question, this.lastJokeMotion, this.lastJokeIntensity);
   }
 
   private enterWaitAnswer(): void {
@@ -552,6 +569,7 @@ export class ComedianBrain {
     // Check if speculative result is still usable
     const spec = this.speculativeRequest;
     if (spec && isSimilarAnswer(spec.snapshot, answer)) {
+      this.deps.logTiming(`brain: reusing speculative (snapshot="${spec.snapshot.slice(0, 30)}")`);
       // Reuse speculative result — but fall back to fresh if it returned empty
       spec.result.then((response) => {
         if (this.state !== "generating") return;
@@ -607,12 +625,16 @@ export class ComedianBrain {
         }
         this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
         this._addLedger("joke", joke.text, []);
+        this.deps.logTiming(`brain: joke[${jokesQueued}] — "${joke.text.slice(0, 60)}"`);
+        this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
+        this.lastJokeIntensity = joke.intensity;
         jokesQueued++;
       },
       // onMeta — fires after all jokes stream, with follow-up/redirect/tags/callback
       (meta) => {
         if (this.state !== "generating" && this.state !== "delivering") return;
         metaHandled = true;
+        this.deps.logTiming(`brain: api meta — relevant=${meta.relevant} jokes=${jokesQueued} followUp=${!!meta.followUp} redirect=${!!meta.redirect}`);
 
         if (!meta.relevant && meta.redirect) {
           // Irrelevant answer — cancel anything queued and redirect
@@ -643,7 +665,14 @@ export class ComedianBrain {
           jokesQueued++;
         }
 
-        // Bonus hopper joke (every other delivery to avoid overuse)
+        if (jokesQueued === 0) {
+          // API returned relevant but no jokes — advance without playing unrelated content
+          this.deps.logTiming("brain: stream delivered nothing — advancing to next question");
+          this._onDeliveringDrained();
+          return;
+        }
+
+        // Bonus hopper joke — only attach when there are real jokes to accompany it
         if (this.transitionCount % 2 === 0) {
           const bonus = this._popHopperJoke(COMEDIAN_CONFIG.hopperMinScoreForBonus);
           if (bonus) {
@@ -652,12 +681,6 @@ export class ComedianBrain {
             this._addLedger("joke", bonus.text, []);
             jokesQueued += 2;
           }
-        }
-
-        if (jokesQueued === 0) {
-          this.deps.logTiming("brain: stream delivered nothing — advancing");
-          this._onDeliveringDrained();
-          return;
         }
 
         this._fireHopperGeneration("answer", undefined, answer);
@@ -719,7 +742,14 @@ export class ComedianBrain {
       queued++;
     }
 
-    // Check for high-score bonus from hopper — only every other delivery to avoid overuse
+    // Nothing was queued — advance immediately (don't wait for TTS drain that will never come)
+    if (queued === 0) {
+      this.deps.logTiming("brain: enterDelivering with nothing to say — advancing");
+      this._onDeliveringDrained();
+      return;
+    }
+
+    // Bonus hopper joke — only attach when there are real jokes to accompany it
     if (this.transitionCount % 2 === 0) {
       const bonus = this._popHopperJoke(COMEDIAN_CONFIG.hopperMinScoreForBonus);
       if (bonus) {
@@ -728,13 +758,6 @@ export class ComedianBrain {
         this._addLedger("joke", bonus.text, []);
         queued += 2;
       }
-    }
-
-    // Nothing was queued — advance immediately (don't wait for TTS drain that will never come)
-    if (queued === 0) {
-      this.deps.logTiming("brain: enterDelivering with nothing to say — advancing");
-      this._onDeliveringDrained();
-      return;
     }
 
     // Feed hopper with this context
@@ -746,7 +769,6 @@ export class ComedianBrain {
 
     // Follow-up takes priority over next question
     if (this.pendingFollowUp) {
-      this._transition("ask_question");
       this.enterAskQuestion();
       return;
     }
@@ -769,7 +791,6 @@ export class ComedianBrain {
     }
 
     // Nothing interesting — next question
-    this._transition("ask_question");
     this.enterAskQuestion();
   }
 

@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useCallback } from "react";
-import { MIC_SAMPLE_RATE, MIC_CHUNK_SAMPLES } from "@/lib/liveConstants";
+import { MIC_SAMPLE_RATE } from "@/lib/liveConstants";
 
 export interface MicCaptureHandle {
   start(): Promise<void>;
@@ -36,15 +36,21 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
     });
     streamRef.current = stream;
 
+    // Hint 16kHz; browsers that ignore this (iOS Safari) will be resampled by the worklet.
     const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
     ctxRef.current = ctx;
+
+    // iOS Safari starts AudioContext in "suspended" state — must explicitly resume.
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
 
     await ctx.audioWorklet.addModule("/worklets/mic-capture-processor.js");
 
     const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, "mic-capture-processor", {
-      processorOptions: { chunkSize: MIC_CHUNK_SAMPLES },
-    });
+    // Worklet is self-configuring: reads sampleRate from AudioWorkletGlobalScope
+    // and downsamples to 16kHz internally.
+    const worklet = new AudioWorkletNode(ctx, "mic-capture-processor");
     workletRef.current = worklet;
 
     worklet.port.onmessage = (e: MessageEvent<{ pcm: Float32Array }>) => {
