@@ -142,7 +142,8 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
 
   useFrame(() => {
     const amp = useSessionStore.getState().audioAmplitude;
-    openAmt.current += (amp * 0.46 - openAmt.current) * 0.04;
+    openAmt.current += (amp * 1 - openAmt.current) * 0.04;
+    // openAmt.current = useSessionStore.getState().audioAmplitude;
 
     // Bottom jaw rotates downward  (+X)
     if (bottomGroupRef.current) bottomGroupRef.current.rotation.x =  openAmt.current;

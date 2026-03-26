@@ -3,11 +3,10 @@ import { useSessionStore } from "@/store/useSessionStore";
 
 interface Props {
   onStartSession: () => void;
-  onStartMock: () => void;
   isMock?: boolean;
 }
 
-export default function HUDOverlay({ onStartSession, onStartMock, isMock = false }: Props) {
+export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
   const phase = useSessionStore((s) => s.phase);
   const setPhase = useSessionStore((s) => s.setPhase);
   const burnIntensity = useSessionStore((s) => s.burnIntensity);
@@ -92,12 +91,6 @@ export default function HUDOverlay({ onStartSession, onStartMock, isMock = false
               className="px-8 py-3 bg-green-600/80 hover:bg-green-500/80 backdrop-blur border border-green-400/30 rounded-full text-white font-bold transition-all"
             >
               Start Session
-            </button>
-            <button
-              onClick={onStartMock}
-              className="px-5 py-3 bg-yellow-500/20 hover:bg-yellow-500/30 backdrop-blur border border-yellow-400/40 rounded-full text-yellow-300 font-bold transition-all"
-            >
-              Mock
             </button>
             <button
               onClick={() => setPhase("sharing")}

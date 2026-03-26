@@ -507,6 +507,9 @@ export default function LiveSessionController({
 
     let lineIdx = 0;
 
+    // Mock mode: puppet looks up at the camera the whole time
+    useSessionStore.getState().setActiveMotionState("smug", 0.8);
+
     // eslint-disable-next-line no-constant-condition
     while (true) {
       if (!isRunningRef.current) break;
@@ -521,16 +524,16 @@ export default function LiveSessionController({
       const line = MOCK_LINES[lineIdx % MOCK_LINES.length];
       lineIdx++;
       store.setTranscript(line);
-      const [motion, intensity] = inferMotionFromTranscript(line, 0.5);
-      store.setActiveMotionState(motion, intensity);
 
       const sentences = line.match(/[^.!?]+[.!?]+\s*/g) ?? [line];
       for (const s of sentences) queueSpeak(s);
+      // Wait for TTS to finish decoding AND finish playing
       await ttsChainRef.current;
+      while (!playback.isQueueEmpty() && isRunningRef.current) await sleep(50);
       if (!isRunningRef.current) break;
 
       useSessionStore.getState().setIsSpeaking(false);
-      useSessionStore.getState().setActiveMotionState("idle", 0.3);
+      useSessionStore.getState().setActiveMotionState("smug", 0.8);
 
       await sleep(600 + Math.random() * 400);
       if (!isRunningRef.current) break;

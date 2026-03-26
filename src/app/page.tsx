@@ -53,8 +53,7 @@ export default function Home() {
   // Keep mockModeRef in sync for stale-closure-safe reads in effects
   useEffect(() => { mockModeRef.current = mockMode; }, [mockMode]);
 
-  const handleStartSession = () => { setMockMode(false); mockModeRef.current = false; setPhase("requesting-permissions"); };
-  const handleStartMock    = () => { setMockMode(true);  mockModeRef.current = true;  setPhase("requesting-permissions"); };
+  const handleStartSession = () => { setPhase("requesting-permissions"); };
 
   // Capture first frame from a MediaStream and send to vision API immediately
   function preAnalyzeFirstFrame(stream: MediaStream) {
@@ -240,22 +239,40 @@ export default function Home() {
   function handleDebugToggle(checked: boolean) {
     setDebugMode(checked);
     if (checked) setPhase("requesting-permissions");
-    else setPhase("idle");
+    else { setMockMode(false); mockModeRef.current = false; setPhase("idle"); }
+  }
+
+  function handleMockToggle(checked: boolean) {
+    setMockMode(checked);
+    mockModeRef.current = checked;
   }
 
   return (
     <main className="relative min-h-screen bg-black flex items-center justify-center">
-      {/* Debug toggle — dev only */}
+      {/* Debug / mock toggles — dev only */}
       {IS_DEV && (
-        <label className="absolute top-3 right-3 z-50 flex items-center gap-2 text-white/50 text-xs cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={debugMode}
-            onChange={(e) => handleDebugToggle(e.target.checked)}
-            className="accent-yellow-400"
-          />
-          debug
-        </label>
+        <div className="absolute top-3 right-3 z-50 flex items-center gap-3 text-white/50 text-xs select-none">
+          {debugMode && (
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mockMode}
+                onChange={(e) => handleMockToggle(e.target.checked)}
+                className="accent-orange-400"
+              />
+              mock
+            </label>
+          )}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={(e) => handleDebugToggle(e.target.checked)}
+              className="accent-yellow-400"
+            />
+            debug
+          </label>
+        </div>
       )}
       <AudioPlayer ref={audioPlayerRef} />
       <VideoRecorder ref={videoRecorderRef} />
@@ -299,7 +316,6 @@ export default function Home() {
           {(phase === "roasting" || phase === "stopped") && (
             <HUDOverlay
               onStartSession={handleStartSession}
-              onStartMock={handleStartMock}
               isMock={mockMode}
             />
           )}
