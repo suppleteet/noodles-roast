@@ -496,17 +496,46 @@ export default function LiveSessionController({
     // Start immediately — puppet looks up and talks with no gaps
     useSessionStore.getState().setActiveMotionState("smug", 0.8);
 
-    let lineIdx = 0;
+    // AI-generated joke queue — refilled in the background as it empties
+    const jokeQueue: string[] = [];
+    let fetchInFlight = false;
+
+    async function refillJokeQueue(): Promise<void> {
+      if (fetchInFlight || !isRunningRef.current) return;
+      fetchInFlight = true;
+      try {
+        const resp = await fetch("/api/generate-joke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ context: "hopper", persona: "kvetch", burnIntensity: 3 }),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as { jokes?: { text: string }[] };
+          const texts = (data.jokes ?? []).map((j) => j.text).filter(Boolean);
+          jokeQueue.push(...texts);
+        }
+      } catch {
+        // API unavailable — fall back to MOCK_LINES below
+      } finally {
+        fetchInFlight = false;
+      }
+    }
+
+    // Pre-fetch before the loop starts so the first line is AI-generated
+    await refillJokeQueue();
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       if (!isRunningRef.current) break;
 
+      // Refill in the background when queue is getting low
+      if (jokeQueue.length <= 1) void refillJokeQueue();
+
+      // Use AI joke if available, otherwise fall back to hardcoded lines
+      const line = jokeQueue.shift() ?? MOCK_LINES[Math.floor(Math.random() * MOCK_LINES.length)];
+
       const store = useSessionStore.getState();
       store.setIsSpeaking(true);
-
-      const line = MOCK_LINES[lineIdx % MOCK_LINES.length];
-      lineIdx++;
       store.setTranscript(line);
 
       const sentences = line.match(/[^.!?]+[.!?]+\s*/g) ?? [line];
