@@ -35,6 +35,7 @@ function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
       "-c:v", "libx264",
       "-preset", "fast",
       "-crf", "23",
+      "-pix_fmt", "yuv420p",  // force compatible pixel format (VP9 can produce yuva420p which H.264 rejects)
       "-c:a", "aac",
       "-movflags", "+faststart",
       outputPath,
