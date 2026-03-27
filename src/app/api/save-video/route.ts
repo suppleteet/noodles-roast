@@ -34,6 +34,8 @@ function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
       "-i", inputPath,
       "-r", "30",             // browser WebM has VFR timestamps → force constant 30fps (matches captureStream(30))
       "-c:v", "libx264",
+      "-profile:v", "baseline", // widest compatibility (WMP, older devices, iOS Safari)
+      "-level", "3.1",
       "-preset", "fast",
       "-crf", "23",
       "-pix_fmt", "yuv420p",
