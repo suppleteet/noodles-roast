@@ -32,10 +32,11 @@ function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
+      "-r", "30",             // browser WebM has VFR timestamps → force constant 30fps (matches captureStream(30))
       "-c:v", "libx264",
       "-preset", "fast",
       "-crf", "23",
-      "-pix_fmt", "yuv420p",  // force compatible pixel format (VP9 can produce yuva420p which H.264 rejects)
+      "-pix_fmt", "yuv420p",
       "-c:a", "aac",
       "-movflags", "+faststart",
       outputPath,
