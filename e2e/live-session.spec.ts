@@ -6,8 +6,7 @@ import { ComedianBrainDriver } from "./helpers/comedianBrainDriver";
 
 async function startRoasting(page: Page, mock: LiveSessionMock): Promise<void> {
   await page.goto("/");
-  // debugMode=true in page.tsx auto-triggers requesting-permissions → roasting.
-  // We just wait for the HUD to confirm we're in the roasting phase.
+  await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await mock.waitForConnect();
 }
@@ -22,6 +21,7 @@ test.describe("Startup", () => {
 
     const startMs = Date.now();
     await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
 
     // Brain greets immediately — wait for the first TTS from the greeting
     const req = await driver.waitForTtsRequest(6000);
@@ -36,6 +36,7 @@ test.describe("Startup", () => {
     const mock = new LiveSessionMock(page);
     await mock.setup();
     await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   });
 });
@@ -162,6 +163,7 @@ test.describe("Diagnostics", () => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
     await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
     await driver.waitForConnect();
 

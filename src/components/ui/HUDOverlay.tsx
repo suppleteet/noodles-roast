@@ -9,7 +9,6 @@ interface Props {
 export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
   const phase = useSessionStore((s) => s.phase);
   const setPhase = useSessionStore((s) => s.setPhase);
-  const burnIntensity = useSessionStore((s) => s.burnIntensity);
   const sessionMode = useSessionStore((s) => s.sessionMode);
   const isSpeaking = useSessionStore((s) => s.isSpeaking);
   const isListening = useSessionStore((s) => s.isListening);
@@ -33,7 +32,7 @@ export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
       <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none">
         <span className={`w-2 h-2 rounded-full ${isRoasting ? "bg-red-500 animate-pulse" : "bg-gray-500"}`} />
         <span className="text-xs font-bold text-white/70 uppercase tracking-wider">
-          {isRoasting ? "Live" : "Stopped"} · Burn {burnIntensity}/5
+          {isRoasting ? "Live" : "Stopped"}
           {isConversation && " · Conversation"}
           {isMock && <span className="text-yellow-400"> · MOCK</span>}
         </span>

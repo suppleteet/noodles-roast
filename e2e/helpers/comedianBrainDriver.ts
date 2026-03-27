@@ -221,7 +221,11 @@ export class ComedianBrainDriver extends LiveSessionMock {
   }
 
   async getBrainState(): Promise<string | null> {
-    return this.page.locator("[data-testid='hud-overlay']").getAttribute("data-brain-state");
+    try {
+      return await this.page.locator("[data-testid='hud-overlay']").getAttribute("data-brain-state", { timeout: 100 });
+    } catch {
+      return null; // HUD not in DOM (session ended or not yet started)
+    }
   }
 
   // ─── Vision control ───────────────────────────────────────────────────────────

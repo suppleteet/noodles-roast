@@ -3,7 +3,7 @@ name: maintain
 description: Audits the project for drift between the codebase and its documentation, tests, and skills. Run this after adding features or merging changes to find what's out of sync. Read-only — reports findings and recommends actions, makes no changes.
 ---
 
-Perform a full drift audit of `c:/Projects/RoastMe`. Read files, glob directories, and grep as needed. Do not write or edit anything.
+Perform a full drift audit of `c:/Projects/Roastie`. Read files, glob directories, and grep as needed. Do not write or edit anything.
 
 ## Check 1 — Package Version Table in CLAUDE.md
 

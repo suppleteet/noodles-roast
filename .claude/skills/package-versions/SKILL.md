@@ -3,7 +3,7 @@ name: package-versions
 description: Reads package.json and outputs a formatted table of all dependency versions plus AI model IDs in use. Use this before making any changes that involve external package APIs to ensure you are using the correct version and calling the right methods.
 ---
 
-Read the file at `c:/Projects/RoastMe/package.json` and `c:/Projects/RoastMe/src/lib/constants.ts`.
+Read the file at `c:/Projects/Roastie/package.json` and `c:/Projects/Roastie/src/lib/constants.ts`.
 
 Output two sections:
 

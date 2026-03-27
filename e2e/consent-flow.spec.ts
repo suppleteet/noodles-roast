@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// debugMode is true by default in page.tsx, so the app auto-starts into roasting phase.
+// debugMode is true by default in page.tsx. A button press is still required to start.
 // These tests mock the APIs needed for that flow to succeed.
 
 test.beforeEach(async ({ page }) => {
@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("app loads and reaches roasting phase (debug auto-start)", async ({ page }) => {
+test("app loads and reaches roasting phase after clicking Roast Me", async ({ page }) => {
   await page.route("/api/live-token", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "fake-token" }) })
   );
@@ -49,6 +49,7 @@ test("app loads and reaches roasting phase (debug auto-start)", async ({ page })
   });
 
   await page.goto("/");
+  await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 });
 
@@ -69,10 +70,11 @@ test("debug checkbox toggles back to landing screen", async ({ page }) => {
   });
 
   await page.goto("/");
+  await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 
   // Uncheck debug → should return to idle/landing
-  await page.locator("input[type=checkbox]").uncheck();
+  await page.getByRole("checkbox", { name: "debug" }).uncheck();
   await expect(page.getByRole("button", { name: /roast me/i })).toBeVisible({ timeout: 5000 });
 });
 
@@ -93,12 +95,10 @@ test("landing Roast Me button starts a session", async ({ page }) => {
   });
 
   await page.goto("/");
-  // Disable debug to get to landing screen
-  await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
-  await page.locator("input[type=checkbox]").uncheck();
+  // Landing screen is shown on page load (debug mode, but no auto-start)
   await expect(page.getByRole("button", { name: /roast me/i })).toBeVisible({ timeout: 5000 });
 
-  // Click Roast Me → goes directly to requesting-permissions → session starts
+  // Click Roast Me → session starts → HUD appears
   await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 });

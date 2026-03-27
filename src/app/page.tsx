@@ -15,8 +15,21 @@ import SessionController from "@/components/session/SessionController";
 import LiveSessionController from "@/components/session/LiveSessionController";
 import { useCompositor } from "@/components/recording/useCompositor";
 import { PERSONA_IDS, PERSONAS } from "@/lib/personas";
+import RigEditMode from "@/engine/ui/RigEditMode";
+import { useRigEditStore } from "@/engine/store/RigEditStore";
 
+/**
+ * Top-level router — decides between edit mode and the main app.
+ * Must be a separate component from MainApp so hooks are always called
+ * in the same order regardless of which branch renders.
+ */
 export default function Home() {
+  const isRigEditMode = useRigEditStore((s) => s.isEditMode);
+  if (isRigEditMode) return <RigEditMode />;
+  return <MainApp />;
+}
+
+function MainApp() {
   const phase = useSessionStore((s) => s.phase);
   const sessionMode = useSessionStore((s) => s.sessionMode);
   const setPhase = useSessionStore((s) => s.setPhase);
@@ -35,6 +48,7 @@ export default function Home() {
   const [debugMode, setDebugMode] = useState(IS_DEV);
   const [mockMode, setMockMode] = useState(false);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
+  const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
 
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
@@ -184,11 +198,6 @@ export default function Home() {
     if (webcamStream) pipVideoRef.current.play().catch(() => {});
   }, [webcamStream]);
 
-  // Auto-trigger when debug mode is on (skips landing/consent screens)
-  useEffect(() => {
-    if (debugMode) setPhase("requesting-permissions");
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Start session timer + clear stale logs when roasting begins;
   // save log to disk when session stops.
   useEffect(() => {
@@ -238,14 +247,29 @@ export default function Home() {
 
   function handleDebugToggle(checked: boolean) {
     setDebugMode(checked);
-    if (checked) setPhase("requesting-permissions");
-    else { setMockMode(false); mockModeRef.current = false; setPhase("idle"); }
+    if (!checked) { setMockMode(false); mockModeRef.current = false; setPhase("idle"); }
   }
 
   function handleMockToggle(checked: boolean) {
     setMockMode(checked);
     mockModeRef.current = checked;
+    // If a session is running, bounce through stopped → requesting-permissions.
+    // Child effects (LiveSessionController stopLiveSession) fire before parent
+    // effects, so by the time the phase==="stopped" effect below runs, the
+    // session is already torn down.
+    if (phase === "roasting" || phase === "stopped") {
+      pendingMockRestartRef.current = true;
+      setPhase("stopped");
+    }
   }
+
+  // Restart after mock toggle tears down the current session
+  useEffect(() => {
+    if (phase === "stopped" && pendingMockRestartRef.current) {
+      pendingMockRestartRef.current = false;
+      setPhase("requesting-permissions");
+    }
+  }, [phase]);
 
   return (
     <main className="relative min-h-screen bg-black flex items-center justify-center">
@@ -272,6 +296,12 @@ export default function Home() {
             />
             debug
           </label>
+          <button
+            onClick={() => useRigEditStore.getState().enterEditMode()}
+            className="text-white/50 hover:text-white/80 border border-white/20 rounded px-2 py-0.5 text-xs transition-colors"
+          >
+            Edit Rig
+          </button>
         </div>
       )}
       <AudioPlayer ref={audioPlayerRef} />

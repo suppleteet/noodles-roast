@@ -7,6 +7,7 @@ export async function POST(req: NextRequest) {
       text,
       voiceId: overrideVoiceId,
       voiceSettings: overrideSettings,
+      previousRequestIds,
     } = await req.json();
     if (!text) {
       return new Response(JSON.stringify({ error: "text required" }), { status: 400 });
@@ -41,6 +42,9 @@ export async function POST(req: NextRequest) {
           text,
           model_id: "eleven_turbo_v2_5",
           voice_settings: voiceSettings,
+          ...(Array.isArray(previousRequestIds) && previousRequestIds.length > 0
+            ? { previous_request_ids: previousRequestIds.slice(-3) }
+            : {}),
         }),
       }
     );
@@ -51,12 +55,16 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ error: "TTS failed" }), { status: 500 });
     }
 
+    // Forward the ElevenLabs request-id so the client can chain continuity
+    const elevenLabsRequestId = response.headers.get("request-id");
+
     // Stream the audio back directly
     return new Response(response.body, {
       headers: {
         "Content-Type": "audio/mpeg",
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
+        ...(elevenLabsRequestId ? { "X-Request-Id": elevenLabsRequestId } : {}),
       },
     });
   } catch (err) {

@@ -15,8 +15,10 @@
 | @anthropic-ai/sdk | ^0.39.0 | installed but NOT used in routes yet (Gemini is) |
 | @google/genai | ^1.45.0 | `new GoogleGenAI({ apiKey })` → `ai.models.generateContent()` |
 | elevenlabs | ^1.57.0 | installed but TTS uses raw fetch for streaming |
-| simplex-noise | ^4.0.3 | |
+| simplex-noise | ^4.0.3 | Used by HeadMotionComponent (createNoise3D) |
 | tailwindcss | ^3.4.19 | |
+| autoprefixer | ^10.4.27 | PostCSS plugin |
+| postcss | ^8.5.8 | |
 
 ## AI Models in Use
 
@@ -78,6 +80,23 @@ src/lib/questionBank.ts    7 questions with prod lines (hot-swappable)
 src/lib/visionDiff.ts      Observation diff + interest scoring
 src/store/             Zustand store (useSessionStore.ts)
 public/worklets/       AudioWorklet processors (mic-capture-processor.js)
+
+src/engine/            Self-contained skeletal rig component engine (no comedy/audio knowledge)
+  types.ts             PropertyDef, ComponentTypeDef, ComponentInstance, RigConfig, TickContext
+  registry.ts          Component type registry — registerComponentType(), createComponentInstance()
+  secondary/           SecondaryMotion (scalar), Vec3, Quat wrappers
+  simulation/          VerletChain — pure verlet math, Jakobsen constraints
+  components/          ComponentRuntime interface + VerletChainComponent
+  runtime/             RigRuntime (tick loop) + RigRuntimeBridge (R3F bridge, useFBX)
+  gizmos/              GizmoLine/Sphere types, R3F renderer, skeleton/verlet builders
+  store/               RigEditStore (Zustand v5), configPersistence (localStorage)
+  ui/                  RigEditMode, ComponentList, ComponentInspector, PropertyField,
+                       SecondaryMotionField, AnimationCurveEditor, BoneSelector, SignalPreview
+
+src/puppet/            Paper-thin puppet-specific layer
+  types.ts             PuppetConfig extends RigConfig
+  components/          JawFlapComponent (audioAmplitude → jaw rotation)
+                       HeadMotionComponent (audioAmplitude + simplex noise → head euler)
 ```
 
 ## Key Invariants — Do Not Violate
@@ -92,6 +111,8 @@ public/worklets/       AudioWorklet processors (mic-capture-processor.js)
 8. **Mic gating**: `useMicCapture` callback checks `brain.isAudioActive()` before sending audio. Mic is `"passive"` (keeps Gemini VAD warm) in most states; only `"off"` during `greeting` and `vision_jokes`. `"listening"` in `wait_answer`, `prodding`, `pre_generate`.
 10. **LLM-generated greetings**: `enterGreeting()` calls `_generateJoke({ context: "greeting" })` asynchronously — no hardcoded greeting strings. Greeting and vision-opening prefetch fire in parallel. The `.then()` callback guards against stale state with `if (this.state !== "greeting") return`.
 9. **TTS drain detection**: LiveSessionController uses `playback.isQueueEmpty()` in a rAF loop to detect when speech finishes, then calls `brain.onTtsQueueDrained()`.
+11. **Engine signals abstraction**: Rig components (JawFlap, HeadMotion) NEVER read from `useSessionStore` directly. They read from `TickContext.signals: Record<string, number>`. In session mode the consumer populates this from the store; in edit mode it comes from `RigEditStore.previewSignals`. Component signal declarations (`SignalDef[]`) auto-generate the preview sliders.
+12. **No per-frame allocations in engine**: Inside `tick()` callbacks, NEVER use `new THREE.Vector3()` / `new THREE.Quaternion()` / `new THREE.Matrix4()`. All scratch objects must be pre-allocated as class fields and mutated via `.set()` / `.copy()`.
 
 ## Test Config Injection
 
@@ -102,9 +123,13 @@ await page.addInitScript(() => {
     answerWaitMs: 80, answerSilenceMs: 30, maxProds: 1,
     visionIntervalMs: 200, greetingVisionTimeoutMs: 300,
   };
+  // Prevent session rotation from firing during long tests (default 90s):
+  (window as unknown as Record<string, unknown>).__SESSION_ROTATE_MS__ = 600_000;
 });
 ```
 `ComedianBrainDriver` in `e2e/helpers/comedianBrainDriver.ts` does this automatically.
+
+`__SESSION_ROTATE_MS__` overrides the 90-second Gemini Live session rotation timeout in `LiveSessionController.tsx`. Set to 600_000 (10 min) in the roast-run test to prevent mid-test session rotation.
 
 ## Commands
 

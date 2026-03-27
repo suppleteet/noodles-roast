@@ -10,8 +10,8 @@ describe("initial state", () => {
     expect(useSessionStore.getState().phase).toBe("idle");
   });
 
-  it("starts with burnIntensity 3", () => {
-    expect(useSessionStore.getState().burnIntensity).toBe(3);
+  it("starts with burnIntensity 5", () => {
+    expect(useSessionStore.getState().burnIntensity).toBe(5);
   });
 
   it("starts not speaking", () => {
@@ -161,7 +161,7 @@ describe("reset", () => {
     const after = useSessionStore.getState();
     expect(after.phase).toBe("idle");
     expect(after.sessionMode).toBe("conversation");
-    expect(after.burnIntensity).toBe(3);
+    expect(after.burnIntensity).toBe(5);
     expect(after.isSpeaking).toBe(false);
     expect(after.isListening).toBe(false);
     expect(after.isUserSpeaking).toBe(false);

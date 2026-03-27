@@ -5,6 +5,7 @@ import { ComedianBrainDriver } from "./helpers/comedianBrainDriver";
 
 async function startRoasting(page: Page, driver: ComedianBrainDriver): Promise<void> {
   await page.goto("/");
+  await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await driver.waitForConnect();
 }

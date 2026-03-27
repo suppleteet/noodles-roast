@@ -16,9 +16,11 @@ function SceneLights() {
 
 interface Props {
   canvasRef?: React.RefObject<HTMLCanvasElement | null>;
+  /** When provided, renders instead of the default PuppetCharacter (used by RigEditMode) */
+  children?: React.ReactNode;
 }
 
-export default function PuppetScene({ canvasRef }: Props) {
+export default function PuppetScene({ canvasRef, children }: Props) {
   return (
     <Canvas
       ref={canvasRef}
@@ -31,7 +33,7 @@ export default function PuppetScene({ canvasRef }: Props) {
       <SceneLights />
 
       <Suspense fallback={null}>
-        <PuppetCharacter />
+        {children ?? <PuppetCharacter />}
         <Environment preset="studio" />
       </Suspense>
 

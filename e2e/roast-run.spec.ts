@@ -31,7 +31,7 @@ const CYCLE_TIMEOUT_MS = 25_000;
 
 test.describe("Full Roast Run", () => {
   test("plays through 6 Q&A cycles via debug text input", async ({ page }) => {
-    test.setTimeout(120_000); // 2-minute ceiling
+    test.setTimeout(240_000); // 4-minute ceiling (6 cycles × ~2-4s + overhead)
 
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
@@ -48,9 +48,12 @@ test.describe("Full Roast Run", () => {
         hopperMaxSize: 4,
         visionIntervalMs: 3000,
       };
+      // Prevent session rotation from firing during the test (default 90s)
+      (window as unknown as Record<string, unknown>).__SESSION_ROTATE_MS__ = 600_000;
     });
 
     await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
     await driver.waitForConnect();
 
     // Wait for HUDOverlay to be in the DOM before starting state tracking

@@ -39,7 +39,7 @@ Do **not** rewrite narrative sections, rename headings, or change anything the a
 
 ### 4b — Memory sync
 
-Read `C:\Users\tyler\.claude\projects\c--Projects-RoastMe\memory\MEMORY.md` and its linked files.
+Read `C:\Users\tyler\.claude\projects\c--Projects-Roastie\memory\MEMORY.md` and its linked files.
 
 Apply updates only for things that materially changed:
 

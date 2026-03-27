@@ -38,10 +38,16 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
         // No resampling needed — fast path.
         chunk = new Float32Array(native);
       } else {
-        // Downsample: nearest-neighbour is sufficient for speech at this ratio.
+        // Downsample with linear interpolation for better speech clarity.
+        // Nearest-neighbour at 3:1 (48→16kHz) discards 2/3 of samples;
+        // linear interpolation blends between adjacent samples instead.
         chunk = new Float32Array(this._targetChunkSize);
         for (let i = 0; i < this._targetChunkSize; i++) {
-          chunk[i] = native[Math.min(Math.floor(i * this._ratio), native.length - 1)];
+          const srcIdx = i * this._ratio;
+          const lo = Math.floor(srcIdx);
+          const hi = Math.min(lo + 1, native.length - 1);
+          const frac = srcIdx - lo;
+          chunk[i] = native[lo] * (1 - frac) + native[hi] * frac;
         }
       }
 

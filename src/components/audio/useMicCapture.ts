@@ -37,7 +37,7 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
     streamRef.current = stream;
 
     // Hint 16kHz; browsers that ignore this (iOS Safari) will be resampled by the worklet.
-    const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
+    const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE, latencyHint: "interactive" });
     ctxRef.current = ctx;
 
     // iOS Safari starts AudioContext in "suspended" state — must explicitly resume.

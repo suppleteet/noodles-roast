@@ -582,11 +582,14 @@ export class ComedianBrain {
     // Short answers: echo the answer back ("Tyler." / "San Francisco.") — instant and funny.
     // Longer answers: use a generic short reaction.
     const answerWords = answer.trim().split(/\s+/);
-    const filler = answerWords.length <= 3
+    const isEchoFiller = answerWords.length <= 3;
+    const filler = isEchoFiller
       ? `${answer}.`
       : ComedianBrain.GENERATING_FILLERS[Math.floor(Math.random() * ComedianBrain.GENERATING_FILLERS.length)];
     this.deps.queueSpeak(filler, "thinking", 0.6);
     this.deps.logTiming(`brain: filler — "${filler}"`);
+    // Only pass filler to generator when it echoed the answer — so the joke doesn't repeat it
+    const fillerAlreadySaid = isEchoFiller ? filler : undefined;
 
     const q = this.currentQuestion;
     const conversationSoFar = this._getLedgerContext();
@@ -604,18 +607,18 @@ export class ComedianBrain {
         } else {
           // Speculative returned empty — generate fresh
           this.deps.logTiming("brain: speculative returned empty, generating fresh");
-          this._generateAndDeliver(answer, q, conversationSoFar);
+          this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
         }
       }).catch(() => {
         // Speculative failed — generate fresh
         if (this.state !== "generating") return;
-        this._generateAndDeliver(answer, q, conversationSoFar);
+        this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
       });
       this._cancelSpeculative(); // clear the ref (result promise still resolves)
     } else {
       // Cancel stale speculative, generate fresh
       this._cancelSpeculative();
-      this._generateAndDeliver(answer, q, conversationSoFar);
+      this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
     }
   }
 
@@ -628,6 +631,7 @@ export class ComedianBrain {
     answer: string,
     q: ComedyQuestion | null,
     conversationSoFar: string[],
+    fillerAlreadySaid?: string,
   ): void {
     let jokesQueued = 0;
     let metaHandled = false;
@@ -637,6 +641,7 @@ export class ComedianBrain {
         context: "answer_roast",
         question: q?.question,
         userAnswer: answer,
+        fillerAlreadySaid,
         conversationSoFar,
         imageBase64: this.cameraAvailable ? this.deps.captureFrame() : undefined,
       },
@@ -727,6 +732,7 @@ export class ComedianBrain {
           context: "answer_roast",
           question: q?.question,
           userAnswer: answer,
+          fillerAlreadySaid,
           conversationSoFar,
           imageBase64: this.cameraAvailable ? this.deps.captureFrame() : undefined,
         }).then((response) => {
@@ -879,11 +885,17 @@ export class ComedianBrain {
     const q = this.currentQuestion;
     const conversationSoFar = this._getLedgerContext();
 
+    // If the answer is short enough to get an echo filler, tell the generator now
+    // so the joke doesn't open by repeating the same word/phrase
+    const snapshotWords = snapshot.split(/\s+/).filter(Boolean).length;
+    const fillerAlreadySaid = snapshotWords <= 3 ? `${snapshot}.` : undefined;
+
     const result = this._generateJoke(
       {
         context: "answer_roast",
         question: q?.question,
         userAnswer: snapshot,
+        fillerAlreadySaid,
         conversationSoFar,
         imageBase64: this.cameraAvailable ? this.deps.captureFrame() : undefined,
       },
@@ -1034,6 +1046,7 @@ export class ComedianBrain {
       context: "answer_roast";
       question?: string;
       userAnswer?: string;
+      fillerAlreadySaid?: string;
       conversationSoFar?: string[];
       imageBase64?: string;
     },
@@ -1116,6 +1129,7 @@ export class ComedianBrain {
       context: "greeting" | "vision_opening" | "answer_roast" | "vision_react" | "hopper";
       question?: string;
       userAnswer?: string;
+      fillerAlreadySaid?: string;
       observations?: string[];
       previousObservations?: string[];
       conversationSoFar?: string[];

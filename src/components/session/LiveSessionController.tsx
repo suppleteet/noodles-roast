@@ -57,6 +57,8 @@ export default function LiveSessionController({
   // TTS pipeline — brain-driven, sequential ElevenLabs requests
   const ttsChainRef = useRef<Promise<void>>(Promise.resolve());
   const ttsGenerationRef = useRef(0);
+  // Last-N ElevenLabs request IDs — passed as previous_request_ids for vocal continuity
+  const ttsRequestIdsRef = useRef<string[]>([]);
 
   // rAF for TTS drain detection
   const drainRafRef = useRef<number>(0);
@@ -134,13 +136,23 @@ export default function LiveSessionController({
     if (!isRunningRef.current) return null;
     try {
       const ttsSpanId = useSessionStore.getState().beginSpan("tts", text.slice(0, 22));
+      // Snapshot current IDs — concurrent prefetches may share the same previous IDs, that's OK
+      const previousRequestIds = [...ttsRequestIdsRef.current];
       const resp = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          ...(previousRequestIds.length > 0 ? { previousRequestIds } : {}),
+        }),
       });
       useSessionStore.getState().endSpan(ttsSpanId);
       if (!resp.ok || ttsGenerationRef.current !== gen) return null;
+      // Capture request-id for continuity on the next call
+      const requestId = resp.headers.get("x-request-id");
+      if (requestId) {
+        ttsRequestIdsRef.current = [...ttsRequestIdsRef.current, requestId].slice(-3);
+      }
       return resp.arrayBuffer();
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -465,7 +477,12 @@ export default function LiveSessionController({
 
   function scheduleRotation() {
     if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
-    rotateTimerRef.current = setTimeout(rotateSession, SESSION_ROTATE_MS);
+    // Allow tests to inject a longer rotation timeout via window.__SESSION_ROTATE_MS__
+    const rotateMsOverride = typeof window !== "undefined"
+      ? (window as unknown as Record<string, unknown>).__SESSION_ROTATE_MS__
+      : undefined;
+    const rotateMs = typeof rotateMsOverride === "number" ? rotateMsOverride : SESSION_ROTATE_MS;
+    rotateTimerRef.current = setTimeout(rotateSession, rotateMs);
   }
 
   // ─── Audio stream for recording ────────────────────────────────────────────────
@@ -487,6 +504,7 @@ export default function LiveSessionController({
     isRunningRef.current = true;
     ttsChainRef.current = Promise.resolve();
     ttsGenerationRef.current++;
+    ttsRequestIdsRef.current = [];
     userSpeakingSpanRef.current = null;
     geminiWaitingSpanRef.current = null;
     useSessionStore.getState().clearConversationEvents();
@@ -558,6 +576,7 @@ export default function LiveSessionController({
     isRunningRef.current = true;
     ttsChainRef.current = Promise.resolve();
     ttsGenerationRef.current++; // increment (not reset) — invalidates any in-flight TTS from prior session
+    ttsRequestIdsRef.current = [];
     userSpeakingSpanRef.current = null;
     geminiWaitingSpanRef.current = null;
     firstSpeechRecordedRef.current = false;
