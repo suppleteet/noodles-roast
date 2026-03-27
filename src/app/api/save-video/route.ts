@@ -29,16 +29,25 @@ function cleverBaseName(): string {
 function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // Use shell:true so Node finds ffmpeg via the same PATH as the terminal
+    // Targeting universal sharing: iMessage, WhatsApp, Instagram, Android, iOS, Mac, Windows.
+    // Settings match what iPhones produce — the de facto standard for mobile sharing.
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
-      "-r", "30",             // browser WebM has VFR timestamps → force constant 30fps
+      "-r", "30",
       "-c:v", "libx264",
+      "-profile:v", "main",
+      "-level", "3.1",
+      "-bf", "0",             // no B-frames — some social/messaging apps re-encode or choke on them
       "-preset", "fast",
-      "-crf", "23",
+      "-crf", "20",
       "-pix_fmt", "yuv420p",
       "-c:a", "aac",
+      "-b:a", "128k",
+      "-ar", "44100",         // 44.1kHz — widest audio compat (some Android devices reject 48kHz AAC)
       "-movflags", "+faststart",
+      "-brand", "mp42",
+      "-minor_version", "0",
       outputPath,
     ], { shell: true });
 
