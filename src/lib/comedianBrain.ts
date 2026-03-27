@@ -242,6 +242,20 @@ export class ComedianBrain {
     this.cameraAvailable = available;
   }
 
+  /**
+   * Called by Silero VAD when end-of-speech is detected (~100-200ms latency).
+   * This fires MUCH faster than the answerSilenceMs fallback timer.
+   * If we already have transcript text from Gemini, complete the answer immediately.
+   */
+  onVadSpeechEnd(): void {
+    if (this.state !== "wait_answer" && this.state !== "pre_generate") return;
+    const answer = this.answerBuffer.trim();
+    if (!answer) return; // no transcript yet — let the silence timer handle it
+    this.deps.logTiming(`brain: VAD speech-end → completing "${answer.slice(0, 40)}"`);
+    this._clearTimers();
+    this._onAnswerComplete();
+  }
+
   /** Called when Gemini transcribes user speech */
   onInputTranscription(text: string): void {
     if (!text.trim()) return;

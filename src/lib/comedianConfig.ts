@@ -9,7 +9,7 @@
 
 const defaults = {
   // Timing (milliseconds)
-  answerSilenceMs: 800,          // silence after speech = answer complete
+  answerSilenceMs: 300,          // fallback silence timer (Silero VAD is primary, ~150ms)
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 600,            // switch mic to listening this many ms before question ends
   visionIntervalMs: 5000,        // how often vision analyze fires

@@ -6,6 +6,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import type { WebcamCaptureHandle } from "./WebcamCapture";
 import type { VideoRecorderHandle } from "@/components/recording/VideoRecorder";
 import { useMicCapture } from "@/components/audio/useMicCapture";
+import { useVad } from "@/components/audio/useVad";
 import { usePcmPlayback } from "@/components/audio/usePcmPlayback";
 import { float32ToBase64Pcm16 } from "@/lib/audioUtils";
 import { inferMotionFromTranscript } from "@/lib/motionInference";
@@ -91,6 +92,21 @@ export default function LiveSessionController({
       }
     }, []),
   );
+
+  // Silero VAD — fast end-of-speech detection (~200ms vs 300ms silence timer fallback)
+  const vad = useVad({
+    onSpeechEnd: () => {
+      if (isRunningRef.current) {
+        useSessionStore.getState().setIsUserSpeaking(false);
+      }
+      brainRef.current?.onVadSpeechEnd();
+    },
+    onSpeechStart: () => {
+      if (isRunningRef.current) {
+        useSessionStore.getState().setIsUserSpeaking(true);
+      }
+    },
+  });
 
   // ComedianBrain — instantiated when session starts
   const brainRef = useRef<ComedianBrain | null>(null);
@@ -624,6 +640,14 @@ export default function LiveSessionController({
       useSessionStore.getState().endSpan(connectSpanId);
       useSessionStore.getState().logTiming("live: session + mic ready");
 
+      // Start Silero VAD on the mic stream for fast end-of-speech detection
+      const micStream = mic.getStream();
+      if (micStream) {
+        vad.start(micStream).catch((e) =>
+          console.warn("[live] VAD start failed (falling back to silence timer):", e),
+        );
+      }
+
       kickoffTimeRef.current = Date.now();
       useSessionStore.getState().setTimeToFirstSpeechMs(null);
       useSessionStore.getState().setHasSpokenThisSession(false);
@@ -680,6 +704,7 @@ export default function LiveSessionController({
     cancelSpeech();
     micRecordingDisconnectRef.current?.();
     micRecordingDisconnectRef.current = null;
+    vad.stop();
     mic.stop();
     playback.flush();
 
@@ -750,6 +775,7 @@ export default function LiveSessionController({
       if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
       if (userSpeakingTimerRef.current) clearTimeout(userSpeakingTimerRef.current);
       brainRef.current?.stop();
+      vad.stop();
       mic.stop();
       playback.flush();
       try { sessionRef.current?.close(); } catch { /* noop */ }

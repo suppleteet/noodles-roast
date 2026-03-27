@@ -15,6 +15,7 @@
 | @anthropic-ai/sdk | ^0.39.0 | installed but NOT used in routes yet (Gemini is) |
 | @google/genai | ^1.45.0 | `new GoogleGenAI({ apiKey })` → `ai.models.generateContent()` |
 | elevenlabs | ^1.57.0 | installed but TTS uses raw fetch for streaming |
+| @ricky0123/vad-web | ^0.0.30 | Silero VAD — fast end-of-speech detection in browser |
 | simplex-noise | ^4.0.3 | Used by HeadMotionComponent (createNoise3D) |
 | tailwindcss | ^3.4.19 | |
 | autoprefixer | ^10.4.27 | PostCSS plugin |
@@ -47,6 +48,9 @@ The app supports two session modes (controlled by `sessionMode` in the store):
 Gemini Live API ──── mic audio ────→ inputTranscription → ComedianBrain.onInputTranscription()
                 ──── webcam ────────→ VAD context only (Gemini output DISCARDED)
 
+Silero VAD ─────── mic audio ────→ onSpeechEnd → ComedianBrain.onVadSpeechEnd()
+                                   (fast ~200ms end-of-speech, primary detector)
+
 ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
              └──→ /api/tts (ElevenLabs) → gapless playback via usePcmPlayback
 
@@ -54,6 +58,8 @@ ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
 ```
 
 **Key rule**: Gemini Live output (outputTranscription, modelTurn) is DISCARDED. The brain controls all speech.
+
+**End-of-speech detection**: Silero VAD (`useVad`) is the primary detector (~200ms). The brain's `answerSilenceMs` timer (300ms) is a fallback if VAD fails to load or misses.
 
 ## Brain State Machine
 
@@ -69,7 +75,7 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 src/app/api/           Next.js API routes (analyze, generate-joke, roast, tts, vision, live-token, save-transcript)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
-src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback (conversation)
+src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, DebugTranscript)
 src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference
