@@ -5,8 +5,8 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { makeSpring, springStep } from "@/lib/spring";
 
 // Tuned for snappy-open, smooth-close mouth animation
-const STIFFNESS = 600;  // high = fast response
-const DAMPING = 35;     // slightly underdamped for springy feel
+const STIFFNESS = 1200; // very fast response
+const DAMPING = 45;     // low enough for springy snap, high enough to avoid ringing
 
 /**
  * Drives the `mouth_open` morph target weight from audio amplitude.
