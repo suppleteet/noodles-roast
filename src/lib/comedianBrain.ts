@@ -40,6 +40,10 @@ export interface LedgerEntry {
 
 export interface ComedianBrainDeps {
   queueSpeak: (text: string, motion?: MotionState, intensity?: number) => void;
+  /** Enqueue raw PCM audio directly into playback (bypasses TTS fetch). */
+  enqueueAudioChunk?: (base64Pcm: string) => void;
+  /** Push text to transcript without triggering TTS (used when audio comes inline). */
+  pushTranscript?: (text: string) => void;
   cancelSpeech: () => void;
   isQueueEmpty: () => boolean;
   setMotion: (state: MotionState, intensity: number) => void;
@@ -661,14 +665,26 @@ export class ComedianBrain {
         imageBase64: this.cameraAvailable ? this.deps.captureFrame() : undefined,
       },
       // onJoke — fires immediately as each joke streams in
-      (joke) => {
+      (joke, hasInlineAudio) => {
         if (this.state !== "generating" && this.state !== "delivering") return;
         if (this.state === "generating") {
           // First joke arrived — transition to delivering now
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
-        this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
+
+        if (hasInlineAudio) {
+          // Audio is already streaming inline from generate-speak — just record transcript + set motion
+          this.deps.pushTranscript?.(joke.text);
+          this.deps.setMotion(
+            joke.motion as import("@/lib/motionStates").MotionState,
+            joke.intensity,
+          );
+        } else {
+          // No inline audio — fall back to separate TTS fetch via queueSpeak
+          this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
+        }
+
         this._addLedger("joke", joke.text, []);
         this.deps.logTiming(`brain: joke[${jokesQueued}] — "${joke.text.slice(0, 60)}"`);
         this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
@@ -1065,7 +1081,7 @@ export class ComedianBrain {
       conversationSoFar?: string[];
       imageBase64?: string;
     },
-    onJoke: (joke: JokeItem) => void,
+    onJoke: (joke: JokeItem, hasInlineAudio: boolean) => void,
     onMeta: (meta: {
       relevant: boolean;
       followUp?: string;
@@ -1094,6 +1110,7 @@ export class ComedianBrain {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let inlineAudioEnabled = false; // set by tts_inline event from server
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -1113,8 +1130,15 @@ export class ComedianBrain {
                 type: string;
                 [key: string]: unknown;
               };
-              if (event.type === "joke") {
-                onJoke(event as unknown as JokeItem);
+              if (event.type === "tts_inline") {
+                inlineAudioEnabled = !!(event.enabled);
+              } else if (event.type === "joke") {
+                onJoke(event as unknown as JokeItem, inlineAudioEnabled);
+              } else if (event.type === "audio") {
+                // Guard: only enqueue if brain is still in a delivering state
+                if (this.state === "generating" || this.state === "delivering") {
+                  this.deps.enqueueAudioChunk?.(event.chunk as string);
+                }
               } else if (event.type === "meta") {
                 onMeta(
                   event as unknown as {
@@ -1126,6 +1150,7 @@ export class ComedianBrain {
                   },
                 );
               }
+              // audio_done is informational — drain detection handles end-of-speech
             } catch {
               // malformed SSE line
             }

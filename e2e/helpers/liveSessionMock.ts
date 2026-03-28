@@ -152,6 +152,22 @@ export class LiveSessionMock {
         body: silentWav(),
       });
     });
+
+    // Mock /api/tts-ws — streaming SSE TTS endpoint (WebSocket-backed in production)
+    await this.page.route("/api/tts-ws", async (route) => {
+      const body = route.request().postDataJSON() as { text?: string };
+      const req: TtsRequest = { text: body.text ?? "" };
+      this.ttsRequests.push(req);
+      for (const resolve of this.ttsWaiters.splice(0)) resolve(req);
+      // Return SSE with a silent PCM chunk (50ms at 24kHz, 16-bit mono)
+      const silentPcm = Buffer.alloc(2400).toString("base64"); // 1200 samples × 2 bytes
+      const sseBody = `data: ${JSON.stringify({ type: "audio", chunk: silentPcm })}\n\ndata: ${JSON.stringify({ type: "done" })}\n\n`;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: sseBody,
+      });
+    });
   }
 
   private async _mockGeminiWebSocket(): Promise<void> {

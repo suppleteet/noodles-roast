@@ -72,13 +72,13 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, generate-joke, roast, tts, vision, live-token, save-transcript)
+src/app/api/           Next.js API routes (analyze, generate-joke, generate-speak, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, serve-video, open-videos-folder)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, DebugTranscript)
-src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference
+src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream
 src/lib/comedianBrain.ts   State machine class (conversation mode)
 src/lib/comedianBrainConfig.ts  Declarative STATE_CONFIG map
 src/lib/comedianConfig.ts  All timing/threshold tuning parameters (window-injectable for tests)
@@ -109,7 +109,7 @@ src/puppet/            Paper-thin puppet-specific layer
 
 1. **useFrame + store**: Inside `useFrame`, ALWAYS use `useSessionStore.getState()`, never `useSessionStore(selector)`. React hooks cannot run inside rAF callbacks.
 2. **API routes use Gemini**: Despite `@anthropic-ai/sdk` being installed, all current routes use `@google/genai`.
-3. **ElevenLabs uses raw fetch**: TTS route uses `fetch()` to support streaming passthrough. Do not refactor to the SDK without testing streaming.
+3. **ElevenLabs uses raw fetch/WebSocket**: `/api/tts` uses `fetch()` (REST), `/api/tts-ws` and `generate-speak` use `ws` (WebSocket streaming). `elTtsStream.ts` is the shared server-side helper. Do not refactor to the ElevenLabs SDK without testing streaming.
 4. **Zustand v5**: `create<SessionState>((set) => ...)` — no curried form.
 5. **No `any`**: strict mode is on. Comment-justify any type assertion.
 6. **LiveSessionController uses getState()**: All store access in WebSocket callbacks and long-lived closures must use `useSessionStore.getState()` to avoid stale closures. Only `phase` is subscribed via selector (for lifecycle).
