@@ -78,12 +78,18 @@ function MainApp() {
     video.playsInline = true;
     video.play().then(() => {
       const canvas = document.createElement("canvas");
-      canvas.width = 320;
-      canvas.height = 240;
+      canvas.width = 512;
+      canvas.height = 512;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      ctx.drawImage(video, 0, 0, 320, 240);
-      const imageBase64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+      // Center-crop to square before sending to vision
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      const side = Math.min(vw, vh);
+      const sx = (vw - side) / 2;
+      const sy = (vh - side) / 2;
+      ctx.drawImage(video, sx, sy, side, side, 0, 0, 512, 512);
+      const imageBase64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
       video.pause();
       video.srcObject = null;
       if (!imageBase64) return;

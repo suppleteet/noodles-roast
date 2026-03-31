@@ -9,6 +9,7 @@ interface RephraseRequest {
   persona: PersonaId;
   burnIntensity: BurnIntensity;
   knownFacts?: string[];
+  previousLine?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -28,9 +29,13 @@ export async function POST(req: NextRequest) {
       `- Stay in character — punchy, in-character opener\n` +
       `- If you know their name, use it naturally\n` +
       `- Do NOT make a joke or add commentary — just ask the question\n` +
+      `- If PREVIOUS LINE is provided, make the question flow naturally from it — use a casual transition like "Alright," "Now," "So tell me," "Okay," etc. It should sound like the next beat in a conversation, not a fresh start.\n` +
       `- Return ONLY the rephrased question text, nothing else`;
 
     const userLines: string[] = [`Rephrase this question: "${body.question}"`];
+    if (body.previousLine) {
+      userLines.push(`PREVIOUS LINE (what you just said): "${body.previousLine}"`);
+    }
     if (body.knownFacts?.length) {
       userLines.push(`Known facts: ${body.knownFacts.join(", ")}`);
     }
