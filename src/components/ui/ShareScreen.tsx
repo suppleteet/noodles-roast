@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
+import DevNoteRecorder from "@/components/ui/DevNoteRecorder";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
@@ -191,6 +192,8 @@ export default function ShareScreen() {
         <p className="text-xs text-gray-500 mb-6">Processing video…</p>
       )}
       {!converting && <div className="mb-6" />}
+
+      <DevNoteRecorder mode="session-end" />
 
       <button onClick={reset} className="text-gray-500 hover:text-gray-300 text-sm">
         ← Roast again

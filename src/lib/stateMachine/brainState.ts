@@ -9,6 +9,7 @@ export type BrainState =
   | "pre_generate"
   | "generating"
   | "delivering"
+  | "dev_note"
   | "redirecting"
   | "check_vision"
   | "vision_react";
@@ -37,19 +38,22 @@ export type BrainTrigger =
   | "VISION_INTERESTING"
   | "VISION_BORING"
   | "VISION_REACT_DONE"
-  | "MIC_UNAVAILABLE";
+  | "MIC_UNAVAILABLE"
+  | "DEV_NOTE_ENTER"
+  | "DEV_NOTE_RESUME";
 
 export const BRAIN_TRANSITIONS: TransitionMap<BrainState> = {
   greeting:      ["vision_jokes", "ask_question"],
   vision_jokes:  ["ask_question"],
-  ask_question:  ["wait_answer", "check_vision"],
-  wait_answer:   ["pre_generate", "prodding", "generating", "check_vision"],
+  ask_question:  ["wait_answer", "check_vision", "dev_note"],
+  wait_answer:   ["pre_generate", "prodding", "generating", "check_vision", "dev_note"],
   prodding:      ["wait_answer", "check_vision"],
   pre_generate:  ["generating", "prodding", "check_vision"],
   generating:    ["delivering", "redirecting"],
-  delivering:    ["check_vision", "ask_question"],
+  delivering:    ["check_vision", "ask_question", "dev_note"],
+  dev_note:      ["check_vision", "ask_question"],
   redirecting:   ["wait_answer"],
-  check_vision:  ["vision_react", "ask_question"],
+  check_vision:  ["vision_react", "ask_question", "dev_note"],
   vision_react:  ["ask_question"],
 };
 
@@ -67,6 +71,7 @@ export const BRAIN_STATE_CONFIG: Record<BrainState, BrainStateConfig> = {
   pre_generate:  { micMode: "listening", canSkipTo: null },
   generating:    { micMode: "passive",   canSkipTo: null },
   delivering:    { micMode: "passive",   canSkipTo: null },
+  dev_note:      { micMode: "off",       canSkipTo: "check_vision" },
   redirecting:   { micMode: "passive",   canSkipTo: null },
   check_vision:  { micMode: "passive",   canSkipTo: null },
   vision_react:  { micMode: "passive",   canSkipTo: null },

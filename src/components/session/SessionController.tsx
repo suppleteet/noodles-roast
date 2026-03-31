@@ -242,6 +242,7 @@ export default function SessionController({
 
   function startLoop() {
     isRunningRef.current = true;
+    audioPlayerRef.current?.warmUp();
     clearTimingLog();
     cycleRef.current = 0;
     runGreetingCycle();

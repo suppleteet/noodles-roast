@@ -20,6 +20,7 @@ interface Props {
 /**
  * R3F component that loads an FBX model, creates a RigRuntime, and ticks
  * it every frame. Passes signal values from the signalProvider into TickContext.
+ * Also manages AnimationMixer for FBX animation clip playback.
  */
 export default function RigRuntimeBridge({ config, signalProvider, showGizmos = false }: Props) {
   const fbx = useFBX(config.modelPath);
@@ -28,19 +29,42 @@ export default function RigRuntimeBridge({ config, signalProvider, showGizmos = 
   const runtimeRef = useRef<RigRuntime | null>(null);
   const gizmoCallsRef = useRef<GizmoDrawCall[]>([]);
 
-  // Initialize runtime once the cloned scene is ready
+  // Animation mixer + clips
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const clipsRef = useRef<THREE.AnimationClip[]>([]);
+  const activeActionRef = useRef<THREE.AnimationAction | null>(null);
+  const prevPlayingRef = useRef<string | null>(null);
+
+  // Initialize runtime + extract animation clips
   useEffect(() => {
     const rt = new RigRuntime(cloned);
     rt.loadConfig(config);
     runtimeRef.current = rt;
-    // Expose bone names to edit store for BoneSelector
+
+    // Expose bone names
     useRigEditStore.getState().setBoneNames(rt.getBoneNames());
+
+    // Extract animation clips from the FBX
+    const clips = fbx.animations ?? [];
+    clipsRef.current = clips;
+    const clipNames = clips.map((c) => c.name || `Clip ${clips.indexOf(c)}`);
+    useRigEditStore.getState().setAnimationClipNames(clipNames);
+
+    // Create mixer on the cloned scene
+    const mixer = new THREE.AnimationMixer(cloned);
+    mixerRef.current = mixer;
+
     return () => {
       rt.dispose();
       runtimeRef.current = null;
+      mixer.stopAllAction();
+      mixerRef.current = null;
+      activeActionRef.current = null;
+      prevPlayingRef.current = null;
+      useRigEditStore.getState().setAnimationClipNames([]);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cloned]);
+  }, [cloned, fbx]);
 
   // Hot-reload config changes
   useEffect(() => {
@@ -50,9 +74,38 @@ export default function RigRuntimeBridge({ config, signalProvider, showGizmos = 
 
   useFrame((_, delta) => {
     const rt = runtimeRef.current;
-    if (!rt) return;
-    rt.tick(delta, signalProvider());
-    if (showGizmos) gizmoCallsRef.current = rt.getGizmoDrawCalls();
+    const mixer = mixerRef.current;
+
+    // Handle play/stop from store
+    const { playingClipName } = useRigEditStore.getState();
+    if (playingClipName !== prevPlayingRef.current) {
+      prevPlayingRef.current = playingClipName;
+
+      if (activeActionRef.current) {
+        activeActionRef.current.stop();
+        activeActionRef.current = null;
+      }
+
+      if (playingClipName && mixer) {
+        const clip = clipsRef.current.find(
+          (c) => c.name === playingClipName || `Clip ${clipsRef.current.indexOf(c)}` === playingClipName,
+        );
+        if (clip) {
+          const action = mixer.clipAction(clip);
+          action.reset().play();
+          activeActionRef.current = action;
+        }
+      }
+    }
+
+    // Tick animation mixer (drives bone targets)
+    if (mixer) mixer.update(delta);
+
+    // Tick rig runtime (secondary motion follows bone targets)
+    if (rt) {
+      rt.tick(delta, signalProvider());
+      if (showGizmos) gizmoCallsRef.current = rt.getGizmoDrawCalls();
+    }
   });
 
   return (

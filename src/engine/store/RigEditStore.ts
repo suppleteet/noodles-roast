@@ -20,6 +20,13 @@ interface RigEditState {
   /** Preview signal values driven by SignalPreview sliders */
   previewSignals: Record<string, number>;
 
+  /** Animation clip names extracted from loaded FBX */
+  animationClipNames: string[];
+  /** Currently selected clip in the dropdown */
+  selectedClipName: string | null;
+  /** Currently playing clip (null = stopped) */
+  playingClipName: string | null;
+
   // ── Navigation ────────────────────────────────────────────────────────────
   enterEditMode: (configId?: string) => void;
   exitEditMode: () => void;
@@ -43,6 +50,12 @@ interface RigEditState {
   toggleGizmos: () => void;
   setPreviewSignal: (key: string, value: number) => void;
   setBoneNames: (names: string[]) => void;
+
+  // ── Animation ────────────────────────────────────────────────────────────
+  setAnimationClipNames: (names: string[]) => void;
+  selectClip: (name: string | null) => void;
+  playClip: (name: string) => void;
+  stopClip: () => void;
 }
 
 // Helper: find active config
@@ -73,6 +86,9 @@ export const useRigEditStore = create<RigEditState>((set, get) => ({
   isDirty: false,
   boneNames: [],
   previewSignals: {},
+  animationClipNames: [],
+  selectedClipName: null,
+  playingClipName: null,
 
   enterEditMode: (configId) => {
     const state = get();
@@ -194,4 +210,10 @@ export const useRigEditStore = create<RigEditState>((set, get) => ({
   setPreviewSignal: (key, value) =>
     set((s) => ({ previewSignals: { ...s.previewSignals, [key]: value } })),
   setBoneNames: (names) => set({ boneNames: names }),
+
+  // ── Animation ──────────────────────────────────────────────────────────────
+  setAnimationClipNames: (names) => set({ animationClipNames: names, selectedClipName: names[0] ?? null }),
+  selectClip: (name) => set({ selectedClipName: name }),
+  playClip: (name) => set({ playingClipName: name }),
+  stopClip: () => set({ playingClipName: null }),
 }));

@@ -6,6 +6,8 @@ export interface AudioPlayerHandle {
   playBuffer(buffer: ArrayBuffer): Promise<void>;
   getAudioContext(): AudioContext | null;
   getDestinationStream(): MediaStream | null;
+  /** Call from a user gesture to warm AudioContext for iOS volume control. */
+  warmUp(): void;
 }
 
 const AMPLITUDE_THRESHOLD = 0.01; // only push store update if change exceeds this
@@ -86,6 +88,16 @@ const AudioPlayer = forwardRef<AudioPlayerHandle>(function AudioPlayer(_props, r
 
     getDestinationStream(): MediaStream | null {
       return destRef.current?.stream ?? null;
+    },
+
+    warmUp() {
+      const ctx = getOrCreateContext();
+      if (ctx.state === "suspended") ctx.resume();
+      const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
     },
   }));
 

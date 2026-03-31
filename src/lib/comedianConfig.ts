@@ -32,6 +32,10 @@ const defaults = {
   // Greeting pool
   generatedGreetingCount: 4,  // how many AI-generated greetings to pre-generate
 
+  // Dev voice notes (gesture-triggered)
+  devNotesEnabled: false,      // thumbs-down pauses brain, starts recording; thumbs-up resumes
+  devNoteTimeoutMs: 60_000,    // auto-resume after 60s if no thumbs-up
+
   // Latency experiments (temporary)
   skipGreeting: false,         // skip greeting → jump straight to ask_question
   skipPreGeneration: true,    // skip speculative pre-generation during wait_answer

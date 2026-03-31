@@ -7,6 +7,7 @@ import { getComponentType } from "../registry";
 import ComponentList from "./ComponentList";
 import ComponentInspector from "./ComponentInspector";
 import SignalPreview from "./SignalPreview";
+import AnimationPlayer from "./AnimationPlayer";
 import RigRuntimeBridge from "../runtime/RigRuntimeBridge";
 
 // Import puppet components to trigger registry registration
@@ -155,8 +156,10 @@ export default function RigEditMode() {
           )}
         </div>
 
-        {/* ── Right signal panel ────────────────────────────────────────────── */}
-        <div className="w-56 shrink-0 border-l border-white/10 p-3 bg-black/60 overflow-y-auto">
+        {/* ── Right panel ────────────────────────────────────────────────────── */}
+        <div className="w-56 shrink-0 border-l border-white/10 p-3 bg-black/60 overflow-y-auto flex flex-col gap-4">
+          <AnimationPlayer />
+          <div className="border-t border-white/10" />
           <SignalPreview />
         </div>
       </div>

@@ -20,6 +20,10 @@ export interface PcmPlaybackHandle {
   /** Route an external stream (e.g. mic) to the recording destination only
    *  (NOT speakers — avoids feedback). Returns a disconnect function. */
   addInputToRecording(stream: MediaStream): () => void;
+  /** Call synchronously from a user gesture (tap/click) to create and warm the
+   *  AudioContext. On iOS Safari this is required for hardware volume buttons
+   *  to control Web Audio output. */
+  warmUp(): void;
 }
 
 /**
@@ -150,10 +154,23 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     return Math.max(0, (queueEndRef.current - ctx.currentTime) * 1000);
   }, []);
 
+  const warmUp = useCallback(() => {
+    const ctx = getOrCreateContext();
+    if (ctx.state === "suspended") ctx.resume();
+    // Play a single silent sample so iOS Safari marks this context as
+    // user-initiated media — hardware volume buttons will control it.
+    const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start();
+  }, []);
+
   return {
     enqueueChunk,
     decodeAndEnqueue,
     flush,
+    warmUp,
     // Eagerly initialize the AudioContext so the destination stream exists
     // before recording starts — otherwise the MediaRecorder captures video-only.
     getDestinationStream: () => {

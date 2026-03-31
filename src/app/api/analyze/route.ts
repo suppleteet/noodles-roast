@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
             parts: [
               { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
               { text: `Return a JSON object with two fields:
-- "person": array of 3-5 short observations (2-5 words each) about the person — expression, mood, posture, actions, accessories.
+- "person": array of 3-5 short observations (2-5 words each) about the person — expression, mood, posture, actions, hand gestures, accessories.
 - "setting": a short confident guess about where they are based on the background (e.g. "home office", "bedroom", "kitchen", "car", "coffee shop"). If the background is too blurry or generic to tell, use null.
 Example: {"person":["smirking","leaning back","wearing headphones"],"setting":"home office"}
 Keep it compact. Return ONLY the JSON object.` },
