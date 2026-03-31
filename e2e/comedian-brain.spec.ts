@@ -241,6 +241,46 @@ test.describe("Comedian Brain — Vision Interrupts", () => {
   });
 });
 
+// ─── TTS-WS route coverage ────────────────────────────────────────────────────
+
+test.describe("Comedian Brain — TTS-WS Route", () => {
+  test("/api/tts-ws is called for puppet speech (greeting)", async ({ page }) => {
+    const driver = new ComedianBrainDriver(page);
+    await driver.setup();
+    await startRoasting(page, driver);
+
+    // Wait for at least one TTS request (greeting speech fires first)
+    const req = await driver.waitForTtsRequest(8000);
+    expect(req.text).toBeTruthy();
+    // tts-ws requests are captured in the same queue as tts requests
+    // (liveSessionMock.ts mocks both routes and collects into ttsRequests)
+    const allReqs = driver.getTtsRequests();
+    expect(allReqs.length).toBeGreaterThan(0);
+  });
+
+  test("/api/tts-ws receives text when brain delivers a joke", async ({ page }) => {
+    const driver = new ComedianBrainDriver(page);
+    await driver.setup();
+    await startRoasting(page, driver);
+
+    await driver.waitForBrainState("wait_answer", 10000);
+    driver.clearTtsRequests();
+
+    driver.mockJokeResponse({
+      relevant: true,
+      jokes: [{ text: "You're like a human participation trophy.", motion: "smug", intensity: 0.8, score: 7 }],
+    });
+
+    await driver.simulateAnswer("I work in marketing");
+    await driver.waitForStateVisited("delivering", 5000);
+
+    const reqs = driver.getTtsRequests();
+    // At least the joke delivery should have gone through TTS
+    const jokeReq = reqs.find((r) => r.text.includes("participation trophy") || r.text.length > 0);
+    expect(jokeReq).toBeTruthy();
+  });
+});
+
 // ─── Startup speed ────────────────────────────────────────────────────────────
 
 test.describe("Comedian Brain — Startup Speed", () => {

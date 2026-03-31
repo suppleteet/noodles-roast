@@ -188,3 +188,163 @@ describe("reset", () => {
     expect(after.observations).toHaveLength(0);
   });
 });
+
+describe("burn intensity and content mode", () => {
+  it("setBurnIntensity updates intensity", () => {
+    useSessionStore.getState().setBurnIntensity(2);
+    expect(useSessionStore.getState().burnIntensity).toBe(2);
+  });
+
+  it("setContentMode switches to vulgar", () => {
+    useSessionStore.getState().setContentMode("vulgar");
+    expect(useSessionStore.getState().contentMode).toBe("vulgar");
+  });
+});
+
+describe("audio amplitude", () => {
+  it("setAudioAmplitude updates the value", () => {
+    useSessionStore.getState().setAudioAmplitude(0.75);
+    expect(useSessionStore.getState().audioAmplitude).toBe(0.75);
+  });
+});
+
+describe("vision setting", () => {
+  it("setVisionSetting stores a setting string", () => {
+    useSessionStore.getState().setVisionSetting("home office");
+    expect(useSessionStore.getState().visionSetting).toBe("home office");
+  });
+
+  it("setVisionSetting accepts null to clear", () => {
+    useSessionStore.getState().setVisionSetting("bedroom");
+    useSessionStore.getState().setVisionSetting(null);
+    expect(useSessionStore.getState().visionSetting).toBeNull();
+  });
+});
+
+describe("conversation events", () => {
+  it("addConversationEvent appends an event", () => {
+    useSessionStore.getState().addConversationEvent("user-start", "hello");
+    const events = useSessionStore.getState().conversationEvents;
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("user-start");
+    expect(events[0].text).toBe("hello");
+  });
+
+  it("clearConversationEvents empties the list", () => {
+    useSessionStore.getState().addConversationEvent("ai-speech");
+    useSessionStore.getState().clearConversationEvents();
+    expect(useSessionStore.getState().conversationEvents).toHaveLength(0);
+  });
+});
+
+describe("comedian brain fields", () => {
+  it("setBrainState updates the brain state", () => {
+    useSessionStore.getState().setBrainState("wait_answer");
+    expect(useSessionStore.getState().brainState).toBe("wait_answer");
+  });
+
+  it("setCurrentQuestion stores the question text", () => {
+    useSessionStore.getState().setCurrentQuestion("What do you do for a living?");
+    expect(useSessionStore.getState().currentQuestion).toBe("What do you do for a living?");
+  });
+
+  it("setUserAnswer stores the answer", () => {
+    useSessionStore.getState().setUserAnswer("I'm a dentist");
+    expect(useSessionStore.getState().userAnswer).toBe("I'm a dentist");
+  });
+
+  it("setIsUserLaughing toggles laughing state", () => {
+    useSessionStore.getState().setIsUserLaughing(true);
+    expect(useSessionStore.getState().isUserLaughing).toBe(true);
+    useSessionStore.getState().setIsUserLaughing(false);
+    expect(useSessionStore.getState().isUserLaughing).toBe(false);
+  });
+
+  it("setHasSpokenThisSession marks first speech", () => {
+    useSessionStore.getState().setHasSpokenThisSession(true);
+    expect(useSessionStore.getState().hasSpokenThisSession).toBe(true);
+  });
+
+  it("setTimeToFirstSpeechMs stores a value and can be cleared", () => {
+    useSessionStore.getState().setTimeToFirstSpeechMs(1234);
+    expect(useSessionStore.getState().timeToFirstSpeechMs).toBe(1234);
+    useSessionStore.getState().setTimeToFirstSpeechMs(null);
+    expect(useSessionStore.getState().timeToFirstSpeechMs).toBeNull();
+  });
+
+  it("setLastVisionCallTs stores a timestamp", () => {
+    const now = Date.now();
+    useSessionStore.getState().setLastVisionCallTs(now);
+    expect(useSessionStore.getState().lastVisionCallTs).toBe(now);
+  });
+});
+
+describe("transcript history", () => {
+  it("pushTranscriptEntry appends puppet and user entries", () => {
+    useSessionStore.getState().pushTranscriptEntry("puppet", "Hello there!");
+    useSessionStore.getState().pushTranscriptEntry("user", "Hi");
+    const history = useSessionStore.getState().transcriptHistory;
+    expect(history).toHaveLength(2);
+    expect(history[0].role).toBe("puppet");
+    expect(history[0].text).toBe("Hello there!");
+    expect(history[1].role).toBe("user");
+  });
+
+  it("clearTranscriptHistory empties the list", () => {
+    useSessionStore.getState().pushTranscriptEntry("puppet", "test");
+    useSessionStore.getState().clearTranscriptHistory();
+    expect(useSessionStore.getState().transcriptHistory).toHaveLength(0);
+  });
+});
+
+describe("timeline spans", () => {
+  it("beginSpan returns an id and stores the span", () => {
+    const id = useSessionStore.getState().beginSpan("tts", "speaking");
+    const spans = useSessionStore.getState().timelineSpans;
+    expect(spans).toHaveLength(1);
+    expect(spans[0].id).toBe(id);
+    expect(spans[0].row).toBe("tts");
+    expect(spans[0].label).toBe("speaking");
+    expect(spans[0].endTs).toBeNull();
+  });
+
+  it("endSpan sets endTs on the matching span", () => {
+    const id = useSessionStore.getState().beginSpan("gemini", "generating");
+    useSessionStore.getState().endSpan(id);
+    const span = useSessionStore.getState().timelineSpans.find((s) => s.id === id);
+    expect(span?.endTs).not.toBeNull();
+  });
+
+  it("clearTimelineSpans empties all spans", () => {
+    useSessionStore.getState().beginSpan("user", "talking");
+    useSessionStore.getState().clearTimelineSpans();
+    expect(useSessionStore.getState().timelineSpans).toHaveLength(0);
+  });
+});
+
+describe("debug transcription", () => {
+  it("submitDebugTranscription sets pendingDebugTranscription", () => {
+    useSessionStore.getState().submitDebugTranscription("test input");
+    expect(useSessionStore.getState().pendingDebugTranscription).toBe("test input");
+  });
+
+  it("clearPendingDebugTranscription nulls it out", () => {
+    useSessionStore.getState().submitDebugTranscription("hello");
+    useSessionStore.getState().clearPendingDebugTranscription();
+    expect(useSessionStore.getState().pendingDebugTranscription).toBeNull();
+  });
+});
+
+describe("session start timestamp", () => {
+  it("setSessionStartTs stores a timestamp", () => {
+    const ts = Date.now();
+    useSessionStore.getState().setSessionStartTs(ts);
+    expect(useSessionStore.getState().sessionStartTs).toBe(ts);
+  });
+
+  it("setSessionStartTs accepts null", () => {
+    useSessionStore.getState().setSessionStartTs(Date.now());
+    useSessionStore.getState().setSessionStartTs(null);
+    expect(useSessionStore.getState().sessionStartTs).toBeNull();
+  });
+});

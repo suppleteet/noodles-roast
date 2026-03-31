@@ -38,6 +38,8 @@ export interface GenerateJokeRequest {
   userAnswer?: string;
   /** Filler the puppet already spoke while generating — don't open the joke by repeating it */
   fillerAlreadySaid?: string;
+  /** Jokes already delivered in this pipeline cycle — escalate/riff, don't restart */
+  jokesAlreadyDelivered?: string[];
   observations?: string[];
   previousObservations?: string[];
   conversationSoFar?: string[];
@@ -82,6 +84,8 @@ export async function POST(req: NextRequest) {
     if (body.question) contextLines.push(`QUESTION ASKED: "${body.question}"`);
     if (body.userAnswer) contextLines.push(`USER'S ANSWER: "${body.userAnswer}"`);
     if (body.fillerAlreadySaid) contextLines.push(`FILLER_ALREADY_SAID: "${body.fillerAlreadySaid}" — do NOT open your joke by repeating this word or phrase.`);
+    if (body.jokesAlreadyDelivered?.length)
+      contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
     if (body.observations?.length)
       contextLines.push(`CURRENT OBSERVATIONS: ${body.observations.join("; ")}`);
     if (body.setting)

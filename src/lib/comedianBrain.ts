@@ -1021,8 +1021,8 @@ export class ComedianBrain {
     const conversationSoFar = this._getLedgerContext();
     const gen = this.deliveryGeneration;
 
-    const alreadySaid = this.pipelinePreviousJokes.length > 0
-      ? this.pipelinePreviousJokes.join(" | ")
+    const alreadyDelivered = this.pipelinePreviousJokes.length > 0
+      ? [...this.pipelinePreviousJokes]
       : undefined;
 
     this._generateJokeStream(
@@ -1030,7 +1030,7 @@ export class ComedianBrain {
         context: "answer_roast",
         question: q?.question,
         userAnswer: answer,
-        fillerAlreadySaid: alreadySaid,
+        jokesAlreadyDelivered: alreadyDelivered,
         conversationSoFar,
         knownFacts: this._getThrowbackContext(),
         maxJokes: 1,
@@ -1114,8 +1114,8 @@ export class ComedianBrain {
 
     const answer = this.pipelineAnswer;
     const q = this.currentQuestion;
-    const alreadySaid = this.pipelinePreviousJokes.length > 0
-      ? this.pipelinePreviousJokes.join(" | ")
+    const alreadyDelivered = this.pipelinePreviousJokes.length > 0
+      ? [...this.pipelinePreviousJokes]
       : undefined;
 
     this.deps.logTiming("brain: prefetching next pipeline joke while current plays");
@@ -1126,7 +1126,7 @@ export class ComedianBrain {
         context: "answer_roast",
         question: q?.question,
         userAnswer: answer,
-        fillerAlreadySaid: alreadySaid,
+        jokesAlreadyDelivered: alreadyDelivered,
         conversationSoFar: this._getLedgerContext(),
         knownFacts: this._getThrowbackContext(),
         maxJokes: 1,
@@ -1434,6 +1434,7 @@ export class ComedianBrain {
       question?: string;
       userAnswer?: string;
       fillerAlreadySaid?: string;
+      jokesAlreadyDelivered?: string[];
       conversationSoFar?: string[];
       knownFacts?: string[];
       maxJokes?: number;
@@ -1521,6 +1522,7 @@ export class ComedianBrain {
       question?: string;
       userAnswer?: string;
       fillerAlreadySaid?: string;
+      jokesAlreadyDelivered?: string[];
       observations?: string[];
       previousObservations?: string[];
       conversationSoFar?: string[];

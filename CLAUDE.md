@@ -21,6 +21,15 @@
 | autoprefixer | ^10.4.27 | PostCSS plugin |
 | postcss | ^8.5.8 | |
 | ws | ^8.20.0 | WebSocket client for ElevenLabs TTS streaming (elTtsStream.ts) |
+| vitest | ^4.1.0 | Unit test runner |
+| @playwright/test | ^1.58.2 | E2E test framework |
+| @testing-library/react | ^16.3.2 | React component testing utilities |
+| @testing-library/jest-dom | ^6.9.1 | Custom jest/vitest matchers |
+| @testing-library/user-event | ^14.6.1 | User interaction simulation |
+| @vitejs/plugin-react | ^6.0.1 | Vite/Vitest React plugin |
+| @vitest/ui | ^4.1.0 | Vitest UI dashboard |
+| @types/ws | ^8.18.1 | TypeScript types for ws |
+| jsdom | ^29.0.0 | DOM environment for Vitest |
 
 ## AI Models in Use
 
