@@ -1416,7 +1416,8 @@ export class ComedianBrain {
   /** Returns the next valid question, skipping excluded ones. Null if exhausted. */
   private _nextValidQuestion(): ComedyQuestion | null {
     const total = this.shuffledQuestions.length;
-    const hasLocation = !!this.deps.getAmbientContext()?.city;
+    const ambientCity = this.deps.getAmbientContext()?.city;
+    const hasLocation = !!ambientCity && ambientCity !== "unknown";
 
     for (let i = 0; i < total; i++) {
       const q = this.shuffledQuestions[(this.questionIndex + i) % total];

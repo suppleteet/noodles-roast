@@ -397,7 +397,7 @@ export default function LiveSessionController({
       store.setActiveMotionState(motion, intensity);
 
       // Route to brain (pass finished flag so brain can use authoritative final text)
-      brainRef.current?.onInputTranscription(text);
+      brainRef.current?.onInputTranscription(text, sc.inputTranscription.finished ?? false);
 
       // Start user speaking span
       if (!userSpeakingSpanRef.current) {
