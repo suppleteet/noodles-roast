@@ -147,7 +147,7 @@ export default function LiveSessionController({
       const previousText = lastSpokenTextRef.current;
       lastSpokenTextRef.current = text.trim();
       useSessionStore.getState().logTiming(
-        `tts: "${text.trim().slice(0, 50)}" prev="${previousText.slice(0, 40)}"`,
+        `tts: "${text.trim()}" prev="${previousText}"`,
       );
       await streamTts(text.trim(), gen, previousText);
     });
