@@ -84,12 +84,12 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, generate-joke, rephrase-question, generate-speak, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, serve-video, open-videos-folder, ambient-context)
+src/app/api/           Next.js API routes (analyze, generate-joke, rephrase-question, generate-speak, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, save-feedback, serve-video, open-videos-folder, ambient-context)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
-src/components/ui/     Screen overlays (landing, consent, HUD, share, DebugTranscript)
+src/components/ui/     Screen overlays (landing, consent, HUD, share, FeedbackBox, DebugTranscript)
 src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream
 src/lib/stateMachine/      State machine types, transitions, and configs (SessionPhase, BrainState, MotionState)
 src/lib/comedianBrain.ts   State machine class (conversation mode)

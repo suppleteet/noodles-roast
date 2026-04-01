@@ -257,6 +257,12 @@ function MainApp() {
           sessionStartTs: s.sessionStartTs,
           timingLog: s.timingLog,
           transcriptHistory: s.transcriptHistory,
+          laughCount: s.laughCount,
+          smileFrames: s.smileFrames,
+          totalVisionFrames: s.totalVisionFrames,
+          timeToFirstSpeechMs: s.timeToFirstSpeechMs,
+          activePersona: s.activePersona,
+          burnIntensity: s.burnIntensity,
         }),
       }).catch(() => {});
     }
@@ -392,6 +398,16 @@ function MainApp() {
             </div>
           )}
         </div>
+      )}
+
+      {/* End Session — outside puppet view */}
+      {phase === "roasting" && (
+        <button
+          onClick={() => setPhase("stopped", "STOP_CLICKED")}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 px-8 py-3 bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 rounded-full text-white font-bold transition-all"
+        >
+          End Session
+        </button>
       )}
 
       {phase === "sharing" && <ShareScreen />}

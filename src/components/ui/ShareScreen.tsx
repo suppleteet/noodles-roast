@@ -9,20 +9,16 @@ export default function ShareScreen() {
   const recordedBlob = useSessionStore((s) => s.recordedBlob);
   const reset = useSessionStore((s) => s.reset);
   const [playing, setPlaying] = useState(false);
-  // Starts as raw WebM for immediate first-frame display; swapped to MP4 when ready.
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  // The converted MP4 blob — null if server lacks ffmpeg (falls back to WebM for share/download).
   const [mp4Blob, setMp4Blob] = useState<Blob | null>(null);
   const [converting, setConverting] = useState(false);
   const [savedFolder, setSavedFolder] = useState<string | null>(null);
   const [savedFilename, setSavedFilename] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  // Prevent double-save (React StrictMode fires effects twice in dev)
   const savedBlobRef = useRef<Blob | null>(null);
 
-  // Show the raw WebM immediately so the first frame appears right away,
-  // then convert in the background and enable Share/Download when MP4 is ready.
   useEffect(() => {
     if (!recordedBlob || savedBlobRef.current === recordedBlob) return;
     savedBlobRef.current = recordedBlob;
@@ -55,7 +51,6 @@ export default function ShareScreen() {
           if (serveResp.ok) {
             const converted = await serveResp.blob();
             setMp4Blob(converted);
-            // Swap video src to MP4 if not currently playing
             if (!videoRef.current || videoRef.current.paused) {
               setVideoBlob(converted);
             }
@@ -69,7 +64,6 @@ export default function ShareScreen() {
     })();
   }, [recordedBlob]);
 
-  // Create and revoke the object URL whenever the playback blob changes.
   useEffect(() => {
     if (!videoBlob) return;
     const url = URL.createObjectURL(videoBlob);
@@ -77,7 +71,6 @@ export default function ShareScreen() {
     return () => URL.revokeObjectURL(url);
   }, [videoBlob]);
 
-  // Set src as soon as URL is ready — browser decodes the first frame as the poster.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
@@ -122,13 +115,12 @@ export default function ShareScreen() {
     );
   }
 
-  // Disabled only while uploading/converting — if MP4 failed, WebM is used as fallback.
   const buttonsDisabled = converting || !videoBlob;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-dvh bg-black text-white px-6 text-center">
 
-      {/* Video frame — folder button shown only in dev */}
+      {/* Video frame */}
       <div className="relative w-full max-w-sm mb-6">
         {IS_DEV && (
           <button
@@ -136,19 +128,13 @@ export default function ShareScreen() {
             title={savedFolder ?? "Open videos folder"}
             className="absolute -top-8 right-0 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white/60 hover:text-white/90"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-5 h-5"
-            >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
               <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
             </svg>
           </button>
         )}
 
         <div className="relative aspect-square bg-gray-900 rounded-2xl overflow-hidden">
-          {/* src set by effect — browser shows first frame before play is clicked */}
           <video
             ref={videoRef}
             className="w-full h-full object-cover"
@@ -169,6 +155,7 @@ export default function ShareScreen() {
         </div>
       </div>
 
+      {/* Action buttons */}
       <div className="flex gap-3 mb-3 flex-wrap justify-center">
         {typeof navigator !== "undefined" && "share" in navigator && (
           <button
@@ -189,15 +176,46 @@ export default function ShareScreen() {
       </div>
 
       {converting && (
-        <p className="text-xs text-gray-500 mb-6">Processing video…</p>
+        <p className="text-xs text-gray-500 mb-4">Processing video…</p>
       )}
-      {!converting && <div className="mb-6" />}
+      {!converting && <div className="mb-4" />}
 
-      <FeedbackBox videoFilename={savedFilename} />
-
-      <button onClick={reset} className="text-gray-500 hover:text-gray-300 text-sm">
-        ← Roast again
+      {/* Roast Again — prominent */}
+      <button
+        onClick={reset}
+        className="px-10 py-3.5 bg-orange-600 hover:bg-orange-500 rounded-xl font-bold text-lg transition-all mb-4"
+      >
+        Roast Again
       </button>
+
+      {/* Leave Feedback — opens modal */}
+      <button
+        onClick={() => setShowFeedback(true)}
+        className="text-gray-500 hover:text-gray-300 text-sm transition-colors"
+      >
+        Leave Feedback
+      </button>
+
+      {/* Feedback modal */}
+      {showFeedback && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowFeedback(false); }}
+        >
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Leave Feedback</h2>
+              <button
+                onClick={() => setShowFeedback(false)}
+                className="text-gray-500 hover:text-white text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            <FeedbackBox videoFilename={savedFilename} onSent={() => setShowFeedback(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

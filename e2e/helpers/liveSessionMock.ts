@@ -168,6 +168,22 @@ export class LiveSessionMock {
         body: sseBody,
       });
     });
+
+    // Mock fire-and-forget utility routes so they don't hit real endpoints
+    const jsonOk = JSON.stringify({ ok: true });
+    for (const path of [
+      "/api/save-log",
+      "/api/save-feedback",
+      "/api/save-video",
+      "/api/save-transcript",
+      "/api/ambient-context",
+      "/api/rephrase-question",
+      "/api/open-videos-folder",
+    ]) {
+      await this.page.route(path, (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: jsonOk })
+      );
+    }
   }
 
   private async _mockGeminiWebSocket(): Promise<void> {

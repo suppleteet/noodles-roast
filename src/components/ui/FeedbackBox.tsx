@@ -3,13 +3,12 @@ import { useState } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
 
 interface Props {
-  /** Filename of the saved video (mp4 or webm), if available. */
   videoFilename?: string | null;
+  onSent?: () => void;
 }
 
-/** Simple text feedback box shown on the share screen. */
-export default function FeedbackBox({ videoFilename }: Props) {
-  const [open, setOpen] = useState(false);
+/** Text feedback box — used inside feedback modal on share screen. */
+export default function FeedbackBox({ videoFilename, onSent }: Props) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
 
@@ -44,48 +43,30 @@ export default function FeedbackBox({ videoFilename }: Props) {
       });
       setStatus("sent");
       setText("");
+      onSent?.();
     } catch (e) {
       console.error("[FeedbackBox] save failed", e);
       setStatus("idle");
     }
   }
 
-  if (status === "sent") {
-    return (
-      <p className="text-gray-500 text-sm my-3">Thanks for the feedback!</p>
-    );
-  }
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="text-gray-500 hover:text-gray-300 text-sm my-3 transition-colors"
-      >
-        Leave Feedback
-      </button>
-    );
-  }
-
   return (
-    <div className="w-full max-w-sm my-3">
+    <div>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="What did you think?"
-        rows={3}
+        rows={4}
         autoFocus
         className="w-full bg-gray-800 text-white text-sm rounded-xl px-4 py-3 placeholder-gray-500 resize-none focus:outline-none focus:ring-1 focus:ring-gray-600"
       />
-      {text.trim() && (
-        <button
-          onClick={handleSubmit}
-          disabled={status === "sending"}
-          className="mt-2 w-full px-4 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-colors"
-        >
-          {status === "sending" ? "Sending…" : "Send Feedback"}
-        </button>
-      )}
+      <button
+        onClick={handleSubmit}
+        disabled={!text.trim() || status === "sending"}
+        className="mt-3 w-full px-4 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors"
+      >
+        {status === "sending" ? "Sending…" : "Send Feedback"}
+      </button>
     </div>
   );
 }

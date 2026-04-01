@@ -93,6 +93,10 @@ interface SessionState {
   currentQuestion: string | null;
   userAnswer: string;
   isUserLaughing: boolean; // vision-based: set when observations contain laugh keywords
+  isUserSmiling: boolean;  // vision-based: set when observations contain smile keywords
+  laughCount: number;       // total laugh detections this session
+  smileFrames: number;      // vision frames where smile was detected
+  totalVisionFrames: number; // total vision frames this session
 
   // Transcript history for debug panel
   transcriptHistory: { role: "user" | "puppet"; text: string; ts: number }[];
@@ -143,6 +147,9 @@ interface SessionState {
   setCurrentQuestion: (q: string | null) => void;
   setUserAnswer: (ans: string) => void;
   setIsUserLaughing: (laughing: boolean) => void;
+  setIsUserSmiling: (smiling: boolean) => void;
+  incrementLaughCount: () => void;
+  recordVisionFrame: (smiling: boolean) => void;
   pushTranscriptEntry: (role: "user" | "puppet", text: string) => void;
   timelineSpans: TimelineSpan[];
   beginSpan: (row: TimelineRow, label: string, color?: string) => string;
@@ -181,6 +188,10 @@ const initialState = {
   currentQuestion: null as string | null,
   userAnswer: "",
   isUserLaughing: false,
+  isUserSmiling: false,
+  laughCount: 0,
+  smileFrames: 0,
+  totalVisionFrames: 0,
   transcriptHistory: [] as { role: "user" | "puppet"; text: string; ts: number }[],
   timelineSpans: [] as TimelineSpan[],
   sessionStartTs: null as number | null,
@@ -242,6 +253,12 @@ export const useSessionStore = create<SessionState>((set) => ({
   setCurrentQuestion: (currentQuestion) => set({ currentQuestion }),
   setUserAnswer: (userAnswer) => set({ userAnswer }),
   setIsUserLaughing: (isUserLaughing) => set({ isUserLaughing }),
+  setIsUserSmiling: (isUserSmiling) => set({ isUserSmiling }),
+  incrementLaughCount: () => set((s) => ({ laughCount: s.laughCount + 1 })),
+  recordVisionFrame: (smiling) => set((s) => ({
+    totalVisionFrames: s.totalVisionFrames + 1,
+    smileFrames: s.smileFrames + (smiling ? 1 : 0),
+  })),
   pushTranscriptEntry: (role, text) =>
     set((s) => {
       const next = [...s.transcriptHistory.slice(-199), { role, text, ts: Date.now() }];

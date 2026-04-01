@@ -54,6 +54,8 @@ export interface ComedianBrainDeps {
   setCurrentQuestion: (q: string | null) => void;
   setUserAnswer: (ans: string) => void;
   logTiming: (entry: string) => void;
+  /** Called when session should reveal the puppet (fade in). */
+  revealSession?: () => void;
   /** Optional: pre-seed for testing */
   initialHopper?: ScoredJoke[];
   initialLedger?: LedgerEntry[];
@@ -484,6 +486,10 @@ export class ComedianBrain {
     this.micMode = "off";
     this.greetingTtsDrained = false;
     this.visionReadyForGreeting = true; // don't wait — fire immediately
+
+    // Reveal the puppet early so you see the head rotate up from sleeping
+    // before the greeting audio starts playing.
+    this.deps.revealSession?.();
 
     // Fire greeting generation immediately with webcam frame — don't wait for /api/analyze.
     // Gemini Flash gets the raw image and can see everything it needs.

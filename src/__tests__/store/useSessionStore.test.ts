@@ -335,6 +335,43 @@ describe("debug transcription", () => {
   });
 });
 
+describe("smile and laugh metrics", () => {
+  it("setIsUserSmiling toggles smiling state", () => {
+    useSessionStore.getState().setIsUserSmiling(true);
+    expect(useSessionStore.getState().isUserSmiling).toBe(true);
+    useSessionStore.getState().setIsUserSmiling(false);
+    expect(useSessionStore.getState().isUserSmiling).toBe(false);
+  });
+
+  it("incrementLaughCount increments the counter", () => {
+    expect(useSessionStore.getState().laughCount).toBe(0);
+    useSessionStore.getState().incrementLaughCount();
+    useSessionStore.getState().incrementLaughCount();
+    expect(useSessionStore.getState().laughCount).toBe(2);
+  });
+
+  it("recordVisionFrame tracks total frames and smile frames", () => {
+    useSessionStore.getState().recordVisionFrame(true);
+    useSessionStore.getState().recordVisionFrame(false);
+    useSessionStore.getState().recordVisionFrame(true);
+    const s = useSessionStore.getState();
+    expect(s.totalVisionFrames).toBe(3);
+    expect(s.smileFrames).toBe(2);
+  });
+
+  it("reset clears all metrics", () => {
+    useSessionStore.getState().incrementLaughCount();
+    useSessionStore.getState().recordVisionFrame(true);
+    useSessionStore.getState().setIsUserSmiling(true);
+    useSessionStore.getState().reset();
+    const s = useSessionStore.getState();
+    expect(s.laughCount).toBe(0);
+    expect(s.smileFrames).toBe(0);
+    expect(s.totalVisionFrames).toBe(0);
+    expect(s.isUserSmiling).toBe(false);
+  });
+});
+
 describe("session start timestamp", () => {
   it("setSessionStartTs stores a timestamp", () => {
     const ts = Date.now();

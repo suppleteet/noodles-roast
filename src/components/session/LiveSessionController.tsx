@@ -52,6 +52,7 @@ export default function LiveSessionController({
   const rotateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const laughDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smileDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const kickoffTimeRef = useRef<number | null>(null);
   const firstSpeechRecordedRef = useRef(false);
@@ -421,26 +422,49 @@ export default function LiveSessionController({
     }
   }
 
-  // ─── Laugh detection (vision-based) ────────────────────────────────────────────
+  // ─── Laugh + smile detection (vision-based) ────────────────────────────────────
 
   const LAUGH_KEYWORDS = ["laugh", "cracking up", "giggl", "chuckl", "grin", "smirk", "hysterical"];
-  const LAUGH_DECAY_MS = 4000; // clear laugh state if next vision doesn't confirm
+  const SMILE_KEYWORDS = ["smile", "smiling", "grinning", "beaming", "happy", "amused", "cheerful"];
+  const LAUGH_DECAY_MS = 4000;
+  const SMILE_DECAY_MS = 4000;
 
-  function detectLaughter(observations: string[]) {
-    const isLaughing = observations.some((obs) => {
-      const lower = obs.toLowerCase();
-      return LAUGH_KEYWORDS.some((kw) => lower.includes(kw));
-    });
+  function detectExpression(observations: string[]) {
+    const store = useSessionStore.getState();
+    const lowerObs = observations.map((o) => o.toLowerCase());
+
+    // Laugh detection
+    const isLaughing = lowerObs.some((obs) =>
+      LAUGH_KEYWORDS.some((kw) => obs.includes(kw)),
+    );
 
     if (isLaughing) {
-      useSessionStore.getState().setIsUserLaughing(true);
-      useSessionStore.getState().addConversationEvent("user-laugh");
-      // Reset decay timer — will clear if next vision call doesn't confirm
+      if (!store.isUserLaughing) {
+        store.incrementLaughCount();
+      }
+      store.setIsUserLaughing(true);
+      store.addConversationEvent("user-laugh");
       if (laughDecayTimerRef.current) clearTimeout(laughDecayTimerRef.current);
       laughDecayTimerRef.current = setTimeout(clearLaughter, LAUGH_DECAY_MS);
     } else {
       clearLaughter();
     }
+
+    // Smile detection
+    const isSmiling = lowerObs.some((obs) =>
+      SMILE_KEYWORDS.some((kw) => obs.includes(kw)),
+    );
+
+    if (isSmiling) {
+      store.setIsUserSmiling(true);
+      if (smileDecayTimerRef.current) clearTimeout(smileDecayTimerRef.current);
+      smileDecayTimerRef.current = setTimeout(clearSmile, SMILE_DECAY_MS);
+    } else {
+      clearSmile();
+    }
+
+    // Record this vision frame for smile percentage
+    store.recordVisionFrame(isSmiling || isLaughing);
   }
 
   function clearLaughter() {
@@ -450,6 +474,16 @@ export default function LiveSessionController({
     if (laughDecayTimerRef.current) {
       clearTimeout(laughDecayTimerRef.current);
       laughDecayTimerRef.current = null;
+    }
+  }
+
+  function clearSmile() {
+    if (useSessionStore.getState().isUserSmiling) {
+      useSessionStore.getState().setIsUserSmiling(false);
+    }
+    if (smileDecayTimerRef.current) {
+      clearTimeout(smileDecayTimerRef.current);
+      smileDecayTimerRef.current = null;
     }
   }
 
@@ -520,7 +554,7 @@ export default function LiveSessionController({
         if (obs.length) {
           useSessionStore.getState().setObservations(obs);
           brainRef.current?.onVisionUpdate(obs);
-          detectLaughter(obs);
+          detectExpression(obs);
           detectThumbGesture(obs);
         } else {
           clearLaughter();
@@ -717,6 +751,7 @@ export default function LiveSessionController({
       setCurrentQuestion: (q) => useSessionStore.getState().setCurrentQuestion(q),
       setUserAnswer: (a) => useSessionStore.getState().setUserAnswer(a),
       logTiming: (e) => useSessionStore.getState().logTiming(e),
+      revealSession: () => useSessionStore.getState().setHasSpokenThisSession(true),
     });
 
     const connectSpanId = useSessionStore.getState().beginSpan("session", "connect");
