@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
     const contextLines: string[] = [];
     if (body.question) contextLines.push(`QUESTION ASKED: "${body.question}"`);
     if (body.userAnswer) contextLines.push(`USER'S ANSWER: "${body.userAnswer}"`);
-    if (body.fillerAlreadySaid) contextLines.push(`FILLER_ALREADY_SAID: "${body.fillerAlreadySaid}" — do NOT open your joke by repeating this word or phrase.`);
+    if (body.fillerAlreadySaid) contextLines.push(`FILLER ALREADY SPOKEN: "${body.fillerAlreadySaid}" was already said aloud as a thinking sound before your joke. Your joke follows this directly — write it as a natural continuation of that energy. Do NOT open with a similar filler sound.`);
     if (body.jokesAlreadyDelivered?.length)
       contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
     if (body.observations?.length)

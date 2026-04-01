@@ -642,8 +642,7 @@ export class ComedianBrain {
       } else {
         // Rephrase didn't finish in time — fall back to original text immediately
         this.deps.logTiming("brain: rephrase not ready — using original question text");
-        this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-        this.deps.queueSpeak(question.question, this.lastJokeMotion, this.lastJokeIntensity);
+        this._queueQuestionWithBridge(question.question);
       }
     } else {
       // Clear follow-up state — new topic
@@ -662,9 +661,7 @@ export class ComedianBrain {
       }
       this.askedQuestionIds.add(question.id);
       this.currentQuestion = question;
-      // Queue TTS — not pre-queued
-      this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-      this.deps.queueSpeak(this.currentQuestion.question, this.lastJokeMotion, this.lastJokeIntensity);
+      this._queueQuestionWithBridge(this.currentQuestion.question);
     }
 
     if (!this.currentQuestion) return;
@@ -1113,6 +1110,21 @@ export class ComedianBrain {
     );
   }
 
+  // Short bridge phrases that connect a joke to the next question — keeps the energy flowing.
+  // Spoken as a separate TTS call so ElevenLabs previous_text carries the joke's vocal tone.
+  private static readonly QUESTION_BRIDGES = [
+    "Okay.", "Alright.", "Anyway.", "Moving on.", "But seriously.",
+    "So.", "Now.", "Let me ask you this.", "Okay okay.",
+  ];
+
+  /** Queue a bridge phrase + question text as two TTS calls for natural transition. */
+  private _queueQuestionWithBridge(questionText: string): void {
+    const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
+    this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
+    this.deps.queueSpeak(bridge, this.lastJokeMotion, this.lastJokeIntensity);
+    this.deps.queueSpeak(questionText, "emphasis", 0.6);
+  }
+
   /** Pre-queue the next question's TTS while the current joke is still playing.
    *  Calls queueSpeak immediately so TTS is already streaming when the joke finishes — no gap. */
   private _preQueueNextQuestion(): void {
@@ -1124,8 +1136,8 @@ export class ComedianBrain {
 
     this.preQueuedQuestion = q;
     this.preQueuedTextReady = true;
-    this.deps.queueSpeak(q.question, this.lastJokeMotion, this.lastJokeIntensity);
-    this.deps.logTiming(`brain: pre-queued next question TTS: "${q.question.slice(0, 40)}"`);
+    this._queueQuestionWithBridge(q.question);
+    this.deps.logTiming(`brain: pre-queued question: "${q.question.slice(0, 40)}"`);
   }
 
   private _cancelRephrase(): void {
