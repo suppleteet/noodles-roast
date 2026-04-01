@@ -146,6 +146,9 @@ export default function LiveSessionController({
       if (motion) useSessionStore.getState().setActiveMotionState(motion, intensity ?? 0.7);
       const previousText = lastSpokenTextRef.current;
       lastSpokenTextRef.current = text.trim();
+      useSessionStore.getState().logTiming(
+        `tts: "${text.trim().slice(0, 50)}" prev="${previousText.slice(0, 40)}"`,
+      );
       await streamTts(text.trim(), gen, previousText);
     });
   }

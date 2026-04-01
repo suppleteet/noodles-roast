@@ -1114,12 +1114,12 @@ export class ComedianBrain {
     "So.", "Now.", "Let me ask you this.", "Okay okay.",
   ];
 
-  /** Queue a bridge phrase + question text as two TTS calls for natural transition. */
+  /** Queue bridge + question as a single TTS call so ElevenLabs maintains vocal continuity. */
   private _queueQuestionWithBridge(questionText: string): void {
     const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
     this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-    this.deps.queueSpeak(bridge, this.lastJokeMotion, this.lastJokeIntensity);
-    this.deps.queueSpeak(questionText, "emphasis", 0.6);
+    // Single TTS call — keeps intonation fluid from bridge into question
+    this.deps.queueSpeak(`${bridge} ${questionText}`, "emphasis", 0.6);
   }
 
   /** Pre-queue the next question's TTS while the current joke is still playing.
