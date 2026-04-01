@@ -17,7 +17,6 @@ import { useCompositor } from "@/components/recording/useCompositor";
 import { PERSONA_IDS, PERSONAS } from "@/lib/personas";
 import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
-import DevNoteRecorder from "@/components/ui/DevNoteRecorder";
 
 /**
  * Top-level router — decides between edit mode and the main app.
@@ -310,7 +309,7 @@ function MainApp() {
   }, [phase]);
 
   return (
-    <main className="relative min-h-dvh bg-black flex items-center justify-center">
+    <main className="relative h-dvh bg-black flex items-center justify-center overflow-hidden">
       {/* Debug / mock toggles — dev only */}
       {IS_DEV && (
         <div className="absolute top-3 right-3 z-50 flex items-center gap-3 text-white/50 text-xs select-none">
@@ -391,9 +390,6 @@ function MainApp() {
             <div className="absolute inset-0 flex items-center justify-center bg-black/70">
               <p className="text-white text-lg font-bold animate-pulse">Requesting camera…</p>
             </div>
-          )}
-          {phase === "roasting" && brainState === "dev_note" && (
-            <DevNoteRecorder mode="gesture" />
           )}
         </div>
       )}

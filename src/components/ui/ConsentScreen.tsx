@@ -22,7 +22,7 @@ export default function ConsentScreen() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white px-6 text-center">
+    <div className="flex flex-col items-center justify-center h-dvh bg-black text-white px-6 text-center overflow-y-auto">
       <h2 className="text-4xl font-black mb-2">Set Your Burn Level</h2>
       <p className="text-gray-400 mb-8 max-w-sm">
         This is locked for the session. Choose wisely.

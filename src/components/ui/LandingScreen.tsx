@@ -8,19 +8,34 @@ export default function LandingScreen() {
   const setError = useSessionStore((s) => s.setError);
   const contentMode = useSessionStore((s) => s.contentMode);
   const setContentMode = useSessionStore((s) => s.setContentMode);
+  const locationConsent = useSessionStore((s) => s.locationConsent);
+  const setLocationConsent = useSessionStore((s) => s.setLocationConsent);
 
   function handleStart() {
     setError(null);
-    setPhase("consent", "START_CLICKED");
+    setPhase("requesting-permissions", "START_CLICKED");
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white px-4 text-center">
+    <div className="flex flex-col items-center justify-center h-dvh bg-black text-white px-4 text-center">
       {error && (
         <div className="mb-6 px-5 py-3 bg-red-900/60 border border-red-500/50 rounded-xl text-red-300 text-sm max-w-sm">
           {error}
         </div>
       )}
+
+      {/* Location opt-in */}
+      <label className="flex items-center gap-3 mb-6 max-w-xs cursor-pointer select-none group">
+        <input
+          type="checkbox"
+          checked={locationConsent}
+          onChange={(e) => setLocationConsent(e.target.checked)}
+          className="w-5 h-5 rounded accent-cyan-500 cursor-pointer flex-shrink-0"
+        />
+        <span className="text-sm text-gray-400 text-left group-hover:text-white/70 transition-colors">
+          Share my location
+        </span>
+      </label>
 
       {/* Clean / Vulgar toggle */}
       <div className="mb-8 flex rounded-full bg-white/10 p-1">
