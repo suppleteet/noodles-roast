@@ -171,7 +171,7 @@ const initialState = {
   timingLog: [] as string[],
   observations: [] as string[],
   visionSetting: null as string | null,
-  locationConsent: false,
+  locationConsent: true,
   ambientContext: null as AmbientContext | null,
   conversationEvents: [] as ConversationEvent[],
   timeToFirstSpeechMs: null as number | null,
