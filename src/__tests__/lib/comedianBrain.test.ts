@@ -103,10 +103,13 @@ describe("ComedianBrain", () => {
       expect(typeof q).toBe("string");
     });
 
-    it("queues question speech", () => {
+    it("queues question speech", async () => {
+      vi.useFakeTimers();
       const deps = makeDeps();
       const brain = new ComedianBrain(deps);
       brain.start();
+      // _queueQuestionWithBridge races rephrase vs timeout — flush microtasks
+      await vi.advanceTimersByTimeAsync(1600);
       expect(deps.queueSpeak).toHaveBeenCalled();
     });
   });

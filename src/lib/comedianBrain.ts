@@ -513,10 +513,6 @@ export class ComedianBrain {
     this.greetingSpeechQueued = false;
     this.visionReadyForGreeting = true;
 
-    // Reveal the puppet early so you see the head rotate up from sleeping
-    // before the greeting audio starts playing.
-    this.deps.revealSession?.();
-
     // Fire greeting generation immediately with webcam frame — don't wait for /api/analyze.
     // Gemini Flash gets the raw image and can see everything it needs.
     const observations = this.deps.getObservations();
@@ -1126,12 +1122,45 @@ export class ComedianBrain {
     "So.", "Now.", "Let me ask you this.", "Okay okay.",
   ];
 
-  /** Queue bridge + question as a single TTS call so ElevenLabs maintains vocal continuity. */
+  /** Queue question with LLM rephrase for natural variation.
+   *  Races rephrase vs 1.5s timeout — falls back to original + bridge if slow. */
   private _queueQuestionWithBridge(questionText: string): void {
-    const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
     this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-    // Single TTS call — keeps intonation fluid from bridge into question
-    this.deps.queueSpeak(`${bridge} ${questionText}`, "emphasis", 0.6);
+
+    // Get the last joke text for rephrase context
+    const lastJoke = this.ledger
+      .filter((e) => e.type === "joke")
+      .at(-1)?.text ?? "";
+
+    // Race: rephrase vs timeout
+    const rephrasePromise = fetch("/api/rephrase-question", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: questionText,
+        persona: this.deps.getPersona(),
+        burnIntensity: this.deps.getBurnIntensity(),
+        knownFacts: this._getThrowbackContext(),
+        previousLine: lastJoke,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d: { rephrased?: string }) => d.rephrased?.trim() || null)
+      .catch(() => null);
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+
+    Promise.race([rephrasePromise, timeoutPromise]).then((rephrased) => {
+      if (this.state !== "ask_question") return;
+      if (rephrased) {
+        this.deps.queueSpeak(rephrased, "emphasis", 0.6);
+        this.deps.logTiming(`brain: rephrased question — "${rephrased.slice(0, 60)}"`);
+      } else {
+        const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
+        this.deps.queueSpeak(`${bridge} ${questionText}`, "emphasis", 0.6);
+        this.deps.logTiming("brain: rephrase timed out — using original");
+      }
+    });
   }
 
   /** Generate a contextual question via LLM based on what we see + know. */
