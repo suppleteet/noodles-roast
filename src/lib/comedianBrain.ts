@@ -149,6 +149,7 @@ export class ComedianBrain {
   private preQueuedTextReady = false;
   private rephraseAbort: AbortController | null = null;
   private answerBuffer = "";
+  private fillerFiredForAnswer = false; // prevent double filler on late-transcription re-entry
   /** Incremented each time enterGenerating fires — stale stream callbacks check this to avoid double delivery. */
   private deliveryGeneration = 0;
   private prodCount = 0;
@@ -675,6 +676,7 @@ export class ComedianBrain {
   private enterWaitAnswer(): void {
     this._transition("wait_answer");
     this.deps.setMotion("listening", 0.5);
+    this.fillerFiredForAnswer = false;
 
     // If user already spoke during ask_question, start silence timer (not prod timer)
     if (this.answerBuffer.trim()) {
@@ -764,7 +766,8 @@ export class ComedianBrain {
     // These short sounds ("Mmm.", "Uh huh.") bridge the silence and set the vocal tone for the joke
     // via ElevenLabs previous_text continuity — no extra latency.
     let fillerAlreadySaid: string | undefined;
-    if (!COMEDIAN_CONFIG.skipFiller) {
+    if (!COMEDIAN_CONFIG.skipFiller && !this.fillerFiredForAnswer) {
+      this.fillerFiredForAnswer = true;
       const filler = ComedianBrain.GENERATING_FILLERS[Math.floor(Math.random() * ComedianBrain.GENERATING_FILLERS.length)];
       this.deps.queueSpeak(filler, "thinking", 0.6);
       this.deps.logTiming(`brain: filler — "${filler}"`);

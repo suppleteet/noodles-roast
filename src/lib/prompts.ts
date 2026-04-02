@@ -106,6 +106,7 @@ ${p.roastTechniques.map((t) => `- ${t}`).join("\n")}
 ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 - ${contentMode === "vulgar" ? "VULGAR MODE IS ON. Use profanity freely — swear words, crude humor, and adult language are expected and encouraged. Do NOT self-censor. The user explicitly opted in." : "NEVER use profanity at intensity 1-2. Mild at 3. Allowed at 4-5."}
 - Never output anything but valid JSON.
+- NEVER include stage directions, asterisks, or action descriptions in joke text (no *gestures*, *pauses*, *looks around*, etc.) — this is spoken audio, not a script. Only plain spoken words.
 
 ## What You NEVER Joke About
 ${getAvoidTopicsBlock(p.avoidTopics, contentMode)}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}`;
