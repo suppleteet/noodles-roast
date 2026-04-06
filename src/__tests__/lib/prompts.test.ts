@@ -5,7 +5,7 @@ describe("getJokePrompt", () => {
   describe("context-specific instructions", () => {
     it("contains greeting task heading for greeting context", () => {
       const prompt = getJokePrompt("greeting", "kvetch", 3, "clean");
-      expect(prompt).toContain("Task: Opening Greeting");
+      expect(prompt).toContain("Task: Quick Opening");
     });
 
     it("contains vision_opening task heading", () => {

@@ -80,7 +80,9 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
     contextLines.push(`KNOWN FACTS: ${body.knownFacts.join(", ")}`);
   if (body.ambientContext) {
     const ac = body.ambientContext;
-    contextLines.push(`AMBIENT: ${ac.city}, ${ac.timeOfDay} (${ac.localTime})${ac.weather ? `, ${ac.weather}` : ""}`);
+    // Use city only (no region/county). Time is vague ("on a Wednesday morning"), never exact.
+    const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    contextLines.push(`AMBIENT (use sparingly, only when funny): They're in ${ac.city} on a ${dayName} ${ac.timeOfDay}.${ac.weather ? ` Weather: ${ac.weather}.` : ""} NEVER say the exact time. Say things like "you're up this late" or "on a ${dayName} morning" or "in this weather".`);
   }
   if (body.maxJokes)
     contextLines.push(`Generate exactly ${body.maxJokes} joke(s).`);

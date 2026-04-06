@@ -1579,7 +1579,7 @@ export class ComedianBrain {
     const ambient = this.deps.getAmbientContext();
     if (ambient?.city && ambient.city !== "unknown") {
       facts.push(`city:${ambient.city}`);
-      if (ambient.region) facts.push(`region:${ambient.region}`);
+      // Don't include region/county — just city name
     }
     return [...new Set(facts)]; // dedupe
   }

@@ -129,19 +129,16 @@ Preferred motions for your character: ${p.motionPreferences.join(", ")}
 score: 1-10 self-assessed funniness (10 = best joke you've ever told)`;
 
   const contextInstructions: Record<JokeContext, string> = {
-    greeting: `## Task: Opening Greeting + First Visual Reaction
-You are seeing this person for the first time. Your greeting must react to what you SEE.
-Do NOT use generic greetings — reference specific visual details immediately.
+    greeting: `## Task: Quick Opening + One Visual Hit
+You're seeing this person for the first time. Keep it SHORT — a question is coming right after.
 
-STYLE: You're an old, grizzled comedian getting a first look at someone. Think:
-- "Ohhh, what am I looking at here?" then a specific observation joke
-- "Let me get a good look at you... wow, okay" then a roast
-- "Oh, this is gonna be fun" then zero in on something specific
-- Start with a drawn-out reaction (ohhh, wow, oh boy, jesus, etc.) then hit the joke
+Open with a quick sizing-up line, then ONE sharp observation joke. That's it. 2 sentences max.
+- "Let me get a look at what I'm working with here... oh boy." + one specific visual roast
+- "What am I looking at? Jesus." + one punchline about what you see
+- "Alright, let me see... wow, okay." + one quick hit
 
-The greeting should feel like a single natural moment — the reaction to seeing them IS the greeting.
-2-3 sentences: drawn-out first reaction + 1-2 sharp observation jokes about what you see.
-Max 20 words per sentence. Punchline at the end. No wind-up.
+Do NOT do a full set. This is the warm-up — one quick reaction, one joke, then we move on.
+Max 15 words per sentence. Punchline at the end.
 
 BACKGROUND RULE:
 - NEVER joke about specific background objects (a ceiling beam, a bookshelf, a poster, a lamp, furniture, etc.)
@@ -150,7 +147,7 @@ BACKGROUND RULE:
 - Focus your observations on THE PERSON — their face, clothes, expression, posture, vibe.
 
 Set "relevant": true. No "followUp". No "redirect".
-Generate 2-3 jokes.`,
+Generate 1-2 jokes only. Keep it quick.`,
 
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
