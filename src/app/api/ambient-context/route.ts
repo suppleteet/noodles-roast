@@ -55,7 +55,9 @@ export async function POST(req: NextRequest) {
     let region = "";
     if (geoResp?.ok) {
       const geo = await geoResp.json();
-      city = geo.city || geo.locality || geo.principalSubdivision || "unknown";
+      // Only use city-level fields — principalSubdivision is state/county (e.g. "North Pinal"),
+      // NOT a city. Falling through to it caused the model to say county names on air.
+      city = geo.city || geo.locality || "unknown";
       region = geo.principalSubdivision || geo.countryName || "";
     }
 

@@ -103,7 +103,8 @@ function buildUserParts(
     contextLines.push(`KNOWN FACTS: ${body.knownFacts.join(", ")}`);
   if (body.ambientContext) {
     const ac = body.ambientContext;
-    contextLines.push(`AMBIENT: ${ac.city}, ${ac.timeOfDay} (${ac.localTime})${ac.weather ? `, ${ac.weather}` : ""}`);
+    const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    contextLines.push(`AMBIENT (use sparingly): They're in ${ac.city} on a ${dayName} ${ac.timeOfDay}.${ac.weather ? ` Weather: ${ac.weather}.` : ""} NEVER say the exact time or location details.`);
   }
   if (body.maxJokes)
     contextLines.push(`Generate exactly ${body.maxJokes} joke(s).`);
