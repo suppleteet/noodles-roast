@@ -76,6 +76,7 @@ export function createSession(
     config: {
       systemInstruction: systemPrompt,
       thinkingConfig: { thinkingBudget: 0 },
+      maxOutputTokens: 200,
     },
   });
 

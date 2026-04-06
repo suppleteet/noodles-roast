@@ -138,6 +138,7 @@ export async function POST(req: NextRequest) {
         config: {
           systemInstruction: systemPrompt,
           thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: 200,
         },
         contents: [{ role: "user", parts: userParts }],
       });

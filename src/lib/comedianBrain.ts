@@ -18,6 +18,7 @@ import type { MotionState } from "@/lib/motionStates";
 import type { BrainState, MicMode } from "@/lib/comedianBrainConfig";
 import { STATE_CONFIG } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
+import { getRandomFallback } from "@/lib/fallbackRoasts";
 import { QUESTION_BANK, type ComedyQuestion } from "@/lib/questionBank";
 import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
@@ -403,8 +404,28 @@ export class ComedianBrain {
         this._startSpeculative();
       }
 
+      // Transcript-based early endpointing: if the buffer looks like a complete thought
+      // AND we have 3+ words, complete immediately instead of waiting for VAD silence timeout.
+      // Saves ~100-200ms on clean sentence endings.
+      if (finished && wordCount(this.answerBuffer) >= 3 && ComedianBrain._looksComplete(this.answerBuffer)) {
+        this.deps.logTiming(`brain: early endpoint — transcript looks complete "${this.answerBuffer.slice(-30)}"`);
+        this._clearTimers();
+        this._onAnswerComplete();
+        return;
+      }
+
       this._startAnswerSilenceTimer();
     }
+  }
+
+  /** Heuristic: does this transcript look like a complete thought? */
+  private static _looksComplete(text: string): boolean {
+    const trimmed = text.trim();
+    // Sentence-ending punctuation
+    if (/[.?!]\s*$/.test(trimmed)) return true;
+    // Common phrase terminals
+    if (/\b(I guess|you know|I dunno|that's it|yeah|nope|no|yes)\s*$/i.test(trimmed)) return true;
+    return false;
   }
 
   /** Called when vision analysis completes (even with empty observations) */
@@ -839,6 +860,16 @@ export class ComedianBrain {
       this.pipelinePreviousJokes = [];
     }
 
+    // Fallback timer: if joke generation takes >1200ms, queue a generic roast to fill the gap
+    let fallbackFired = false;
+    const fallbackTimer = setTimeout(() => {
+      if (this.deliveryGeneration !== gen || this.state !== "generating") return;
+      fallbackFired = true;
+      const fallback = getRandomFallback(this.deps.getPersona());
+      this.deps.queueSpeak(fallback, "thinking", 0.6);
+      this.deps.logTiming(`brain: fallback roast (>1200ms) — "${fallback.slice(0, 50)}"`);
+    }, 1200);
+
     this._generateJokeStream(
       {
         context: "answer_roast",
@@ -851,6 +882,7 @@ export class ComedianBrain {
       },
       // onJoke — fires immediately as each joke streams in
       (joke) => {
+        clearTimeout(fallbackTimer);
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         if (this.state === "generating") {
