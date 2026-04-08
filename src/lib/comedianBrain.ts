@@ -1081,7 +1081,8 @@ export class ComedianBrain {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         if (this.state === "generating") {
-          // First joke arrived — transition to delivering now
+          // First joke arrived — cancel any fallback speech that's already queued
+          if (fallbackFired) this.deps.cancelSpeech();
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }

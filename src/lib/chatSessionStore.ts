@@ -140,6 +140,12 @@ Max 20 words per sentence, punchline at the end. Each sentence self-contained.
 If FILLER_ALREADY_SAID is provided, do NOT open with a similar filler sound.
 If off-topic, set "relevant": false with a witty "redirect".
 Include "followUp" if the answer invites one (open-ended, never A/B format).
+
+PIPELINE RULE: If JOKES ALREADY DELIVERED THIS CYCLE is provided, those jokes have ALREADY played aloud.
+Do NOT re-introduce the answer, echo the user's words, or open as if hearing the answer for the first time.
+Do NOT start with "[answer]? [joke]" or "So your [answer]..." — that opener was already used.
+Each successive joke must feel like the NEXT beat in a tight comedy SET — escalate, pivot to a new angle, or riff off the previous joke. Build momentum, don't restart.
+
 Generate 1-2 jokes.`,
 
     vision_react: `TASK: React to a visual change on camera. Something just changed — react like you just noticed.
