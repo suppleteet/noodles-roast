@@ -1293,6 +1293,8 @@ export class ComedianBrain {
       }
       if (prefetch.meta?.followUp) this.pendingFollowUp = prefetch.meta.followUp;
       if (prefetch.meta?.tags?.length) this._addLedger("answer", answer, prefetch.meta.tags);
+      // Pre-queue next question TTS while this joke plays — eliminates dead air after delivery
+      this._preQueueNextQuestion();
       return;
     }
 
