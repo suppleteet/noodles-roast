@@ -46,9 +46,11 @@ export function getAvoidTopicsBlock(personaAvoidTopics?: string[], contentMode?:
   ];
   if (contentMode === "clean") {
     all.push(
-      "All profanity, swearing, and crude language — keep it completely PG",
-      "Sexual references, innuendo, or body humor",
+      "All profanity, swearing, and crude language — absolutely zero, not even mild words like damn, hell, crap, or ass. Keep it completely PG.",
+      "Sexual references, innuendo, body humor, or anything suggestive",
       "Drug or alcohol references",
+      "Insults that attack someone's worth as a person — roast their choices, appearance, or behavior, not their value. 'Your haircut is a disaster' is fine. 'You're worthless' is not.",
+      "Aggressive or hostile tone — be playful and teasing, not mean-spirited. Think friendly ribbing at a family dinner, not a bar fight.",
     );
   }
   return all.map((t) => `- ${t}`).join("\n");

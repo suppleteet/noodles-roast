@@ -49,7 +49,7 @@ describe("getJokePrompt", () => {
   describe("content mode", () => {
     it("clean mode includes profanity restriction", () => {
       const prompt = getJokePrompt("answer_roast", "kvetch", 3, "clean");
-      expect(prompt).toContain("NEVER use profanity");
+      expect(prompt).toContain("CLEAN MODE: ZERO profanity");
     });
 
     it("vulgar mode enables profanity", () => {
