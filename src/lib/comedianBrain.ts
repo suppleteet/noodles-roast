@@ -18,7 +18,7 @@ import type { MotionState } from "@/lib/motionStates";
 import type { BrainState, MicMode } from "@/lib/comedianBrainConfig";
 import { STATE_CONFIG } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
-import { getRandomFallback } from "@/lib/fallbackRoasts";
+
 import { QUESTION_BANK, DEFAULT_CONFIRM_TEMPLATES, REJECT_TEMPLATES, type ComedyQuestion } from "@/lib/questionBank";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
 import { diffObservations } from "@/lib/visionDiff";
@@ -1055,16 +1055,6 @@ export class ComedianBrain {
       this.pipelinePreviousJokes = [];
     }
 
-    // Fallback timer: if joke generation takes >1200ms, queue a generic roast to fill the gap
-    let fallbackFired = false;
-    const fallbackTimer = setTimeout(() => {
-      if (this.deliveryGeneration !== gen || this.state !== "generating") return;
-      fallbackFired = true;
-      const fallback = getRandomFallback(this.deps.getPersona());
-      this.deps.queueSpeak(fallback, "thinking", 0.6);
-      this.deps.logTiming(`brain: fallback roast (>1200ms) — "${fallback.slice(0, 50)}"`);
-    }, 1200);
-
     this._generateJokeStream(
       {
         context: "answer_roast",
@@ -1077,14 +1067,8 @@ export class ComedianBrain {
       },
       // onJoke — fires immediately as each joke streams in
       (joke) => {
-        clearTimeout(fallbackTimer);
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
-        // Cancel fallback speech if it fired before the real joke arrived
-        if (fallbackFired) {
-          this.deps.cancelSpeech();
-          fallbackFired = false; // only cancel once
-        }
         if (this.state === "generating") {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
