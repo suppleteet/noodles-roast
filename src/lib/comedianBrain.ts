@@ -684,7 +684,7 @@ export class ComedianBrain {
       // Re-ask same question (after redirect)
       this.preQueuedQuestion = null;
       this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-      this.deps.queueSpeak(this.currentQuestion.question, this.lastJokeMotion, this.lastJokeIntensity);
+      this.deps.queueSpeak(this._pickQuestionText(this.currentQuestion), this.lastJokeMotion, this.lastJokeIntensity);
     } else if (this.visionOnlyMode) {
       // Vision-only: no more questions, wait in check_vision for interesting changes
       this._transition("check_vision");
@@ -707,7 +707,7 @@ export class ComedianBrain {
       } else {
         // Rephrase didn't finish in time — fall back to original text immediately
         this.deps.logTiming("brain: rephrase not ready — using original question text");
-        this._queueQuestionWithBridge(question.question);
+        this._queueQuestionWithBridge(this._pickQuestionText(question));
       }
     } else {
       // Clear follow-up state — new topic
@@ -726,7 +726,7 @@ export class ComedianBrain {
         this.askedQuestionIds.add(question.id);
         this.currentQuestion = question;
         this.bankQuestionsInARow++;
-        this._queueQuestionWithBridge(this.currentQuestion.question);
+        this._queueQuestionWithBridge(this._pickQuestionText(this.currentQuestion));
       } else {
         // Generate a contextual question based on what we see + know
         this.bankQuestionsInARow = 0;
@@ -1355,6 +1355,14 @@ export class ComedianBrain {
     "So.", "Now.", "Let me ask you this.", "Okay okay.",
   ];
 
+  /** Pick the question text variant — uses vulgarQuestions when contentMode is "vulgar". */
+  private _pickQuestionText(q: ComedyQuestion): string {
+    if (this.deps.getContentMode() === "vulgar" && q.vulgarQuestions?.length) {
+      return q.vulgarQuestions[Math.floor(Math.random() * q.vulgarQuestions.length)];
+    }
+    return q.question;
+  }
+
   /** Queue question with LLM rephrase for natural variation.
    *  Races rephrase vs 1.5s timeout — falls back to original + bridge if slow. */
   private _queueQuestionWithBridge(questionText: string): void {
@@ -1461,8 +1469,9 @@ export class ComedianBrain {
 
     this.preQueuedQuestion = q;
     this.preQueuedTextReady = true;
-    this._queueQuestionWithBridge(q.question);
-    this.deps.logTiming(`brain: pre-queued question: "${q.question.slice(0, 40)}"`);
+    const text = this._pickQuestionText(q);
+    this._queueQuestionWithBridge(text);
+    this.deps.logTiming(`brain: pre-queued question: "${text.slice(0, 40)}"`);
   }
 
   private _cancelRephrase(): void {

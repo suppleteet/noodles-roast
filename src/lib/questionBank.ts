@@ -12,6 +12,8 @@
 export interface ComedyQuestion {
   id: string;
   question: string;
+  /** Vulgar mode variants — pick one randomly when contentMode is "vulgar". Question + insult format. */
+  vulgarQuestions?: string[];
   /** Hint passed to /api/generate-joke to guide joke style */
   jokeContext: string;
   /** Silence-filler lines spoken if user doesn't respond (2 used, then skip) */
@@ -43,6 +45,13 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "name",
     question: "Alright — what's your name?",
+    vulgarQuestions: [
+      "Alright, what's your name, you sad bastard?",
+      "Let's start with the basics. Name? And don't bullshit me.",
+      "What do they call you, besides a disappointment?",
+      "What's your goddamn name?",
+      "Who the hell are you? Name, please.",
+    ],
     jokeContext: "Riff on name puns, famous people with that name, what the name implies about their personality.",
     prodLines: [
       "I asked your name, not for a moment of silence.",
@@ -59,6 +68,13 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "job",
     question: "And what do you do for a living?",
+    vulgarQuestions: [
+      "What the hell do you do for a living?",
+      "What's the gig, smartass? How do you pay rent?",
+      "What do you do all day, besides this?",
+      "Tell me what you do for money. I need a laugh.",
+      "What's your job, you beautiful disaster?",
+    ],
     jokeContext: "Profession roast — job stereotypes, what the job reveals about their personality, unlikely career observations.",
     prodLines: [
       "You do something for money, right? Or is the vibe just... independently vibing?",
@@ -74,6 +90,13 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "single",
     question: "Are you single?",
+    vulgarQuestions: [
+      "Are you single? Be honest, I already know.",
+      "Anybody actually putting up with your shit, or are you single?",
+      "Single? Married? Or just emotionally unavailable?",
+      "You got a partner, or did they finally come to their senses?",
+      "Tell me about your love life, you tragic bastard.",
+    ],
     jokeContext: "Dating life, relationship status comedy — single = roast the solitude, taken = roast the partner's choices.",
     prodLines: [
       "I can already tell from the silence. That's an answer.",
@@ -83,6 +106,13 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "age",
     question: "How old are you?",
+    vulgarQuestions: [
+      "How old are you, exactly? Don't lie, I can tell.",
+      "What's the damage? How many years you got on you?",
+      "How old? And don't shave a decade off, I'll know.",
+      "Age, please. I want to know what kind of disaster I'm working with.",
+      "How old are you, you weathered son of a bitch?",
+    ],
     jokeContext: "Age roast — too young to know better, too old to be doing this, whatever the number implies about their life choices.",
     prodLines: [
       "The number. Just the number.",
