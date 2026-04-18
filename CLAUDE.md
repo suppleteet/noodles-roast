@@ -91,7 +91,7 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, comedian-session, generate-joke, generate-speak, rephrase-question, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, save-feedback, serve-video, open-videos-folder, ambient-context)
+src/app/api/           Next.js API routes (analyze, comedian-session, generate-joke, generate-speak, list-feedback, rephrase-question, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, save-feedback, serve-video, open-videos-folder, ambient-context)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
