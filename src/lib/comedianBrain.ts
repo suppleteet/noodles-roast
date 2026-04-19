@@ -52,12 +52,18 @@ export interface ComedianBrainDeps {
   getObservations: () => string[];
   getVisionSetting: () => string | null;
   getAmbientContext: () => import("@/store/useSessionStore").AmbientContext | null;
+  /** LLM model ID for joke generation (e.g. "gemini-2.5-flash", "gpt-4o"). */
+  getRoastModel: () => string;
+  /** Current mic input RMS (0-1) — used for background noise gating. */
+  getInputAmplitude: () => number;
   /** Multi-turn chat session ID — if set, API routes reuse the session instead of sending the full persona. */
   getSessionId: () => string | null;
   setBrainState: (state: BrainState | null) => void;
   setCurrentQuestion: (q: string | null) => void;
   setUserAnswer: (ans: string) => void;
   logTiming: (entry: string) => void;
+  /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
+  setError?: (error: string) => void;
   /** Called when session should reveal the puppet (fade in). */
   revealSession?: () => void;
   /** Fire-and-forget: save an in-session critique to feedback storage. */
@@ -153,6 +159,7 @@ export class ComedianBrain {
   private preQueuedTextReady = false;
   private rephraseAbort: AbortController | null = null;
   private answerBuffer = "";
+  private earlyListenActivated = false; // true once question TTS is nearly done — gate for early answer capture
   private fillerFiredForAnswer = false; // prevent double filler on late-transcription re-entry
   /** Incremented each time enterGenerating fires — stale stream callbacks check this to avoid double delivery. */
   private deliveryGeneration = 0;
@@ -278,6 +285,7 @@ export class ComedianBrain {
   activateEarlyListen(): void {
     if (this.state !== "ask_question" || this.micMode === "listening") return;
     this.micMode = "listening";
+    this.earlyListenActivated = true;
     this.deps.logTiming("brain: early listen activated");
   }
 
@@ -412,10 +420,25 @@ export class ComedianBrain {
       return;
     }
 
-    // User speaks during question TTS — buffer it so it's not lost when we enter wait_answer
+    // Background noise gate: log when amplitude is low but DON'T filter.
+    // The old gate silently dropped valid speech because Gemini's transcription
+    // arrives after the user stops speaking — by then amplitude has dropped.
+    // Gemini's own STT confidence is a better noise filter.
+    if (COMEDIAN_CONFIG.inputAmplitudeMin > 0) {
+      const amp = this.deps.getInputAmplitude();
+      if (amp > 0 && amp < COMEDIAN_CONFIG.inputAmplitudeMin) {
+        this.deps.logTiming(`brain: low amplitude ${amp.toFixed(3)} (threshold ${COMEDIAN_CONFIG.inputAmplitudeMin}) — accepting anyway`);
+      }
+    }
+
+    // User speaks during question TTS — buffer it so it's not lost when we enter wait_answer.
+    // Only capture after early listen activates (question nearly done) to avoid picking up
+    // background noise (e.g. kids talking) while the question is still playing.
     if (this.state === "ask_question") {
-      this._accumulateAnswer(text, finished);
-      this.deps.logTiming(`brain: early answer during ask_question — "${text}"`);
+      if (this.earlyListenActivated) {
+        this._accumulateAnswer(text, finished);
+        this.deps.logTiming(`brain: early answer during ask_question — "${text}"`);
+      }
       return;
     }
 
@@ -656,6 +679,7 @@ export class ComedianBrain {
   private enterAskQuestion(sameQuestion = false): void {
     this._transition("ask_question");
     this.answerBuffer = "";
+    this.earlyListenActivated = false;
     this.prodCount = 0;
     this.confirmAttempts = 0;
     this.deps.setUserAnswer("");
@@ -674,8 +698,8 @@ export class ComedianBrain {
         question: followUpText,
         jokeContext: "Answer-driven follow-up question.",
         prodLines: [
-          "Come on, I set that up perfectly.",
           "I'm waiting. The audience is waiting.",
+          "Hello? Anyone home?",
         ],
       };
       this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
@@ -704,6 +728,12 @@ export class ComedianBrain {
       if (wasReady) {
         // Rephrase finished and TTS is already in the chain — gapless
         this.deps.logTiming("brain: using pre-queued question (zero wait)");
+        // If queue already drained (question played during prior states), advance now
+        if (this.deps.isQueueEmpty()) {
+          this.deps.logTiming("brain: pre-queued question already drained — advancing to wait_answer");
+          this.enterWaitAnswer();
+          return;
+        }
       } else {
         // Rephrase didn't finish in time — fall back to original text immediately
         this.deps.logTiming("brain: rephrase not ready — using original question text");
@@ -804,6 +834,21 @@ export class ComedianBrain {
   private enterProdding(): void {
     const q = this.currentQuestion;
     if (!q) return;
+    if (COMEDIAN_CONFIG.skipScriptedLines) {
+      // No canned prod — just count and eventually skip the question
+      this._transition("prodding");
+      this.prodCount++;
+      if (this.prodCount >= COMEDIAN_CONFIG.maxProds) {
+        this.consecutiveSilentQuestions++;
+        if (this.consecutiveSilentQuestions >= COMEDIAN_CONFIG.silentQuestionsBeforeVisionMode) {
+          this.visionOnlyMode = true;
+        }
+        this.enterCheckVision();
+      } else {
+        this._startProdTimer();
+      }
+      return;
+    }
     const prodLine = q.prodLines[this.prodCount % q.prodLines.length];
     this._transition("prodding");
     this.deps.queueSpeak(prodLine, "conspiratorial", 0.5);
@@ -817,7 +862,8 @@ export class ComedianBrain {
     }
 
     // Confidence gate — reject garbage, confirm dubious, pass clean answers through
-    if (COMEDIAN_CONFIG.confirmationEnabled) {
+    // Skip when scripted lines are disabled (no canned confirm/reject templates)
+    if (COMEDIAN_CONFIG.confirmationEnabled && !COMEDIAN_CONFIG.skipScriptedLines) {
       const qId = this.currentQuestion?.id ?? "";
       const confidence = transcriptConfidence(answer, qId);
       const threshold = this.currentQuestion?.confirmThreshold ?? CONFIDENCE_THRESHOLDS.defaultConfirm;
@@ -1282,9 +1328,11 @@ export class ComedianBrain {
         this._preQueueNextQuestion();
         return;
       } else {
-        // Jokes were already eagerly queued from the prefetch callback — TTS is in the chain.
-        // Just advance; drain detection will handle the rest.
+        // Jokes were already eagerly queued from the prefetch callback — TTS was in the chain.
+        // Since we're inside _onDeliveringDrained (called from drain poll), the eagerly-queued
+        // joke has already played — both jokes drained as one batch. Advance immediately.
         this.deps.logTiming("brain: pipeline joke already eagerly queued — advancing");
+        this._onDeliveringDrained();
         return;
       }
     }
@@ -1379,6 +1427,7 @@ export class ComedianBrain {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         question: questionText,
+        model: this.deps.getRoastModel(),
         persona: this.deps.getPersona(),
         burnIntensity: this.deps.getBurnIntensity(),
         knownFacts: this._getThrowbackContext(),
@@ -1392,10 +1441,16 @@ export class ComedianBrain {
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
 
     Promise.race([rephrasePromise, timeoutPromise]).then((rephrased) => {
-      if (this.state !== "ask_question") return;
+      // Guard: only queue if we're in ask_question (normal path) or the pre-queue is
+      // still pending (pipeline path — brain may be in delivering/generating/check_vision).
+      // If preQueuedQuestion was cleared (consumed or cancelled), this callback is stale.
+      if (this.state !== "ask_question" && !this.preQueuedQuestion) return;
       if (rephrased) {
         this.deps.queueSpeak(rephrased, "emphasis", 0.6);
         this.deps.logTiming(`brain: rephrased question — "${rephrased.slice(0, 60)}"`);
+      } else if (COMEDIAN_CONFIG.skipScriptedLines) {
+        this.deps.queueSpeak(questionText, "emphasis", 0.6);
+        this.deps.logTiming("brain: rephrase timed out — using original (no bridge)");
       } else {
         const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
         this.deps.queueSpeak(`${bridge} ${questionText}`, "emphasis", 0.6);
@@ -1416,6 +1471,7 @@ export class ComedianBrain {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        model: this.deps.getRoastModel(),
         persona: this.deps.getPersona(),
         observations,
         setting: this.deps.getVisionSetting(),
@@ -1894,6 +1950,7 @@ export class ComedianBrain {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...params,
+        model: this.deps.getRoastModel(),
         sessionId: this.deps.getSessionId(),
         persona: this.deps.getPersona(),
         burnIntensity: this.deps.getBurnIntensity(),
@@ -1902,6 +1959,12 @@ export class ComedianBrain {
     })
       .then(async (resp) => {
         if (!resp.ok || !resp.body) {
+          if (resp.status === 402) {
+            const body = await resp.json().catch(() => ({ provider: "unknown" }));
+            const provider = (body as { provider?: string }).provider ?? "unknown";
+            this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
+            this.deps.logTiming(`brain: QUOTA ERROR from ${provider}`);
+          }
           onError();
           return;
         }
@@ -1930,6 +1993,12 @@ export class ComedianBrain {
               };
               if (event.type === "joke") {
                 onJoke(event as unknown as JokeItem);
+              } else if (event.type === "error" && event.error === "quota_exceeded") {
+                const provider = (event.provider as string) ?? "unknown";
+                this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
+                this.deps.logTiming(`brain: QUOTA ERROR from ${provider} (stream)`);
+                onError();
+                return;
               } else if (event.type === "meta") {
                 onMeta(
                   event as unknown as {
@@ -1978,6 +2047,7 @@ export class ComedianBrain {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...params,
+          model: this.deps.getRoastModel(),
           sessionId: this.deps.getSessionId(),
           persona: this.deps.getPersona(),
           burnIntensity: this.deps.getBurnIntensity(),
@@ -1987,7 +2057,15 @@ export class ComedianBrain {
         }),
         signal,
       });
-      if (!resp.ok) return null;
+      if (!resp.ok) {
+        if (resp.status === 402) {
+          const body = await resp.json().catch(() => ({ provider: "unknown" }));
+          const provider = (body as { provider?: string }).provider ?? "unknown";
+          this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
+          this.deps.logTiming(`brain: QUOTA ERROR from ${provider}`);
+        }
+        return null;
+      }
       return (await resp.json()) as JokeResponse;
     } catch (e) {
       if ((e as Error).name !== "AbortError") {

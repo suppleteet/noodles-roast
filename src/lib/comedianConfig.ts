@@ -42,10 +42,14 @@ const defaults = {
   confirmSilenceMs: 200,        // silence timer for yes/no responses (shorter — expect brief answers)
   confirmTimeoutMs: 3000,       // silence after confirm prompt = implicit yes
 
+  // Background noise gating
+  inputAmplitudeMin: 0.02,     // minimum mic RMS (0-1) to accept speech — filters distant voices (kids, TV)
+
   // Latency experiments (temporary)
   skipGreeting: false,         // skip greeting → jump straight to ask_question
   skipPreGeneration: false,   // speculative pre-generation fires after 1st word in wait_answer
   skipFiller: false,          // non-word filler ("Mmm.", "Uh huh.") bridges silence before joke
+  skipScriptedLines: false,   // skip ALL canned speech (bridges, prods, confirm templates, reject templates)
   singleJokeMode: true,      // generate 1 joke at a time, pipeline next during delivery
 };
 

@@ -1,10 +1,13 @@
 /**
- * Server-side in-memory store for Gemini multi-turn chat sessions.
+ * Server-side in-memory store for multi-turn chat sessions.
  *
- * Each session holds a GoogleGenAI Chat object created with the full comedian
- * persona as systemInstruction. Subsequent joke requests send only the small
- * per-turn context (question, answer, observations) — the persona is already
- * baked into the chat.
+ * Supports all LLM providers:
+ *   - Gemini: native Chat object (SDK manages history internally)
+ *   - OpenAI / Anthropic: explicit message history replayed each request
+ *
+ * Each session holds the full comedian persona as the system prompt.
+ * Subsequent joke requests send only the small per-turn context — the persona
+ * is already baked into the session.
  *
  * Sessions auto-expire after TTL_MS. If the server restarts, all sessions are
  * lost — callers should fall back to stateless generation transparently.
@@ -12,16 +15,27 @@
 
 import { GoogleGenAI, type Chat } from "@google/genai";
 import { ROAST_MODEL } from "@/lib/constants";
-import { getJokePrompt } from "@/lib/prompts";
+import { getBaseJokePrompt } from "@/lib/prompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
+import { generateText, generateTextStream, type UserPart } from "@/lib/llmClient";
 
 const TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // check every minute
 
+interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
 interface SessionEntry {
-  chat: Chat;
+  model: string;
+  systemPrompt: string;
+  /** Gemini only — native Chat object that manages its own history. */
+  geminiChat?: Chat;
+  /** Non-Gemini — explicit message history for replay. */
+  history: HistoryEntry[];
   createdAt: number;
   lastUsedAt: number;
   persona: PersonaId;
@@ -55,35 +69,46 @@ function generateId(): string {
   return `cs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isGemini(model: string): boolean {
+  return !model.startsWith("gpt-") && !model.startsWith("claude-") && !model.startsWith("o1") && !model.startsWith("o3");
+}
+
 /**
  * Create a new chat session with the comedian persona baked in.
- * The context param determines the initial system prompt flavor.
  */
 export function createSession(
   apiKey: string,
   persona: PersonaId,
   burnIntensity: BurnIntensity,
   contentMode: "clean" | "vulgar",
+  model?: string,
 ): string {
-  const ai = new GoogleGenAI({ apiKey });
+  const resolvedModel = model ?? ROAST_MODEL;
+  // Base persona only — NO context-specific task instructions.
+  // Per-turn context instructions come via getContextInstructions() in each user message.
+  const systemPrompt = getBaseJokePrompt(persona, burnIntensity, contentMode);
 
-  // Use a generic context for the system instruction — the per-turn context
-  // instructions will be prepended to each user message instead.
-  const systemPrompt = getJokePrompt("answer_roast", persona, burnIntensity, contentMode);
+  let geminiChat: Chat | undefined;
 
-  const chat = ai.chats.create({
-    model: ROAST_MODEL,
-    config: {
-      systemInstruction: systemPrompt,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 200,
-    },
-  });
+  if (isGemini(resolvedModel)) {
+    const ai = new GoogleGenAI({ apiKey });
+    geminiChat = ai.chats.create({
+      model: resolvedModel,
+      config: {
+        systemInstruction: systemPrompt,
+        thinkingConfig: { thinkingBudget: 0 },
+        maxOutputTokens: 200,
+      },
+    });
+  }
 
   const id = generateId();
   const now = Date.now();
   sessions.set(id, {
-    chat,
+    model: resolvedModel,
+    systemPrompt,
+    geminiChat,
+    history: [],
     createdAt: now,
     lastUsedAt: now,
     persona,
@@ -110,6 +135,110 @@ export function getSession(id: string): SessionEntry | null {
 
   entry.lastUsedAt = now;
   return entry;
+}
+
+/**
+ * Send a message in a multi-turn session. Returns the model's response text.
+ *
+ * - Gemini: uses native Chat.sendMessage() (history managed internally)
+ * - Others: replays history + new message via generateText(), then appends to history
+ */
+export async function sendMessage(
+  sessionId: string,
+  userParts: UserPart[],
+  maxOutputTokens?: number,
+): Promise<string | null> {
+  const session = getSession(sessionId);
+  if (!session) return null;
+
+  // Extract text from userParts for history storage
+  const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
+
+  if (session.geminiChat) {
+    const result = await session.geminiChat.sendMessage({ message: userParts });
+    const text = result.text ?? "";
+    // Gemini manages its own history, but we still track for debugging
+    session.history.push({ role: "user", content: userText });
+    session.history.push({ role: "assistant", content: text });
+    return text;
+  }
+
+  // Non-Gemini: build full message list with history
+  const historyText = session.history
+    .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
+    .join("\n\n");
+
+  const contextParts: UserPart[] = [];
+  if (historyText) {
+    contextParts.push({ text: `CONVERSATION HISTORY:\n${historyText}\n\n---\nNEW REQUEST:\n` });
+  }
+  contextParts.push(...userParts);
+
+  const text = await generateText({
+    model: session.model,
+    systemPrompt: session.systemPrompt,
+    userParts: contextParts,
+    maxOutputTokens,
+  });
+
+  session.history.push({ role: "user", content: userText });
+  session.history.push({ role: "assistant", content: text });
+  return text;
+}
+
+/**
+ * Streaming version of sendMessage. Returns an async iterable of text chunks.
+ *
+ * - Gemini: uses native Chat.sendMessageStream()
+ * - Others: replays history via generateTextStream(), accumulates for history
+ */
+export async function* sendMessageStream(
+  sessionId: string,
+  userParts: UserPart[],
+): AsyncGenerator<string> {
+  const session = getSession(sessionId);
+  if (!session) return;
+
+  const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
+
+  if (session.geminiChat) {
+    const stream = await session.geminiChat.sendMessageStream({ message: userParts });
+    let accumulated = "";
+    for await (const chunk of stream) {
+      const text = chunk.text ?? "";
+      if (text) {
+        accumulated += text;
+        yield text;
+      }
+    }
+    session.history.push({ role: "user", content: userText });
+    session.history.push({ role: "assistant", content: accumulated });
+    return;
+  }
+
+  // Non-Gemini: replay history
+  const historyText = session.history
+    .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
+    .join("\n\n");
+
+  const contextParts: UserPart[] = [];
+  if (historyText) {
+    contextParts.push({ text: `CONVERSATION HISTORY:\n${historyText}\n\n---\nNEW REQUEST:\n` });
+  }
+  contextParts.push(...userParts);
+
+  let accumulated = "";
+  for await (const chunk of generateTextStream({
+    model: session.model,
+    systemPrompt: session.systemPrompt,
+    userParts: contextParts,
+  })) {
+    accumulated += chunk;
+    yield chunk;
+  }
+
+  session.history.push({ role: "user", content: userText });
+  session.history.push({ role: "assistant", content: accumulated });
 }
 
 /**
