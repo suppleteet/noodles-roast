@@ -3,6 +3,7 @@ import { writeFile, mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { VISION_MODEL } from "@/lib/constants";
+import { recordGeminiUsage } from "@/lib/usageTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,13 @@ export async function POST(req: NextRequest) {
         config: { maxOutputTokens: 2000 },
       });
       transcript = (response.text ?? "").trim();
+      recordGeminiUsage({
+        route: "voice-note-transcribe",
+        model: VISION_MODEL,
+        text: transcript,
+        userText: "Transcribe this audio exactly as spoken. Return ONLY the transcription text, nothing else.",
+        usageMetadata: response.usageMetadata,
+      });
     } catch (e) {
       console.error("[save-voice-note] transcription failed:", e);
       transcript = "[transcription failed]";

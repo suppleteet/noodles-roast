@@ -115,6 +115,33 @@ export function recordLlmUsage(input: {
   return entry;
 }
 
+export function recordGeminiUsage(input: {
+  route: string;
+  model: string;
+  text: string;
+  systemPrompt?: string;
+  userText?: string;
+  imageCount?: number;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+}): LlmUsageEntry {
+  const estimatedInput =
+    estimateTokenCount(input.systemPrompt ?? "") +
+    estimateTokenCount(input.userText ?? "") +
+    (input.imageCount ?? 0) * 260;
+  return recordLlmUsage({
+    route: input.route,
+    provider: "gemini",
+    model: input.model,
+    inputTokens: input.usageMetadata?.promptTokenCount ?? estimatedInput,
+    outputTokens: input.usageMetadata?.candidatesTokenCount ?? estimateTokenCount(input.text),
+    exact: Boolean(input.usageMetadata?.totalTokenCount),
+  });
+}
+
 export function recordTtsUsage(input: {
   route: string;
   model?: string;

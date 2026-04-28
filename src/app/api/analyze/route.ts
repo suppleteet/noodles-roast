@@ -6,6 +6,7 @@ import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
 import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
+import { recordGeminiUsage } from "@/lib/usageTracker";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 const ANALYZE_RETRY_DELAYS_MS = [250, 700];
@@ -66,6 +67,14 @@ Keep it compact. Return ONLY the JSON object.` },
         config: { maxOutputTokens: 500 },
       });
       const text = response.text ?? "{}";
+      recordGeminiUsage({
+        route: "analyze-vision",
+        model: VISION_MODEL,
+        text,
+        userText: "vision observations",
+        imageCount: 1,
+        usageMetadata: response.usageMetadata,
+      });
       const parsed = extractJson<{ person?: string[]; setting?: string | null }>(text, /\{[\s\S]*\}/, {});
       const observations = Array.isArray(parsed.person) ? parsed.person.filter((s) => typeof s === "string") : [];
       const setting = typeof parsed.setting === "string" ? parsed.setting : null;
@@ -95,6 +104,15 @@ Keep it compact. Return ONLY the JSON object.` },
     });
 
     const text = response.text ?? "{}";
+    recordGeminiUsage({
+      route: `analyze-${mode}`,
+      model: VISION_MODEL,
+      text,
+      systemPrompt,
+      userText: mode === "greeting" ? "Greet and observe this person!" : "Roast this person based on what you see!",
+      imageCount: 1,
+      usageMetadata: response.usageMetadata,
+    });
     const parsed = extractJson<{ observations?: string[]; sentences?: RoastSentenceRaw[] }>(
       text,
       /\{[\s\S]*\}/,

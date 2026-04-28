@@ -82,6 +82,7 @@ function MainApp() {
   const [debugMode, setDebugMode] = useState(IS_DEV);
   const [mockMode, setMockMode] = useState(false);
   const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
+  const lastNonZeroUsageRef = useRef<DebugUsageSnapshot | null>(null);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
@@ -385,7 +386,9 @@ function MainApp() {
       const resp = await fetch("/api/debug-usage", { cache: "no-store" }).catch(() => null);
       if (!resp?.ok) return;
       const data = (await resp.json()) as DebugUsageSnapshot;
-      if (!cancelled) setLlmUsage(data);
+      const hasUsage = data.totalEstimatedCostUsd > 0 || data.llm.calls > 0 || data.tts.calls > 0;
+      if (hasUsage) lastNonZeroUsageRef.current = data;
+      if (!cancelled) setLlmUsage(hasUsage ? data : lastNonZeroUsageRef.current ?? data);
     }
 
     void refreshUsage();
@@ -572,23 +575,16 @@ function MainApp() {
           </div>
           {llmUsage && (
             <div className="bg-black/80 border border-emerald-400/40 rounded p-2 font-mono text-[10px] leading-tight pointer-events-auto">
-              <div>
-                <span className="text-emerald-400">LLM </span>
-                <span className="text-white/70">{llmUsage.llm.calls} calls</span>
-                <span className="text-white/30"> Â· </span>
-                <span className="text-emerald-200">{formatDebugCost(llmUsage.llm.estimatedCostUsd)} est</span>
+              <div className="text-[11px]">
+                <span className="text-emerald-400">COST </span>
+                <span className="font-bold text-emerald-100">{formatDebugCost(llmUsage.totalEstimatedCostUsd)}</span>
+                <span className="text-white/35"> est</span>
               </div>
               <div className="text-white/35">
-                {formatCompactNumber(llmUsage.llm.inputTokens)} in / {formatCompactNumber(llmUsage.llm.outputTokens)} out
+                {llmUsage.llm.calls + llmUsage.tts.calls} calls · {formatCompactNumber(llmUsage.llm.totalTokens)} tok · {formatCompactNumber(llmUsage.tts.characters)} chars
               </div>
-              <div className="mt-1">
-                <span className="text-sky-300">TTS </span>
-                <span className="text-white/70">{llmUsage.tts.calls} calls</span>
-                <span className="text-white/30"> Â· </span>
-                <span className="text-sky-100">{formatDebugCost(llmUsage.tts.estimatedCostUsd)} est</span>
-              </div>
-              <div className="text-white/35">
-                {formatCompactNumber(llmUsage.tts.characters)} chars · total {formatDebugCost(llmUsage.totalEstimatedCostUsd)}
+              <div className="text-white/25">
+                LLM {formatDebugCost(llmUsage.llm.estimatedCostUsd)} · TTS {formatDebugCost(llmUsage.tts.estimatedCostUsd)}
               </div>
             </div>
           )}

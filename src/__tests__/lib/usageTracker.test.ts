@@ -4,6 +4,7 @@ import {
   estimateTtsCostUsd,
   getLlmUsageSnapshot,
   getUsageSnapshot,
+  recordGeminiUsage,
   recordLlmUsage,
   recordTtsUsage,
   resetLlmUsageForTests,
@@ -47,5 +48,24 @@ describe("usageTracker", () => {
     expect(snapshot.tts.characters).toBe(500);
     expect(snapshot.tts.estimatedCostUsd).toBeCloseTo(0.15);
     expect(snapshot.totalEstimatedCostUsd).toBeCloseTo(0.15);
+  });
+
+  it("records direct Gemini vision usage", () => {
+    recordGeminiUsage({
+      route: "analyze-vision",
+      model: "gemini-2.5-flash",
+      text: "{}",
+      userText: "look at this",
+      imageCount: 1,
+      usageMetadata: {
+        promptTokenCount: 300,
+        candidatesTokenCount: 20,
+        totalTokenCount: 320,
+      },
+    });
+    const snapshot = getUsageSnapshot();
+    expect(snapshot.llm.calls).toBe(1);
+    expect(snapshot.llm.inputTokens).toBe(300);
+    expect(snapshot.llm.outputTokens).toBe(20);
   });
 });

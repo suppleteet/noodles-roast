@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { VISION_SYSTEM_PROMPT } from "@/lib/prompts";
 import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
+import { recordGeminiUsage } from "@/lib/usageTracker";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -31,6 +32,15 @@ export async function POST(req: NextRequest) {
     });
 
     const text = response.text ?? "{}";
+    recordGeminiUsage({
+      route: "vision",
+      model: VISION_MODEL,
+      text,
+      systemPrompt: VISION_SYSTEM_PROMPT,
+      userText: "Describe what you see in this webcam image.",
+      imageCount: 1,
+      usageMetadata: response.usageMetadata,
+    });
     const sceneJson = extractJson<object>(text, /\{[\s\S]*\}/, { overall_vibe: "unclear" });
 
     return NextResponse.json({ scene: sceneJson });
