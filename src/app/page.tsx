@@ -22,6 +22,26 @@ import type { JokeResponse } from "@/app/api/generate-joke/route";
 import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
 
+interface DebugUsageSnapshot {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+function formatDebugCost(value: number): string {
+  if (value <= 0) return "$0.0000";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
 /**
  * Top-level router — decides between edit mode and the main app.
  * Must be a separate component from MainApp so hooks are always called
@@ -53,6 +73,7 @@ function MainApp() {
   const IS_DEV = process.env.NODE_ENV !== "production";
   const [debugMode, setDebugMode] = useState(IS_DEV);
   const [mockMode, setMockMode] = useState(false);
+  const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
@@ -348,6 +369,25 @@ function MainApp() {
     return () => clearInterval(id);
   }, [lastVisionCallTs]);
 
+  useEffect(() => {
+    if (!IS_DEV || !debugMode) return;
+    let cancelled = false;
+
+    async function refreshUsage() {
+      const resp = await fetch("/api/debug-usage", { cache: "no-store" }).catch(() => null);
+      if (!resp?.ok) return;
+      const data = (await resp.json()) as DebugUsageSnapshot;
+      if (!cancelled) setLlmUsage(data);
+    }
+
+    void refreshUsage();
+    const id = window.setInterval(refreshUsage, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [IS_DEV, debugMode]);
+
   const showPuppet =
     phase === "roasting" || phase === "stopped" || phase === "requesting-permissions";
 
@@ -522,6 +562,19 @@ function MainApp() {
               <span className="text-white/30">{phase === "roasting" ? "waiting…" : "—"}</span>
             )}
           </div>
+          {llmUsage && (
+            <div className="bg-black/80 border border-emerald-400/40 rounded p-2 font-mono text-[10px] leading-tight pointer-events-auto">
+              <div>
+                <span className="text-emerald-400">LLM </span>
+                <span className="text-white/70">{llmUsage.calls} calls</span>
+                <span className="text-white/30"> Â· </span>
+                <span className="text-emerald-200">{formatDebugCost(llmUsage.estimatedCostUsd)} est</span>
+              </div>
+              <div className="text-white/35">
+                {formatCompactNumber(llmUsage.inputTokens)} in / {formatCompactNumber(llmUsage.outputTokens)} out
+              </div>
+            </div>
+          )}
           {timingLog.length > 0 && (
             <div className="max-h-52 overflow-y-auto bg-black/80 border border-yellow-400/40 rounded p-2 font-mono text-[10px] text-yellow-300 leading-tight pointer-events-auto">
               {timingLog.map((line, i) => (

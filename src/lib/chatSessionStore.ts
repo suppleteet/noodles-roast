@@ -20,6 +20,11 @@ import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
 import { generateText, generateTextStream, type UserPart } from "@/lib/llmClient";
+import {
+  estimateTokenCount,
+  estimateUserPartsTokens,
+  recordLlmUsage,
+} from "@/lib/usageTracker";
 
 const TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // check every minute
@@ -157,6 +162,15 @@ export async function sendMessage(
   if (session.geminiChat) {
     const result = await session.geminiChat.sendMessage({ message: userParts });
     const text = result.text ?? "";
+    const usage = result.usageMetadata;
+    recordLlmUsage({
+      route: "chatSession",
+      provider: "gemini",
+      model: session.model,
+      inputTokens: usage?.promptTokenCount ?? estimateUserPartsTokens(userParts),
+      outputTokens: usage?.candidatesTokenCount ?? estimateTokenCount(text),
+      exact: Boolean(usage?.totalTokenCount),
+    });
     // Gemini manages its own history, but we still track for debugging
     session.history.push({ role: "user", content: userText });
     session.history.push({ role: "assistant", content: text });
@@ -205,13 +219,29 @@ export async function* sendMessageStream(
   if (session.geminiChat) {
     const stream = await session.geminiChat.sendMessageStream({ message: userParts });
     let accumulated = "";
+    let promptTokenCount: number | undefined;
+    let candidatesTokenCount: number | undefined;
+    let totalTokenCount: number | undefined;
     for await (const chunk of stream) {
+      if (chunk.usageMetadata) {
+        promptTokenCount = chunk.usageMetadata.promptTokenCount;
+        candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;
+        totalTokenCount = chunk.usageMetadata.totalTokenCount;
+      }
       const text = chunk.text ?? "";
       if (text) {
         accumulated += text;
         yield text;
       }
     }
+    recordLlmUsage({
+      route: "chatSessionStream",
+      provider: "gemini",
+      model: session.model,
+      inputTokens: promptTokenCount ?? estimateUserPartsTokens(userParts),
+      outputTokens: candidatesTokenCount ?? estimateTokenCount(accumulated),
+      exact: Boolean(totalTokenCount),
+    });
     session.history.push({ role: "user", content: userText });
     session.history.push({ role: "assistant", content: accumulated });
     return;

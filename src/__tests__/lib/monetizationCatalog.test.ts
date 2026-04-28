@@ -18,6 +18,6 @@ describe("monetizationCatalog", () => {
   });
 
   it("formats USD prices", () => {
-    expect(formatUsd(499)).toBe("$4.99");
+    expect(formatUsd(500)).toBe("$5.00");
   });
 });

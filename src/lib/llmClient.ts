@@ -10,6 +10,11 @@
 import { GoogleGenAI } from "@google/genai";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import {
+  estimateTokenCount,
+  estimateUserPartsTokens,
+  recordLlmUsage,
+} from "@/lib/usageTracker";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -96,6 +101,10 @@ function getProvider(model: string): Provider {
   return "gemini";
 }
 
+function estimatedInputTokens(req: LlmRequest): number {
+  return estimateTokenCount(req.systemPrompt) + estimateUserPartsTokens(req.userParts);
+}
+
 // ─── API key helpers ────────────────────────────────────────────────────────────
 
 function getGeminiKey(): string {
@@ -164,7 +173,17 @@ export async function generateText(req: LlmRequest): Promise<string> {
             },
             contents: [{ role: "user", parts: req.userParts }],
           });
-          return result.text ?? "";
+          const text = result.text ?? "";
+          const usage = result.usageMetadata;
+          recordLlmUsage({
+            route: "generateText",
+            provider,
+            model: req.model,
+            inputTokens: usage?.promptTokenCount ?? estimatedInputTokens(req),
+            outputTokens: usage?.candidatesTokenCount ?? estimateTokenCount(text),
+            exact: Boolean(usage?.totalTokenCount),
+          });
+          return text;
         }
 
         case "openai": {
@@ -179,7 +198,16 @@ export async function generateText(req: LlmRequest): Promise<string> {
               { role: "user", content: toOpenAIParts(req.userParts) },
             ],
           });
-          return resp.choices[0]?.message?.content ?? "";
+          const text = resp.choices[0]?.message?.content ?? "";
+          recordLlmUsage({
+            route: "generateText",
+            provider,
+            model: req.model,
+            inputTokens: resp.usage?.prompt_tokens ?? estimatedInputTokens(req),
+            outputTokens: resp.usage?.completion_tokens ?? estimateTokenCount(text),
+            exact: Boolean(resp.usage),
+          });
+          return text;
         }
 
         case "anthropic": {
@@ -191,7 +219,16 @@ export async function generateText(req: LlmRequest): Promise<string> {
             messages: [{ role: "user", content: toAnthropicParts(req.userParts) }],
           });
           const textBlock = resp.content.find((b) => b.type === "text");
-          return textBlock?.text ?? "";
+          const text = textBlock?.text ?? "";
+          recordLlmUsage({
+            route: "generateText",
+            provider,
+            model: req.model,
+            inputTokens: resp.usage.input_tokens ?? estimatedInputTokens(req),
+            outputTokens: resp.usage.output_tokens ?? estimateTokenCount(text),
+            exact: Boolean(resp.usage),
+          });
+          return text;
         }
       }
     } catch (err) {
@@ -227,13 +264,31 @@ export async function* generateTextStream(
             },
             contents: [{ role: "user", parts: req.userParts }],
           });
+          let accumulated = "";
+          let promptTokenCount: number | undefined;
+          let candidatesTokenCount: number | undefined;
+          let totalTokenCount: number | undefined;
           for await (const chunk of stream) {
+            if (chunk.usageMetadata) {
+              promptTokenCount = chunk.usageMetadata.promptTokenCount;
+              candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;
+              totalTokenCount = chunk.usageMetadata.totalTokenCount;
+            }
             const text = chunk.text ?? "";
             if (text) {
               yielded = true;
+              accumulated += text;
               yield text;
             }
           }
+          recordLlmUsage({
+            route: "generateTextStream",
+            provider,
+            model: req.model,
+            inputTokens: promptTokenCount ?? estimatedInputTokens(req),
+            outputTokens: candidatesTokenCount ?? estimateTokenCount(accumulated),
+            exact: Boolean(totalTokenCount),
+          });
           return;
         }
 
@@ -250,13 +305,23 @@ export async function* generateTextStream(
               { role: "user", content: toOpenAIParts(req.userParts) },
             ],
           });
+          let accumulated = "";
           for await (const chunk of stream) {
             const text = chunk.choices[0]?.delta?.content;
             if (text) {
               yielded = true;
+              accumulated += text;
               yield text;
             }
           }
+          recordLlmUsage({
+            route: "generateTextStream",
+            provider,
+            model: req.model,
+            inputTokens: estimatedInputTokens(req),
+            outputTokens: estimateTokenCount(accumulated),
+            exact: false,
+          });
           return;
         }
 
@@ -268,15 +333,25 @@ export async function* generateTextStream(
             system: req.systemPrompt,
             messages: [{ role: "user", content: toAnthropicParts(req.userParts) }],
           });
+          let accumulated = "";
           for await (const event of stream) {
             if (
               event.type === "content_block_delta" &&
               event.delta.type === "text_delta"
             ) {
               yielded = true;
+              accumulated += event.delta.text;
               yield event.delta.text;
             }
           }
+          recordLlmUsage({
+            route: "generateTextStream",
+            provider,
+            model: req.model,
+            inputTokens: estimatedInputTokens(req),
+            outputTokens: estimateTokenCount(accumulated),
+            exact: false,
+          });
           return;
         }
       }

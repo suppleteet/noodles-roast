@@ -16,7 +16,7 @@ export const ROAST_PASS_PRODUCTS: readonly RoastPassProduct[] = [
     name: "Roast Pass",
     description: "One live roast session with recording export.",
     credits: 1,
-    amountCents: 499,
+    amountCents: 500,
     currency: "USD",
   },
   {
