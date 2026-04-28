@@ -3,6 +3,7 @@ node_modules/
 
 # debug session transcripts
 .debug/
+.data/
 
 # Next.js
 .next/

@@ -115,7 +115,18 @@ function MainApp() {
     })().catch(() => null);
   }
 
-  const handleStartSession = () => { setPhase("requesting-permissions", "START_CLICKED"); };
+  const handleStartSession = async () => {
+    if (process.env.NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED === "true") {
+      const resp = await fetch("/api/monetization/redeem", { method: "POST" });
+      if (!resp.ok) {
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "No Roast Pass available.");
+        setPhase("sharing", "SHARE_CLICKED");
+        return;
+      }
+    }
+    setPhase("requesting-permissions", "START_CLICKED");
+  };
 
   // Capture first frame from a MediaStream and send to vision API immediately
   function preAnalyzeFirstFrame(stream: MediaStream) {
