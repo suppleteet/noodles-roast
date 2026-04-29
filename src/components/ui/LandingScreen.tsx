@@ -115,8 +115,8 @@ export default function LandingScreen() {
   const featured = products.find((product) => product.featured) ?? products[0];
 
   return (
-    <div className="relative flex h-dvh flex-col items-center justify-center overflow-hidden bg-[#080301] px-4 text-center text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,22,0.24),transparent_30%),linear-gradient(150deg,#170604_0%,#050201_58%,#000_100%)]" />
+    <div className="relative flex h-dvh w-full flex-col items-center justify-center overflow-hidden bg-[#080301] px-4 text-center text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,22,0.24),transparent_30%),linear-gradient(150deg,#170604_0%,#050201_58%,#000_100%)]" />
 
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-[2rem] border border-white/10 bg-black/45 px-6 py-8 shadow-2xl shadow-orange-950/30 backdrop-blur-xl">
         {error && (
