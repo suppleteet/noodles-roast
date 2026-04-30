@@ -22,6 +22,34 @@ import type { JokeResponse } from "@/app/api/generate-joke/route";
 import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
 
+interface DebugUsageSnapshot {
+  llm: {
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+  };
+  tts: {
+    calls: number;
+    characters: number;
+    estimatedCostUsd: number;
+  };
+  totalEstimatedCostUsd: number;
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+function formatDebugCost(value: number): string {
+  if (value <= 0) return "$0.0000";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
 /**
  * Top-level router — decides between edit mode and the main app.
  * Must be a separate component from MainApp so hooks are always called
@@ -53,6 +81,8 @@ function MainApp() {
   const IS_DEV = process.env.NODE_ENV !== "production";
   const [debugMode, setDebugMode] = useState(IS_DEV);
   const [mockMode, setMockMode] = useState(false);
+  const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
+  const lastNonZeroUsageRef = useRef<DebugUsageSnapshot | null>(null);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
@@ -115,7 +145,18 @@ function MainApp() {
     })().catch(() => null);
   }
 
-  const handleStartSession = () => { setPhase("requesting-permissions", "START_CLICKED"); };
+  const handleStartSession = async () => {
+    if (process.env.NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED === "true") {
+      const resp = await fetch("/api/monetization/redeem", { method: "POST" });
+      if (!resp.ok) {
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "No Roast Pass available.");
+        setPhase("sharing", "SHARE_CLICKED");
+        return;
+      }
+    }
+    setPhase("requesting-permissions", "START_CLICKED");
+  };
 
   // Capture first frame from a MediaStream and send to vision API immediately
   function preAnalyzeFirstFrame(stream: MediaStream) {
@@ -202,35 +243,20 @@ function MainApp() {
 
     ensureLiveTokenPrefetch();
 
-    // If camera was already granted during consent screen, just add audio and go
+    // If camera was already granted during consent screen, go straight to warmup.
+    // LiveSessionController owns microphone startup so we don't request mic twice.
     if (webcamStream) {
-      if (sessionMode === "conversation" && !mockModeRef.current) {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-          .then((audioStream) => {
-            audioStream.getAudioTracks().forEach((t) => webcamStream.addTrack(t));
-            startPreRoastGreetingWarmup(webcamStream);
-            setPhase("roasting", "PERMISSIONS_GRANTED");
-          })
-          .catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error("Microphone denied:", message);
-            logTiming(`mic: getUserMedia(audio) failed — ${message}`);
-            setError(
-              `Microphone access failed: ${message}. Please allow mic access in browser settings and retry.`,
-            );
-            setPhase("idle", "PERMISSIONS_DENIED");
-          });
-      } else {
-        setPhase("roasting", "PERMISSIONS_GRANTED");
-      }
+      startPreRoastGreetingWarmup(webcamStream);
+      setPhase("roasting", "PERMISSIONS_GRANTED");
       return;
     }
 
-    // Fallback: camera not yet granted — request everything now
+    // Fallback: camera not yet granted — request video only. The live audio hook
+    // starts mic capture in the background and can gracefully fall back if denied.
     navigator.mediaDevices
       .getUserMedia({
         video: { width: { ideal: 720 }, height: { ideal: 720 }, facingMode: { ideal: "user" } },
-        audio: sessionMode === "conversation" && !mockModeRef.current,
+        audio: false,
       })
       .then((stream) => {
         setWebcamStream(stream);
@@ -351,6 +377,27 @@ function MainApp() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [lastVisionCallTs]);
+
+  useEffect(() => {
+    if (!IS_DEV || !debugMode) return;
+    let cancelled = false;
+
+    async function refreshUsage() {
+      const resp = await fetch("/api/debug-usage", { cache: "no-store" }).catch(() => null);
+      if (!resp?.ok) return;
+      const data = (await resp.json()) as DebugUsageSnapshot;
+      const hasUsage = data.totalEstimatedCostUsd > 0 || data.llm.calls > 0 || data.tts.calls > 0;
+      if (hasUsage) lastNonZeroUsageRef.current = data;
+      if (!cancelled) setLlmUsage(hasUsage ? data : lastNonZeroUsageRef.current ?? data);
+    }
+
+    void refreshUsage();
+    const id = window.setInterval(refreshUsage, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [IS_DEV, debugMode]);
 
   const showPuppet =
     phase === "roasting" || phase === "stopped" || phase === "requesting-permissions";
@@ -526,6 +573,21 @@ function MainApp() {
               <span className="text-white/30">{phase === "roasting" ? "waiting…" : "—"}</span>
             )}
           </div>
+          {llmUsage && (
+            <div className="bg-black/80 border border-emerald-400/40 rounded p-2 font-mono text-[10px] leading-tight pointer-events-auto">
+              <div className="text-[11px]">
+                <span className="text-emerald-400">COST </span>
+                <span className="font-bold text-emerald-100">{formatDebugCost(llmUsage.totalEstimatedCostUsd)}</span>
+                <span className="text-white/35"> est</span>
+              </div>
+              <div className="text-white/35">
+                {llmUsage.llm.calls + llmUsage.tts.calls} calls · {formatCompactNumber(llmUsage.llm.totalTokens)} tok · {formatCompactNumber(llmUsage.tts.characters)} chars
+              </div>
+              <div className="text-white/25">
+                LLM {formatDebugCost(llmUsage.llm.estimatedCostUsd)} · TTS {formatDebugCost(llmUsage.tts.estimatedCostUsd)}
+              </div>
+            </div>
+          )}
           {timingLog.length > 0 && (
             <div className="max-h-52 overflow-y-auto bg-black/80 border border-yellow-400/40 rounded p-2 font-mono text-[10px] text-yellow-300 leading-tight pointer-events-auto">
               {timingLog.map((line, i) => (

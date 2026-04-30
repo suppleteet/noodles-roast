@@ -4,6 +4,7 @@ import { getRoastSystemPrompt, getGreetingSystemPrompt } from "@/lib/prompts";
 import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
 import type { BurnIntensity } from "@/lib/prompts";
+import { recordGeminiUsage } from "@/lib/usageTracker";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -39,6 +40,14 @@ export async function POST(req: NextRequest) {
     });
 
     const text = response.text ?? "[]";
+    recordGeminiUsage({
+      route: "roast",
+      model: VISION_MODEL,
+      text,
+      systemPrompt,
+      userText: `Here is the scene description:\n${JSON.stringify(scene, null, 2)}\n\nRoast this person!`,
+      usageMetadata: response.usageMetadata,
+    });
     const fallback: RoastSentenceRaw[] = [{ text, motion: "smug", intensity: 0.7 }];
     const sentences = extractJson<RoastSentenceRaw[]>(text, /\[[\s\S]*\]/, fallback);
 
