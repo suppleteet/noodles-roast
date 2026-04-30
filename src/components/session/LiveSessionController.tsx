@@ -174,10 +174,6 @@ export default function LiveSessionController({
 
   function queueSpeak(text: string, motion?: MotionState, intensity?: number, appendToPrev?: boolean): void {
     if (!text.trim() || !isRunningRef.current) return;
-    // Reveal puppet on first queued speech — TTS latency ≈ fade duration
-    if (!useSessionStore.getState().puppetRevealed) {
-      useSessionStore.getState().setPuppetRevealed(true);
-    }
     useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
     wasDrainedRef.current = false; // reset edge so drain detection fires when this plays through
     const gen = ttsGenerationRef.current;
@@ -307,6 +303,7 @@ export default function LiveSessionController({
         cursor++;
         if (!queuedAny) {
           queuedAny = true;
+          useSessionStore.getState().setPuppetRevealed(true);
           recordTtfs();
           useSessionStore.getState().setIsSpeaking(true);
         }
@@ -983,7 +980,7 @@ export default function LiveSessionController({
       kickoffTimeRef.current = Date.now();
       useSessionStore.getState().setTimeToFirstSpeechMs(null);
       useSessionStore.getState().setHasSpokenThisSession(false);
-      // puppetRevealed is set by page.tsx when phase becomes "roasting" — don't reset
+      // puppetRevealed flips on the first queued audio chunk so setup stays behind loading.
       // here or the puppet would flash off mid-mount. Stop/restart paths reset elsewhere.
       useSessionStore.getState().setIsEnding(false);
 

@@ -236,6 +236,19 @@ describe("ComedianBrain — Q&A cycle", () => {
     vi.advanceTimersByTime(1600);
     expect(getStates(deps)).toContain("generating");
   });
+
+  it("does not immediately commit an unfinalized sentence starter", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps();
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+
+    brain.onInputTranscription("I");
+    vi.advanceTimersByTime(1000);
+
+    expect(getStates(deps)).not.toContain("generating");
+  });
 });
 
 // ─── Silence handling ─────────────────────────────────────────────────────────
@@ -618,11 +631,10 @@ describe("ComedianBrain — filler echo gating", () => {
     expect(filler.toLowerCase()).toContain("tyler");
   });
 
-  it("uses non-word filler when random=0.99 forces non-echo branch", async () => {
+  it("still echoes a complete answer when random=0.99", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0.99);
-    // Non-word fillers don't contain the answer text.
-    expect(filler.toLowerCase()).not.toContain("tyler");
-    expect(filler).toMatch(/^(Mmm|Hm|Uh huh|Hmm|Mmhmm|Ohhh|Huh)\.?$/);
+    expect(filler.toLowerCase()).toContain("tyler");
+    expect(filler).toMatch(/^(Tyler, uh huh\.|Tyler\. Hmm\.|Tyler, okay\.)$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {
@@ -636,6 +648,20 @@ describe("ComedianBrain — filler echo gating", () => {
     const filler = await captureFillerForAnswer("I work at a bakery.", 0);
     // Echo template wraps the answer text — must contain part of it.
     expect(filler.toLowerCase()).toContain("bakery");
+  });
+
+  it("removes a repeated answer lead from a joke after echo filler", () => {
+    const brain = new ComedianBrain(makeDeps()) as unknown as {
+      _removeEchoedAnswerLead: (text: string, answer: string, filler?: string) => string;
+    };
+
+    expect(
+      brain._removeEchoedAnswerLead(
+        "Gerard. Nobody under sixty has that name by accident.",
+        "Gerard.",
+        "Gerard, uh huh.",
+      ),
+    ).toBe("Nobody under sixty has that name by accident.");
   });
 });
 

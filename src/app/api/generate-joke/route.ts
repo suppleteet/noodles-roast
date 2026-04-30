@@ -72,7 +72,11 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
   if (taskPreamble) contextLines.push(taskPreamble);
   if (body.question) contextLines.push(`QUESTION ASKED: "${body.question}"`);
   if (body.userAnswer) contextLines.push(`USER'S ANSWER: "${body.userAnswer}"`);
-  if (body.fillerAlreadySaid) contextLines.push(`FILLER ALREADY SPOKEN: "${body.fillerAlreadySaid}" was already said aloud. Do NOT open with a similar filler sound.`);
+  if (body.fillerAlreadySaid) {
+    contextLines.push(
+      `FILLER ALREADY SPOKEN: "${body.fillerAlreadySaid}" was already said aloud. Do NOT open with that filler, the user's answer, or the same first phrase. Start with the roast angle, consequence, or comparison instead.`,
+    );
+  }
   if (body.jokesAlreadyDelivered?.length)
     contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
   if (body.observations?.length)

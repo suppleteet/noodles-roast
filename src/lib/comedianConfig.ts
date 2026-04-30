@@ -10,9 +10,9 @@
 const defaults = {
   // Timing (milliseconds)
   answerSilenceMs: 300,          // fallback silence timer (Silero VAD is primary, ~150ms)
-  unfinalizedAnswerSilenceMs: 1000, // wait longer for trailing STT chunks before committing multi-word answers
+  unfinalizedAnswerSilenceMs: 1600, // wait longer for trailing STT chunks before committing partial answers
   answerWaitMs: 6000,            // silence before first prod
-  earlyListenMs: 600,            // switch mic to listening this many ms before question ends
+  earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   visionIntervalMs: 5000,        // how often vision analyze fires
   greetingVisionTimeoutMs: 3000, // how long to wait for vision during greeting
 

@@ -340,9 +340,6 @@ function MainApp() {
     if (phase === "roasting") {
       const now = Date.now();
       setSessionStartTs(now);
-      // Reveal puppet immediately — fade-in starts now, well before LLM/TTS
-      // (LLM cold start can be 7-15s; we don't want a black screen during it).
-      useSessionStore.getState().setPuppetRevealed(true);
       // NOTE: Do NOT clearTimingLog() here — startLiveSession() already logged
       // prefetch entries before this effect runs. Clearing would wipe them.
       logTiming("session: roasting started");
@@ -497,7 +494,7 @@ function MainApp() {
 
       {showPuppet && (
         <div className="relative w-full max-w-[560px] aspect-square">
-          {/* Dark overlay — fades out over 2s when first joke text is ready (before TTS audio) */}
+          {/* Loading overlay — fades out only when the first TTS audio chunk starts. */}
           <div className={`absolute inset-0 bg-black z-10 pointer-events-none transition-opacity ${isEnding ? "duration-[600ms]" : "duration-[2000ms]"} ${puppetRevealed ? "opacity-0" : "opacity-100"}`}>
             {phase === "roasting" && !puppetRevealed && (
               <div className="flex items-center justify-center h-full">

@@ -112,7 +112,7 @@ interface SessionState {
   conversationEvents: ConversationEvent[];
   timeToFirstSpeechMs: number | null;
   hasSpokenThisSession: boolean;
-  puppetRevealed: boolean; // true once first joke text is ready (before TTS audio)
+  puppetRevealed: boolean; // true once the first TTS audio chunk starts
   isEnding: boolean; // true while session is fading out — switches the puppet overlay to a fast fade-out duration
   lastVisionCallTs: number | null;
 

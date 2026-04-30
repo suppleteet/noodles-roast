@@ -886,11 +886,11 @@ export class ComedianBrain {
       this.deps.logTiming("brain: greeting generation fired (no prefetch)");
     }
 
-    const queueGreeting = (response: JokeResponse | null, source: "prefetch" | "fallback") => {
+    const queueGreeting = (response: JokeResponse | null) => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       if (!response || response.jokes.length === 0) {
         const fallback = "Alright, I see what we're working with.";
-        if (source === "fallback") this.deps.logTiming("brain: greeting prefetch slow — using short fallback");
+        this.deps.logTiming("brain: greeting failed — using short fallback");
         this.deps.queueSpeak(fallback, "energetic", 0.8);
         this._addLedger("joke", fallback, []);
       } else {
@@ -908,8 +908,7 @@ export class ComedianBrain {
       this._maybeAdvanceFromGreeting();
     };
 
-    setTimeout(() => queueGreeting(null, "fallback"), 1200);
-    this.visionJokePrefetch.then((response) => queueGreeting(response, "prefetch"));
+    this.visionJokePrefetch.then((response) => queueGreeting(response));
   }
 
   private _maybeAdvanceFromGreeting(): void {
@@ -1119,7 +1118,7 @@ export class ComedianBrain {
   private _startLateSilenceTimer(): void {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     const silenceMs = this._answerNeedsMoreStt()
-      ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, 650)
+      ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, 900)
       : Math.round(COMEDIAN_CONFIG.answerSilenceMs / 2);
     this.silenceTimer = setTimeout(() => {
       if (this.state === "wait_answer" || this.state === "pre_generate") {
@@ -1133,6 +1132,12 @@ export class ComedianBrain {
     if (!answer || this.sttHadFinalSegment) return false;
     if (ComedianBrain._looksComplete(answer)) return false;
     const words = wordCount(answer);
+    const firstWord = (answer.match(/[A-Za-z']+/)?.[0] ?? "").toLowerCase();
+    const incompleteStarters = new Set([
+      "i", "i'm", "im", "i've", "ive", "i'll", "ill", "my", "we", "we're", "were",
+      "it", "it's", "its", "the", "a", "an", "to", "for", "with", "because", "uh", "um",
+    ]);
+    if (words <= 2 && incompleteStarters.has(firstWord)) return true;
     if (words <= 1 && this._isViableAnswer(answer)) return false;
     return words >= 2;
   }
@@ -1374,17 +1379,17 @@ export class ComedianBrain {
     "Mmm.", "Hm.", "Uh huh.", "Hmm.", "Mmhmm.", "Ohhh.", "Huh.",
   ];
 
-  // Echo fillers — the puppet repeats what it heard back as a question, then the joke lands.
-  // Question-only (no "Mmm. {answer}." prefix variants) so the joke knows not to re-ask the
-  // answer itself. Gated by `_isFillerEchoable` so partial transcripts don't get echoed.
+  // Echo fillers — repeat the complete answer once, then bridge into the joke.
+  // Keep these declarative, not question-shaped, so they sound like active listening
+  // instead of another prompt.
   private static readonly ECHO_FILLER_TEMPLATES = [
-    "{answer}?",
-    "So — {answer}?",
-    "{answer}, huh?",
+    "{answer}, uh huh.",
+    "{answer}. Hmm.",
+    "{answer}, okay.",
   ];
 
   /** Probability of picking an echo filler when the answer is echo-eligible. */
-  private static readonly ECHO_FILLER_PROBABILITY = 0.5;
+  private static readonly ECHO_FILLER_PROBABILITY = 1;
 
   /** True if the answer is short enough and complete enough to repeat as a filler. */
   private _isFillerEchoable(answer: string): boolean {
@@ -1439,6 +1444,20 @@ export class ComedianBrain {
     ];
   }
 
+  private _removeEchoedAnswerLead(text: string, answer: string, fillerAlreadySaid?: string): string {
+    const cleanedAnswer = ComedianBrain._stripLeadingHesitation(
+      answer.trim().replace(/[.?!,]+$/, "").trim(),
+    );
+    if (!cleanedAnswer || wordCount(cleanedAnswer) > 8) return text;
+
+    const filler = fillerAlreadySaid?.toLowerCase() ?? "";
+    if (filler && !filler.includes(cleanedAnswer.toLowerCase())) return text;
+
+    const escaped = cleanedAnswer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const stripped = text.replace(new RegExp(`^\\s*${escaped}\\s*[,.!?:;\\-]*\\s+`, "i"), "").trim();
+    return wordCount(stripped) >= 3 ? stripped : text;
+  }
+
   private enterGenerating(answer: string): void {
     this._transition("generating");
     this.deliveryGeneration++;
@@ -1470,7 +1489,7 @@ export class ComedianBrain {
         if (this.state !== "generating") return;
         this._speculativeRequest = null;
         if (response && response.jokes.length > 0) {
-          this.enterDelivering(answer, response);
+          this.enterDelivering(answer, response, fillerAlreadySaid);
         } else {
           // Speculative returned empty — generate fresh
           this.deps.logTiming("brain: speculative returned empty, generating fresh");
@@ -1529,20 +1548,22 @@ export class ComedianBrain {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
+        const jokeText = this._removeEchoedAnswerLead(joke.text, answer, fillerAlreadySaid);
+        const deliveredJoke = jokeText === joke.text ? joke : { ...joke, text: jokeText };
         // Streamed jokes after the first in this batch append to the same transcript paragraph
         const appendToPrev = jokesQueued > 0;
         this.deps.queueSpeak(
-          joke.text,
-          joke.motion as import("@/lib/motionStates").MotionState,
-          joke.intensity,
+          deliveredJoke.text,
+          deliveredJoke.motion as import("@/lib/motionStates").MotionState,
+          deliveredJoke.intensity,
           appendToPrev,
         );
-        if (COMEDIAN_CONFIG.singleJokeMode) this.pipelinePreviousJokes.push(joke.text);
+        if (COMEDIAN_CONFIG.singleJokeMode) this.pipelinePreviousJokes.push(deliveredJoke.text);
 
-        this._addLedger("joke", joke.text, []);
-        this.deps.logTiming(`brain: joke[${jokesQueued}] — "${joke.text.slice(0, 60)}"`);
-        this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
-        this.lastJokeIntensity = joke.intensity;
+        this._addLedger("joke", deliveredJoke.text, []);
+        this.deps.logTiming(`brain: joke[${jokesQueued}] — "${deliveredJoke.text.slice(0, 60)}"`);
+        this.lastJokeMotion = deliveredJoke.motion as import("@/lib/motionStates").MotionState;
+        this.lastJokeIntensity = deliveredJoke.intensity;
         jokesQueued++;
       },
       // onMeta — fires after all jokes stream, with follow-up/redirect/tags/callback
@@ -1627,13 +1648,13 @@ export class ComedianBrain {
           conversationSoFar,
         }).then((response) => {
           if (this.state !== "generating") return;
-          this.enterDelivering(answer, response ?? { relevant: true, jokes: [] });
+          this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
         });
       },
     );
   }
 
-  private enterDelivering(answer: string, response: JokeResponse): void {
+  private enterDelivering(answer: string, response: JokeResponse, fillerAlreadySaid?: string): void {
     this._transition("delivering");
     this.deps.setMotion("energetic", 0.8);
 
@@ -1666,8 +1687,9 @@ export class ComedianBrain {
 
     // Queue all jokes — same delivery batch renders as a single transcript paragraph
     for (const joke of response.jokes) {
-      this.deps.queueSpeak(joke.text, joke.motion, joke.intensity, queued > 0);
-      this._addLedger("joke", joke.text, []);
+      const jokeText = this._removeEchoedAnswerLead(joke.text, answer, fillerAlreadySaid);
+      this.deps.queueSpeak(jokeText, joke.motion, joke.intensity, queued > 0);
+      this._addLedger("joke", jokeText, []);
       queued++;
     }
 

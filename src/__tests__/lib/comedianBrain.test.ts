@@ -90,6 +90,31 @@ describe("ComedianBrain", () => {
     });
   });
 
+  describe("filler delivery", () => {
+    it("echoes complete answers as active-listening filler", () => {
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const brain = new ComedianBrain(makeDeps()) as unknown as {
+        _pickFiller: (answer: string) => string;
+      };
+
+      expect(brain._pickFiller("Gerard.")).toBe("Gerard, uh huh.");
+    });
+
+    it("removes a repeated answer lead from a joke after echo filler", () => {
+      const brain = new ComedianBrain(makeDeps()) as unknown as {
+        _removeEchoedAnswerLead: (text: string, answer: string, filler?: string) => string;
+      };
+
+      expect(
+        brain._removeEchoedAnswerLead(
+          "Gerard. Nobody under sixty has that name by accident.",
+          "Gerard.",
+          "Gerard, uh huh.",
+        ),
+      ).toBe("Nobody under sixty has that name by accident.");
+    });
+  });
+
   describe("start() with skipGreeting", () => {
     it("transitions to ask_question", () => {
       const deps = makeDeps();
@@ -210,6 +235,23 @@ describe("ComedianBrain", () => {
 
         await vi.advanceTimersByTimeAsync(80);
         expect(stateHistory(deps)).toContain("generating");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not immediately commit an unfinalized sentence starter", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        const brain = new ComedianBrain(deps);
+        brain.start();
+        brain.onTtsQueueDrained();
+
+        brain.onInputTranscription("I");
+        await vi.advanceTimersByTimeAsync(40);
+
+        expect(stateHistory(deps)).not.toContain("generating");
       } finally {
         vi.useRealTimers();
       }
