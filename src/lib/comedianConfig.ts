@@ -14,7 +14,7 @@ const defaults = {
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   visionIntervalMs: 5000,        // how often vision analyze fires
-  greetingVisionTimeoutMs: 3000, // how long to wait for vision during greeting
+  greetingVisionTimeoutMs: 5500, // max wait for prefetched vision greeting before a fast generated fallback
 
   // Behavior
   maxProds: 2,                            // prods before skipping question

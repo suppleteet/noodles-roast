@@ -1,20 +1,16 @@
 /**
- * ElevenLabs WebSocket TTS streaming — server-side only.
+ * ElevenLabs WebSocket TTS streaming, server-side only.
  *
- * Opens a WebSocket to ElevenLabs' streaming input API, sends text (can be
- * chunked word-by-word), and calls `onAudioChunk` with base64 PCM as it
- * arrives. Audio starts generating before the full sentence is finished.
- *
- * Used by:
- *   - /api/generate-speak (inline LLM→TTS pipe)
- *   - /api/tts-ws (standalone TTS for fillers, questions)
+ * Opens a WebSocket to ElevenLabs' streaming input API, sends text, and calls
+ * `onAudioChunk` with base64 PCM as it arrives.
  */
 
 import WebSocket from "ws";
 import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
 
-const EL_MODEL_ID = "eleven_turbo_v2_5";
-const EL_OUTPUT_FORMAT = "pcm_24000"; // 16-bit PCM at 24kHz — matches OUTPUT_SAMPLE_RATE
+const DEFAULT_EL_MODEL_ID = "eleven_flash_v2_5";
+const EL_OUTPUT_FORMAT = "pcm_24000";
+const DEFAULT_CHUNK_LENGTH_SCHEDULE = [80, 120, 160, 220];
 
 export interface ElVoiceSettings {
   stability: number;
@@ -33,20 +29,35 @@ const DEFAULT_VOICE_SETTINGS: ElVoiceSettings = {
 };
 
 interface ElTtsStreamOptions {
-  /** Text to synthesize. Sent as a single chunk. */
   text: string;
-  /** Text spoken immediately before this request — helps ElevenLabs match intonation/prosody. */
   previousText?: string;
-  /** Called with each base64-encoded PCM audio chunk as it arrives. */
   onAudioChunk: (base64Pcm: string) => void;
-  /** Called when all audio has been received. */
   onDone: () => void;
-  /** Called on error. */
   onError: (err: Error) => void;
-  /** ElevenLabs voice ID override. */
   voiceId?: string;
-  /** Voice settings override. */
   voiceSettings?: Partial<ElVoiceSettings>;
+}
+
+export function getElevenLabsModelId(): string {
+  return process.env.ELEVENLABS_MODEL_ID?.trim() || DEFAULT_EL_MODEL_ID;
+}
+
+function getElevenLabsHost(): string {
+  return process.env.ELEVENLABS_API_HOST?.trim() || "api.elevenlabs.io";
+}
+
+function shouldUseAutoMode(): boolean {
+  return process.env.ELEVENLABS_AUTO_MODE !== "false";
+}
+
+function getChunkLengthSchedule(): number[] {
+  const raw = process.env.ELEVENLABS_CHUNK_SCHEDULE?.trim();
+  if (!raw) return DEFAULT_CHUNK_LENGTH_SCHEDULE;
+  const parsed = raw
+    .split(",")
+    .map((n) => Number(n.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return parsed.length > 0 ? parsed : DEFAULT_CHUNK_LENGTH_SCHEDULE;
 }
 
 /**
@@ -69,35 +80,38 @@ export function streamElTts({
   }
 
   const vid = voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? ELEVENLABS_VOICE_ID;
-  const url = `wss://api.elevenlabs.io/v1/text-to-speech/${vid}/stream-input?model_id=${EL_MODEL_ID}&output_format=${EL_OUTPUT_FORMAT}&xi-api-key=${apiKey}`;
+  const autoMode = shouldUseAutoMode();
+  const params = new URLSearchParams({
+    model_id: getElevenLabsModelId(),
+    output_format: EL_OUTPUT_FORMAT,
+    "xi-api-key": apiKey,
+  });
+  if (autoMode) params.set("auto_mode", "true");
 
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(
+    `wss://${getElevenLabsHost()}/v1/text-to-speech/${vid}/stream-input?${params.toString()}`,
+  );
   let closed = false;
 
   ws.on("open", () => {
-    const { speed, ...vsRest } = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
-    // BOS (Beginning of Stream) — init with voice settings
+    const voiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
     ws.send(
       JSON.stringify({
         text: " ",
-        voice_settings: vsRest,
+        voice_settings: voiceSettings,
         xi_api_key: apiKey,
-        generation_config: {
-          // Larger first chunks → ElevenLabs has more prosody context up front,
-          // so the opening words don't rush before settling to natural pace.
-          // Slight first-byte latency cost vs the old [120,160,250,290], but
-          // pacing matters more than ms when the puppet is mid-roast.
-          chunk_length_schedule: [220, 260, 290, 290],
-          ...(speed !== undefined && speed !== 1.0 ? { speed } : {}),
-        },
+        ...(!autoMode
+          ? {
+              generation_config: {
+                chunk_length_schedule: getChunkLengthSchedule(),
+              },
+            }
+          : {}),
         ...(previousText ? { previous_text: previousText } : {}),
       }),
     );
 
-    // Send the actual text — trigger generation immediately
-    ws.send(JSON.stringify({ text, try_trigger_generation: true }));
-
-    // EOS (End of Stream) — flush and close generation
+    ws.send(JSON.stringify({ text, flush: true }));
     ws.send(JSON.stringify({ text: "" }));
   });
 
@@ -116,9 +130,7 @@ export function streamElTts({
         return;
       }
 
-      if (msg.audio) {
-        onAudioChunk(msg.audio);
-      }
+      if (msg.audio) onAudioChunk(msg.audio);
 
       if (msg.isFinal) {
         closed = true;
@@ -126,7 +138,7 @@ export function streamElTts({
         onDone();
       }
     } catch {
-      // Non-JSON message — ignore
+      // Ignore non-JSON messages.
     }
   });
 
@@ -147,7 +159,11 @@ export function streamElTts({
   return () => {
     if (!closed) {
       closed = true;
-      try { ws.close(); } catch { /* noop */ }
+      try {
+        ws.close();
+      } catch {
+        // noop
+      }
     }
   };
 }

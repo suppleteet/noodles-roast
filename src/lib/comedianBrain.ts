@@ -888,8 +888,12 @@ export class ComedianBrain {
 
     const queueGreeting = (response: JokeResponse | null) => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
+      if (this.greetingVisionTimeout) {
+        clearTimeout(this.greetingVisionTimeout);
+        this.greetingVisionTimeout = null;
+      }
       if (!response || response.jokes.length === 0) {
-        const fallback = "Alright, I see what we're working with.";
+        const fallback = "The camera took one look and requested hazard pay.";
         this.deps.logTiming("brain: greeting failed — using short fallback");
         this.deps.queueSpeak(fallback, "energetic", 0.8);
         this._addLedger("joke", fallback, []);
@@ -910,6 +914,16 @@ export class ComedianBrain {
     };
 
     this.visionJokePrefetch.then((response) => queueGreeting(response));
+    this.greetingVisionTimeout = setTimeout(() => {
+      if (this.state !== "greeting" || this.greetingSpeechQueued) return;
+      this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
+      const observations = this.deps.getObservations();
+      this._generateJoke({
+        context: "greeting",
+        model: "gemini-2.5-flash",
+        observations,
+      }).then((response) => queueGreeting(response));
+    }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 
   private _maybeAdvanceFromGreeting(): void {
@@ -2637,6 +2651,7 @@ export class ComedianBrain {
     if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
     if (this.prodTimer) { clearTimeout(this.prodTimer); this.prodTimer = null; }
     if (this.devNoteTimer) { clearTimeout(this.devNoteTimer); this.devNoteTimer = null; }
+    if (this.greetingVisionTimeout) { clearTimeout(this.greetingVisionTimeout); this.greetingVisionTimeout = null; }
     this._clearConfirmTimer();
   }
 

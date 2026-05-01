@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { streamElTts, type ElVoiceSettings } from "@/lib/elTtsStream";
+import { getElevenLabsModelId, streamElTts, type ElVoiceSettings } from "@/lib/elTtsStream";
 import { recordTtsUsage } from "@/lib/usageTracker";
 
 /**
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
         onDone: () => {
           recordTtsUsage({
             route: "tts-ws",
-            model: "eleven_turbo_v2_5",
+            model: getElevenLabsModelId(),
             characters: body.text!.length,
           });
           controller.enqueue(

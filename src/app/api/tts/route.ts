@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
+import { getElevenLabsModelId } from "@/lib/elTtsStream";
 import { recordTtsUsage } from "@/lib/usageTracker";
 
 export async function POST(req: NextRequest) {
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest) {
       use_speaker_boost: true,
     };
 
+    const modelId = getElevenLabsModelId();
+
     // Use ElevenLabs REST streaming endpoint (latency tier 3 = optimized streaming)
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=3`,
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_turbo_v2_5",
+          model_id: modelId,
           voice_settings: voiceSettings,
           ...(Array.isArray(previousRequestIds) && previousRequestIds.length > 0
             ? { previous_request_ids: previousRequestIds.slice(-3) }
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
     const elevenLabsRequestId = response.headers.get("request-id");
     recordTtsUsage({
       route: "tts-rest",
-      model: "eleven_turbo_v2_5",
+      model: modelId,
       characters: String(text).length,
     });
 

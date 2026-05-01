@@ -228,6 +228,8 @@ export default function LiveSessionController({
     };
 
     void (async () => {
+      const startedAt = Date.now();
+      let firstAudioLogged = false;
       try {
         const resp = await fetch("/api/tts-ws", {
           method: "POST",
@@ -268,6 +270,12 @@ export default function LiveSessionController({
             try {
               const event = JSON.parse(line.slice(6)) as { type: string; chunk?: string };
               if (event.type === "audio" && event.chunk) {
+                if (!firstAudioLogged) {
+                  firstAudioLogged = true;
+                  useSessionStore.getState().logTiming(
+                    `tts: first audio ${Date.now() - startedAt}ms "${text.slice(0, 32)}"`,
+                  );
+                }
                 audio.push(event.chunk);
               }
             } catch { /* malformed SSE line */ }
