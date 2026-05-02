@@ -65,7 +65,12 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") {
-      ctx = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+      // Use device native sample rate (don't request 24kHz). iOS Safari sometimes
+      // honors the request, sometimes coerces silently to 48kHz, and on the latter
+      // path its built-in AudioBufferSourceNode resampler glitches the first ~500ms
+      // of audio (chipmunk effect). Resampling ourselves in enqueueChunk gives a
+      // single deterministic code path on every device.
+      ctx = new AudioContext();
       ctxRef.current = ctx;
 
       const analyser = ctx.createAnalyser();

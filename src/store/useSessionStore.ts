@@ -30,7 +30,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   stability: 0.72,
   similarity_boost: 0.7,
   style: 1,
-  speed: 0.88,
+  speed: 1.0,
   use_speaker_boost: true,
 };
 

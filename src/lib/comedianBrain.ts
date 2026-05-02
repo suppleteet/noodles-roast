@@ -1017,7 +1017,14 @@ export class ComedianBrain {
     let spokenQuestionText: string | null = null;
     let questionWillBeQueuedAsync = false;
 
-    if (this.pendingFollowUp && !sameQuestion && this.followUpCount < 1) {
+    // Follow-up questions disabled: when the puppet's joke ends with an
+    // open follow-up like "are you a or b?", it locks the topic in place.
+    // Half the time there's no funny answer to the follow-up, so the show
+    // stalls on a weak premise. Better to always change topics — pull the
+    // next bank question or generate a contextual one. Keeping the field
+    // populated for future debugging, just gating it shut here.
+    const FOLLOW_UPS_ENABLED = false;
+    if (FOLLOW_UPS_ENABLED && this.pendingFollowUp && !sameQuestion && this.followUpCount < 1) {
       // Ask generated follow-up (max 1 per topic, then move on)
       const followUpText = this.pendingFollowUp;
       this.pendingFollowUp = null;
@@ -2075,24 +2082,10 @@ export class ComedianBrain {
     if (this.visionOnlyMode) return;
     if (this.preQueuedQuestion) return;
 
-    // Follow-up wins — the LLM picked the next question for us already
+    // Follow-up pre-queue disabled — see enterAskQuestion for rationale.
+    // Always pull the next bank question or generate a contextual one instead.
     if (this.pendingFollowUp) {
-      const followUpText = this.pendingFollowUp;
       this.pendingFollowUp = null;
-      this.followUpCount++;
-      this.preQueuedQuestion = {
-        id: "follow_up",
-        question: followUpText,
-        jokeContext: "Answer-driven follow-up question.",
-        prodLines: [
-          "I'm waiting. The audience is waiting.",
-          "Hello? Anyone home?",
-        ],
-      };
-      this.preQueuedRephrasedText = null;
-      this._fetchRephraseForPreQueue(followUpText);
-      this.deps.logTiming(`brain: pre-queue follow-up — "${followUpText.slice(0, 40)}"`);
-      return;
     }
 
     const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
