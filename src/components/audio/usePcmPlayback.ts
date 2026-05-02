@@ -183,9 +183,13 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const warmUp = useCallback(() => {
     const ctx = getOrCreateContext();
     if (ctx.state === "suspended") ctx.resume();
-    // Play a single silent sample so iOS Safari marks this context as
-    // user-initiated media — hardware volume buttons will control it.
-    const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+    // 250ms of silence at OUTPUT_SAMPLE_RATE: marks the context as user-initiated
+    // media (so iOS hardware volume buttons control it) AND warms the resampler
+    // before real audio arrives. Without the latter, iOS Safari plays the first
+    // ~500ms of real chunks at the context's native rate (chipmunk effect) before
+    // the 24kHz→48kHz resampler stabilizes.
+    const samples = Math.round(OUTPUT_SAMPLE_RATE * 0.25);
+    const buf = ctx.createBuffer(1, samples, OUTPUT_SAMPLE_RATE);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(analyserRef.current ?? ctx.destination);

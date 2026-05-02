@@ -14,19 +14,19 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json()) as {
       text?: string;
-      type?: "post-session" | "critique" | "joke-rating";
+      type?: "post-session" | "critique" | "joke-rating" | "session-log";
       persona?: string;
       lastJokeText?: string;
       videoFilename?: string | null;
       sessionLog?: unknown;
     };
 
+    const feedbackType = body.type ?? "post-session";
     const text = (body.text ?? "").trim();
-    if (!text) {
+    // session-log is auto-saved on session end with no user input — text is optional.
+    if (!text && feedbackType !== "session-log") {
       return NextResponse.json({ error: "No feedback text" }, { status: 400 });
     }
-
-    const feedbackType = body.type ?? "post-session";
 
     const entry: Record<string, unknown> = {
       type: feedbackType,
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const prefix = feedbackType === "critique" ? "critique"
       : feedbackType === "joke-rating" ? "joke-rating"
+      : feedbackType === "session-log" ? "session"
       : "feedback";
     const blobPath = `feedback/${prefix}-${ts}.json`;
 

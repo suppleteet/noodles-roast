@@ -280,7 +280,7 @@ describe("ComedianBrain", () => {
       brain.onInputTranscription("Tyler");
       expect(deps.setUserAnswer).toHaveBeenCalled();
       expect(deps.logTiming).toHaveBeenCalledWith(
-        expect.stringContaining("early answer"),
+        expect.stringContaining("answer during ask_question"),
       );
     });
   });

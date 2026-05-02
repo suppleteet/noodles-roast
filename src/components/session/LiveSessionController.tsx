@@ -1159,11 +1159,25 @@ export default function LiveSessionController({
       burnIntensity: store.burnIntensity,
       sessionMode: store.sessionMode,
     };
+    // Local dev: write to .debug/ on disk for fast inspection (no-ops on Vercel — read-only fs)
     fetch("/api/save-transcript", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).catch((e) => console.warn("[save-transcript] failed:", e));
+    // Production: also push to Vercel Blob via save-feedback so debugging a Vercel session
+    // doesn't require the user to fill out the FeedbackBox. Skip empty sessions.
+    if (store.timingLog.length > 0 || store.transcriptHistory.length > 0) {
+      fetch("/api/save-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "session-log",
+          persona: store.activePersona,
+          sessionLog: payload,
+        }),
+      }).catch((e) => console.warn("[save-feedback session-log] failed:", e));
+    }
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────

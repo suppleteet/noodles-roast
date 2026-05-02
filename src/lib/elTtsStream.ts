@@ -94,7 +94,9 @@ export function streamElTts({
   let closed = false;
 
   ws.on("open", () => {
-    const { speed, ...voiceSettings } = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
+    // ElevenLabs reads `speed` from voice_settings. Putting it under generation_config
+    // is silently ignored — keep the full settings object intact.
+    const voiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
     ws.send(
       JSON.stringify({
         text: " ",
@@ -102,7 +104,6 @@ export function streamElTts({
         xi_api_key: apiKey,
         generation_config: {
           chunk_length_schedule: getChunkLengthSchedule(),
-          ...(speed !== undefined && speed !== 1.0 ? { speed } : {}),
         },
         ...(previousText ? { previous_text: previousText } : {}),
       }),

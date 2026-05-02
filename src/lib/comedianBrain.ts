@@ -610,14 +610,17 @@ export class ComedianBrain {
       }
     }
 
-    // User speaks during question TTS — buffer it so it's not lost when we enter wait_answer.
-    // Only capture after early listen activates (question nearly done) to avoid picking up
-    // background noise (e.g. kids talking) while the question is still playing.
+    // User speaks during question TTS — buffer it so wait_answer has the answer ready.
+    // Trust Gemini's STT: if it transcribed something, treat it as user speech (the alternative
+    // dropped real answers when users started replying before earlyListen activated, leaving
+    // the brain with an empty buffer that prodded "I asked X, not for a moment of silence" while
+    // the user could see their words on screen).
     if (this.state === "ask_question") {
-      if (this.earlyListenActivated) {
-        this._accumulateAnswer(text, finished);
-        this.deps.logTiming(`brain: early answer during ask_question — "${text}"`);
-      }
+      this._accumulateAnswer(text, finished);
+      if (finished) this.sttHadFinalSegment = true;
+      this.deps.logTiming(
+        `brain: answer during ask_question${this.earlyListenActivated ? "" : " (pre-early-listen)"} — "${text}"`,
+      );
       return;
     }
 
