@@ -56,18 +56,6 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const rafRef = useRef<number>(0);
   const lastAmplitudeRef = useRef<number>(0);
-  // Continuous sub-audible source that keeps the analyser → speaker
-  // MediaStream pumping real samples so Android Chrome locks the audio
-  // session as "media" instead of "communication". DC-zero from a
-  // ConstantSourceNode wasn't enough — the system treated it as silence
-  // and routed via call channel. A 5 Hz oscillator at 0.0005 gain is
-  // subsonic and inaudible but produces non-zero samples.
-  const silentSourceRef = useRef<AudioScheduledSourceNode | null>(null);
-
-  // Hidden <audio> element routes output through the media channel on Android.
-  // Without this, Chrome Android sends Web Audio through the earpiece when
-  // getUserMedia is active, ignoring the media volume slider.
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
 
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
@@ -88,49 +76,15 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       const dest = ctx.createMediaStreamDestination();
       destRef.current = dest;
 
-      // Route through a MediaStream → <audio> element so Android Chrome uses
-      // the media volume channel instead of the earpiece/communication channel.
-      // Without this, Chrome Android sends Web Audio through the call/earpiece
-      // channel when getUserMedia is active, and the media volume slider has no effect.
-      const speakerDest = ctx.createMediaStreamDestination();
-      analyser.connect(speakerDest);
+      // Playback path: connect directly to ctx.destination (system audio out).
+      // The earlier <audio>+MediaStream indirection was an attempt to influence
+      // which channel Android Chrome routed to, but in practice that left the
+      // hardware volume buttons not controlling the puppet at all. Going
+      // through ctx.destination puts the audio on whatever stream Android picks
+      // for this AudioContext — and hardware volume controls THAT stream.
+      // Recording dest is kept separate so the captured video keeps audio.
+      analyser.connect(ctx.destination);
       analyser.connect(dest);
-
-      // Append to DOM and configure for inline media playback. Without DOM
-      // attachment + playsInline + autoplay, Android Chrome takes one extra
-      // session start to lock onto the media channel — first roast plays
-      // through the earpiece (volume slider does nothing) and the audio also
-      // sounds chipmunked while routing settles. Subsequent roasts work
-      // because the element from the first attempt is still alive.
-      const audioEl = document.createElement("audio");
-      audioEl.autoplay = true;
-      audioEl.setAttribute("playsinline", "");
-      audioEl.muted = false;
-      audioEl.controls = false;
-      audioEl.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;";
-      audioEl.setAttribute("aria-hidden", "true");
-      document.body.appendChild(audioEl);
-      audioEl.srcObject = speakerDest.stream;
-      audioEl.play().catch((e) => console.warn("[playback] audioEl.play failed:", e));
-      audioElRef.current = audioEl;
-
-      // Continuous sub-audible signal: a low oscillator at very low gain
-      // keeps the MediaStream pumping real (non-zero) samples even when
-      // no TTS is playing. Android Chrome only locks the media-channel
-      // routing while the stream is actively producing audio — silence
-      // (DC zero) was being treated as "no media" and the system fell
-      // back to the communication channel (volume buttons controlled call
-      // volume instead of media, mic switched to near-field gain). 5 Hz
-      // is subsonic; gain of 0.0005 is well below audible threshold.
-      const silentOsc = ctx.createOscillator();
-      silentOsc.frequency.value = 5;
-      silentOsc.type = "sine";
-      const silentGain = ctx.createGain();
-      silentGain.gain.value = 0.0005;
-      silentOsc.connect(silentGain);
-      silentGain.connect(analyser);
-      silentOsc.start();
-      silentSourceRef.current = silentOsc;
     }
     return ctx;
   }
@@ -220,17 +174,6 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     return () => {
       cancelAnimationFrame(rafRef.current);
       flush();
-      if (silentSourceRef.current) {
-        try { silentSourceRef.current.stop(); } catch { /* already stopped */ }
-        silentSourceRef.current.disconnect();
-        silentSourceRef.current = null;
-      }
-      if (audioElRef.current) {
-        audioElRef.current.pause();
-        audioElRef.current.srcObject = null;
-        audioElRef.current.remove();
-        audioElRef.current = null;
-      }
       if (ctxRef.current?.state !== "closed") {
         ctxRef.current?.close();
       }
@@ -263,8 +206,6 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     src.buffer = buf;
     src.connect(analyserRef.current ?? ctx.destination);
     src.start();
-    // Also ensure the <audio> element is playing (Android requires user gesture)
-    audioElRef.current?.play().catch(() => {});
   }, []);
 
   return {

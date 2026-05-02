@@ -127,16 +127,15 @@ function ProceduralHead() {
       {/* ── Nose ── */}
       <Nose />
 
-      {/* ── Eyebrows — short, thick capsule pills with a clear gap between
-            them. Sit level above each eye, no V tilt. Capsule default
-            axis is Y, rotate Math.PI/2 around Z to lay them horizontal.
-            High roughness, no metalness — felt texture, no specular. ── */}
-      <mesh position={[-0.21, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.085, 0.10, 6, 12]} />
+      {/* ── Eyebrows — thick capsule pills pressed down against the eyes.
+            Capsule default axis is Y, rotate Math.PI/2 around Z to lay
+            them horizontal. Felt finish (rough, no metalness). ── */}
+      <mesh position={[-0.20, 0.78, 0.83]} rotation={[0.9, 0, Math.PI / 2]}>
+        <capsuleGeometry args={[0.105, 0.18, 6, 12]} />
         <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
       </mesh>
-      <mesh position={[0.21, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.085, 0.10, 6, 12]} />
+      <mesh position={[0.20, 0.78, 0.83]} rotation={[0.9, 0, Math.PI / 2]}>
+        <capsuleGeometry args={[0.105, 0.18, 6, 12]} />
         <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
       </mesh>
     </MouthHemispheres>
@@ -181,21 +180,21 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
 
   return (
     <>
-      {/* Mouth interior: SOLID red sphere just inside the head shell. Reads
-          as a "solid ball with a cut in it" — when the jaw opens, the
-          visible part is the outer surface of the inner ball, not the
-          inside of a hollow cavity. Sized to fit just inside the bottom
-          hemisphere (which is at R*0.95). */}
-      <mesh>
-        <sphereGeometry args={[R * 0.93, 48, 48]} />
-        <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} />
-      </mesh>
 
-      {/* Top hemisphere — eyes and nose are children so they tilt with it */}
+      {/* Top hemisphere — eyes and nose are children so they tilt with it.
+          The flat circular opening at the equator is capped by a red disc,
+          so each hemisphere reads as a SOLID half-ball. When the jaw
+          opens, the two discs split apart and you see them face-on as the
+          inside of the mouth. */}
       <group ref={topGroupRef}>
         <mesh>
           <sphereGeometry args={[R, 64, 64, 0, Math.PI * 2, 0, Math.PI / 2]} />
           <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
+        </mesh>
+        {/* Red disc cap — fills the flat opening at the bottom of the top hemisphere */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[R, 48]} />
+          <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
         </mesh>
         {children}
       </group>
@@ -206,9 +205,14 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
           <sphereGeometry args={[R * 0.95, 64, 64, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]} />
           <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
         </mesh>
-        {/* Tongue: flattened ellipsoid resting on the floor of the bottom
-            jaw, tilted slightly forward like it's sticking out a touch. */}
-        <mesh position={[0, -0.55, 0.18]} rotation={[-0.25, 0, 0]} scale={[0.55, 0.22, 0.75]}>
+        {/* Red disc cap — fills the flat opening at the top of the bottom hemisphere */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[R * 0.95, 48]} />
+          <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
+        </mesh>
+        {/* Tongue: flattened ellipsoid resting on top of the bottom disc,
+            tilted slightly forward like it's sticking out a touch. */}
+        <mesh position={[0, 0.04, 0.32]} rotation={[-0.25, 0, 0]} scale={[0.55, 0.18, 0.75]}>
           <sphereGeometry args={[0.32, 28, 24]} />
           <meshStandardMaterial color={TONGUE_COLOR} roughness={1.0} metalness={0} />
         </mesh>
