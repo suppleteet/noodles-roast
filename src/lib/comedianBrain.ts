@@ -1415,7 +1415,7 @@ export class ComedianBrain {
   ];
 
   /** Probability of picking an echo filler when the answer is echo-eligible. */
-  private static readonly ECHO_FILLER_PROBABILITY = 1;
+  private static readonly ECHO_FILLER_PROBABILITY = 0.35;
 
   /** True if the answer is short enough and complete enough to repeat as a filler. */
   private _isFillerEchoable(answer: string): boolean {
@@ -1638,9 +1638,21 @@ export class ComedianBrain {
         }
 
         if (jokesQueued === 0) {
-          // API returned relevant but no jokes — advance without playing unrelated content
-          this.deps.logTiming("brain: stream delivered nothing — advancing to next question");
-          this._onDeliveringDrained();
+          // Streaming JSON parsing can miss jokes from providers that emit awkward
+          // chunk boundaries. Do a blocking JSON fallback before giving up.
+          this.deps.logTiming("brain: stream delivered nothing - retrying non-streaming roast");
+          this._generateJoke({
+            context: "answer_roast",
+            question: q?.question,
+            userAnswer: answer,
+            fillerAlreadySaid,
+            conversationSoFar,
+            knownFacts: this._getThrowbackContext(),
+          }).then((response) => {
+            if (this.deliveryGeneration !== gen) return;
+            if (this.state !== "generating" && this.state !== "delivering") return;
+            this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
+          });
           return;
         }
 

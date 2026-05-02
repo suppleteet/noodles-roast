@@ -109,7 +109,7 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
       const source = ctx.createMediaStreamSource(stream);
       sourceRef.current = source;
       const pullGain = ctx.createGain();
-      pullGain.gain.value = 0;
+      pullGain.gain.value = 0.000001;
       pullGain.connect(ctx.destination);
       pullGainRef.current = pullGain;
 
@@ -140,7 +140,10 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
         }
       };
 
+      let gotFirstChunk = false;
+
       const handlePcmChunk = (pcm: Float32Array) => {
+        gotFirstChunk = true;
         onChunkRef.current(pcm);
         updateAmplitude();
       };
@@ -183,6 +186,17 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
         };
         source.connect(worklet);
         worklet.connect(pullGain);
+        window.setTimeout(() => {
+          if (!capturingRef.current || gotFirstChunk || scriptProcessorRef.current) return;
+          console.warn("[mic] AudioWorklet produced no PCM; falling back to ScriptProcessor");
+          try {
+            worklet.disconnect();
+          } catch {
+            // noop
+          }
+          workletRef.current = null;
+          startScriptProcessor();
+        }, 1200);
       } catch {
         startScriptProcessor();
       }

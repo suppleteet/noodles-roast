@@ -8,9 +8,9 @@
 import WebSocket from "ws";
 import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
 
-const DEFAULT_EL_MODEL_ID = "eleven_flash_v2_5";
+const DEFAULT_EL_MODEL_ID = "eleven_turbo_v2_5";
 const EL_OUTPUT_FORMAT = "pcm_24000";
-const DEFAULT_CHUNK_LENGTH_SCHEDULE = [80, 120, 160, 220];
+const DEFAULT_CHUNK_LENGTH_SCHEDULE = [120, 160, 250, 290];
 
 export interface ElVoiceSettings {
   stability: number;
@@ -47,7 +47,7 @@ function getElevenLabsHost(): string {
 }
 
 function shouldUseAutoMode(): boolean {
-  return process.env.ELEVENLABS_AUTO_MODE !== "false";
+  return process.env.ELEVENLABS_AUTO_MODE === "true";
 }
 
 function getChunkLengthSchedule(): number[] {
@@ -94,19 +94,16 @@ export function streamElTts({
   let closed = false;
 
   ws.on("open", () => {
-    const voiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
+    const { speed, ...voiceSettings } = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
     ws.send(
       JSON.stringify({
         text: " ",
         voice_settings: voiceSettings,
         xi_api_key: apiKey,
-        ...(!autoMode
-          ? {
-              generation_config: {
-                chunk_length_schedule: getChunkLengthSchedule(),
-              },
-            }
-          : {}),
+        generation_config: {
+          chunk_length_schedule: getChunkLengthSchedule(),
+          ...(speed !== undefined && speed !== 1.0 ? { speed } : {}),
+        },
         ...(previousText ? { previous_text: previousText } : {}),
       }),
     );

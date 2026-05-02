@@ -631,10 +631,10 @@ describe("ComedianBrain — filler echo gating", () => {
     expect(filler.toLowerCase()).toContain("tyler");
   });
 
-  it("still echoes a complete answer when random=0.99", async () => {
+  it("uses a non-echo filler when echo probability misses", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0.99);
-    expect(filler.toLowerCase()).toContain("tyler");
-    expect(filler).toMatch(/^(Tyler, huh\.|Tyler, you say\.|Tyler\. Hm\.)$/);
+    expect(filler.toLowerCase()).not.toContain("tyler");
+    expect(filler).toMatch(/^(Mmm\.|Hm\.|Uh huh\.|Hmm\.|Mmhmm\.|Ohhh\.|Huh\.)$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

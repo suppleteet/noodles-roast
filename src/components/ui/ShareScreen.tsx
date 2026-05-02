@@ -34,6 +34,7 @@ export default function ShareScreen() {
   const savedBlobRef = useRef<Blob | null>(null);
 
   const shareBlob = mp4Blob ?? videoBlob;
+  const recordingMissing = !recordedBlob || recordedBlob.size === 0;
   const shareFilename = preferredFilename(savedFilename, shareBlob);
   const hasNativeShare = typeof navigator !== "undefined" && "share" in navigator;
 
@@ -49,7 +50,7 @@ export default function ShareScreen() {
   }, [hasNativeShare, shareBlob, shareFilename]);
 
   useEffect(() => {
-    if (!recordedBlob || savedBlobRef.current === recordedBlob) return;
+    if (!recordedBlob || recordedBlob.size === 0 || savedBlobRef.current === recordedBlob) return;
     savedBlobRef.current = recordedBlob;
 
     setVideoBlob(recordedBlob);
@@ -145,7 +146,7 @@ export default function ShareScreen() {
     );
   }
 
-  const buttonsDisabled = converting || !shareBlob;
+  const buttonsDisabled = converting || !shareBlob || shareBlob.size === 0;
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-black px-6 text-center text-white">
@@ -208,6 +209,10 @@ export default function ShareScreen() {
 
       {converting ? (
         <p className="mb-4 text-xs text-white/40">Processing video...</p>
+      ) : recordingMissing ? (
+        <p className="mb-4 max-w-sm text-xs text-red-300/80">
+          Recording did not produce a video. The session log will show recorder start/stop details.
+        </p>
       ) : (
         <div className="mb-4" />
       )}

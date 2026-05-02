@@ -9,6 +9,7 @@ import {
 export interface VideoRecorderHandle {
   start(compositorStream: MediaStream, audioStream: MediaStream | null): void;
   stop(): Promise<Blob>;
+  isRecording(): boolean;
 }
 
 const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_props, ref) {
@@ -55,6 +56,9 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
       recorder.onerror = (e) => console.error("[recorder] error:", e);
       recorder.start(1000);
       recorderRef.current = recorder;
+      console.info(
+        `[recorder] started mime=${mimeTypeRef.current} video=${videoTracks.length} audio=${audioTracks.length}`,
+      );
     },
 
     stop(): Promise<Blob> {
@@ -69,7 +73,9 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
           if (settled) return;
           settled = true;
           recorderRef.current = null;
-          resolve(new Blob(chunksRef.current, { type: mimeTypeRef.current }));
+          const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+          console.info(`[recorder] stopped chunks=${chunksRef.current.length} size=${blob.size}`);
+          resolve(blob);
         };
         recorder.onstop = () => {
           finish();
@@ -90,6 +96,10 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
         }
         window.setTimeout(finish, 3000);
       });
+    },
+
+    isRecording(): boolean {
+      return recorderRef.current?.state === "recording";
     },
   }));
 

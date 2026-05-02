@@ -401,9 +401,11 @@ function MainApp() {
     }
   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stop webcam tracks when session ends
+  // Stop webcam tracks after recording shutdown has had a chance to capture the final blob.
+  // `stopped` is an intermediate phase where LiveSessionController.stopLiveSession()
+  // is still stopping MediaRecorder; killing tracks here can produce an empty share screen.
   useEffect(() => {
-    if ((phase === "sharing" || phase === "idle" || phase === "stopped") && webcamStream) {
+    if ((phase === "sharing" || phase === "idle") && webcamStream) {
       webcamStream.getTracks().forEach((t) => t.stop());
       setWebcamStream(null);
     }

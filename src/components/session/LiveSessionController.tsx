@@ -90,6 +90,9 @@ export default function LiveSessionController({
   const userSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const laughDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const smileDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micChunkLoggedRef = useRef(false);
+  const micSentLoggedRef = useRef(false);
+  const micBlockedLoggedRef = useRef(false);
 
   const kickoffTimeRef = useRef<number | null>(null);
   const firstSpeechRecordedRef = useRef(false);
@@ -123,14 +126,28 @@ export default function LiveSessionController({
     useCallback((pcm: Float32Array) => {
       const session = sessionRef.current;
       if (!session || !isRunningRef.current) return;
+      if (!micChunkLoggedRef.current) {
+        micChunkLoggedRef.current = true;
+        useSessionStore.getState().logTiming(`mic: first PCM chunk (${pcm.length} samples)`);
+      }
       // Gate mic: send audio when brain is listening OR in passive warm-up (keeps Gemini VAD hot)
       const brain = brainRef.current;
-      if (brain && !brain.isAudioActive()) return;
+      if (brain && !brain.isAudioActive()) {
+        if (!micBlockedLoggedRef.current) {
+          micBlockedLoggedRef.current = true;
+          useSessionStore.getState().logTiming("mic: chunk blocked while brain audio inactive");
+        }
+        return;
+      }
       const base64 = float32ToBase64Pcm16(pcm);
       try {
         session.sendRealtimeInput({
           audio: { data: base64, mimeType: MIC_MIME_TYPE },
         });
+        if (!micSentLoggedRef.current) {
+          micSentLoggedRef.current = true;
+          useSessionStore.getState().logTiming("mic: first chunk sent to Gemini");
+        }
       } catch {
         // Session WebSocket may be in CLOSING state during rotation — safe to discard chunk
       }
@@ -840,6 +857,9 @@ export default function LiveSessionController({
     userSpeakingSpanRef.current = null;
     geminiWaitingSpanRef.current = null;
     firstSpeechRecordedRef.current = false;
+    micChunkLoggedRef.current = false;
+    micSentLoggedRef.current = false;
+    micBlockedLoggedRef.current = false;
     useSessionStore.getState().setError(null); // clear any prior quota/session error
     useSessionStore.getState().clearTimingLog();
     useSessionStore.getState().clearConversationEvents();
@@ -1005,7 +1025,9 @@ export default function LiveSessionController({
       // captures it without re-starting.
       if (!mockMode && videoRecorderRef.current && compositorStream && isRunningRef.current) {
         videoRecorderRef.current.start(compositorStream, playback.getDestinationStream());
-        useSessionStore.getState().logTiming("live: recording started (TTS-only, mic to follow)");
+        useSessionStore.getState().logTiming(
+          `live: recording start requested (${compositorStream.getVideoTracks().length}v/${playback.getDestinationStream()?.getAudioTracks().length ?? 0}a)`,
+        );
       }
 
       // Start the comedy show NOW — don't wait for mic to finish initializing.
@@ -1022,6 +1044,9 @@ export default function LiveSessionController({
         useSessionStore.getState().logTiming("live: mic ready");
         const micStream = mic.getStream();
         if (micStream) {
+          useSessionStore.getState().logTiming(
+            `mic: stream ready (${micStream.getAudioTracks().length} audio tracks)`,
+          );
           micRecordingDisconnectRef.current = playback.addInputToRecording(micStream);
           vad.start(micStream)
             .then(() => brainRef.current?.setVadAvailable(true))
@@ -1105,9 +1130,11 @@ export default function LiveSessionController({
     if (videoRecorderRef.current) {
       try {
         const blob = await videoRecorderRef.current.stop();
+        store.logTiming(`live: recording stopped (${blob.size} bytes, ${blob.type || "unknown"})`);
         store.setRecordedBlob(blob);
       } catch (err) {
         console.error("[live] Recording stop error:", err);
+        store.logTiming(`live: recording stop error — ${(err as Error).message}`);
       }
     }
 

@@ -153,7 +153,7 @@ export function recordTtsUsage(input: {
     ts: Date.now(),
     route: input.route,
     provider: "elevenlabs",
-    model: input.model ?? "eleven_flash_v2_5",
+    model: input.model ?? "eleven_turbo_v2_5",
     characters,
     estimatedCostUsd: estimateTtsCostUsd(characters),
   };
