@@ -115,10 +115,15 @@ export const MOTION_STATE_CONFIGS: Record<MotionState, MotionStateConfig> = {
   sleeping: {
     stiffness: 15,
     damping: 8,
-    headPitch: -0.65,  // chin tucked down
+    // Head level — pre-reveal pose. Earlier this was -0.65 ("chin tucked
+    // down") but with this rig negative pitch tilts the face skyward, so
+    // the user saw the puppet looking up while the page-fade was still
+    // clearing. Keep it neutral so the reveal-into-idle transition has
+    // nothing to do.
+    headPitch: 0,
     headYaw: 0,
     headRoll: 0.05,    // slight tilt
-    bodyBob: -0.08,    // slumped down
+    bodyBob: -0.08,    // slumped body — visual sleepiness comes from this + slow breathing
     oscFreq: 0.15,     // slow breathing
     oscAmp: 0.015,
   },

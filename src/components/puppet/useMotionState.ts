@@ -34,11 +34,20 @@ export function useMotionState(targets: React.MutableRefObject<SpringTargets>) {
   useFrame((_, delta) => {
     timeRef.current += delta;
     const t = timeRef.current;
-    const { activeMotionState, motionIntensity, audioAmplitude, hasSpokenThisSession } =
+    const { activeMotionState, motionIntensity, audioAmplitude, hasSpokenThisSession, puppetRevealed } =
       useSessionStore.getState();
 
-    const awake = hasSpokenThisSession;
-    const effectiveState: MotionState = awake ? activeMotionState : "sleeping";
+    // Three-phase pose:
+    //   1. Not revealed yet → "sleeping" (chin/head tucked, still hidden behind the fade overlay)
+    //   2. Revealed but hasn't spoken yet → force "idle" so the user sees him
+    //      sitting there looking straight ahead during the beat before talking
+    //   3. Speaking → use whatever activeMotionState the brain picked
+    const awake = puppetRevealed || hasSpokenThisSession;
+    const effectiveState: MotionState = !awake
+      ? "sleeping"
+      : !hasSpokenThisSession
+        ? "idle"
+        : activeMotionState;
     const effectiveIntensity = awake ? motionIntensity : 1.0;
 
     const cfg = MOTION_STATE_CONFIGS[effectiveState];

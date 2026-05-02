@@ -326,6 +326,19 @@ export default function LiveSessionController({
 
     while (isRunningRef.current && ttsGenerationRef.current === gen) {
       while (cursor < audio.chunks.length) {
+        // Before queueing the very first chunk of the session: reveal the
+        // puppet, then hold for a beat. The page-level black overlay fades
+        // out over ~500ms; without the wait, the user heard the puppet
+        // talking while still mid-fade — jarring. Holding here lets the
+        // fade complete and gives him a moment of "sitting there looking
+        // at you" before he opens his mouth.
+        if (!queuedAny && !firstSpeechRecordedRef.current) {
+          useSessionStore.getState().setPuppetRevealed(true);
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, COMEDIAN_CONFIG.firstSpeechBeatMs),
+          );
+          if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
+        }
         playback.enqueueChunk(audio.chunks[cursor]);
         cursor++;
         if (!queuedAny) {

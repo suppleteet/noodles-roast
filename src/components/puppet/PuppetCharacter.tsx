@@ -51,7 +51,7 @@ interface Props {
 export default function PuppetCharacter({ modelUrl = null }: Props) {
   const groupRef = useRef<THREE.Group>(null);
 
-  const targets = useRef<SpringTargets>({ pitch: 0.65, yaw: 0, roll: 0.05, bobY: -0.03 });
+  const targets = useRef<SpringTargets>({ pitch: 0, yaw: 0, roll: 0.05, bobY: -0.03 });
   const { stiffnessRef, dampingRef } = useMotionState(targets);
   const springs = useSpringPhysics(stiffnessRef, dampingRef, targets);
 
@@ -127,17 +127,17 @@ function ProceduralHead() {
       {/* ── Nose ── */}
       <Nose />
 
-      {/* ── Eyebrows — capsule pills, level above the white domes.
-            Capsule default is along Y, so rotate Math.PI/2 around Z to
-            orient horizontally. No inner-end-down angry V — they sit flat
-            and lifted above the eyes. ── */}
-      <mesh position={[-0.18, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.055, 0.26, 6, 12]} />
-        <meshStandardMaterial color={BROW_COLOR} roughness={0.5} />
+      {/* ── Eyebrows — short, thick capsule pills with a clear gap between
+            them. Sit level above each eye, no V tilt. Capsule default
+            axis is Y, rotate Math.PI/2 around Z to lay them horizontal.
+            High roughness, no metalness — felt texture, no specular. ── */}
+      <mesh position={[-0.21, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
+        <capsuleGeometry args={[0.085, 0.10, 6, 12]} />
+        <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
       </mesh>
-      <mesh position={[0.18, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.055, 0.26, 6, 12]} />
-        <meshStandardMaterial color={BROW_COLOR} roughness={0.5} />
+      <mesh position={[0.21, 0.92, 0.80]} rotation={[0.9, 0, Math.PI / 2]}>
+        <capsuleGeometry args={[0.085, 0.10, 6, 12]} />
+        <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
       </mesh>
     </MouthHemispheres>
   );
@@ -181,20 +181,21 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
 
   return (
     <>
-      {/* Mouth interior: dark red sphere slightly smaller than the head, sits
-          inside the hemispheres. Visible only through the gap when the jaw
-          opens. side=BackSide renders the inside surface so it reads as a
-          cavity rather than a solid ball. */}
+      {/* Mouth interior: SOLID red sphere just inside the head shell. Reads
+          as a "solid ball with a cut in it" — when the jaw opens, the
+          visible part is the outer surface of the inner ball, not the
+          inside of a hollow cavity. Sized to fit just inside the bottom
+          hemisphere (which is at R*0.95). */}
       <mesh>
-        <sphereGeometry args={[R * 0.92, 32, 32]} />
-        <meshStandardMaterial color={MOUTH_COLOR} roughness={0.65} side={THREE.BackSide} />
+        <sphereGeometry args={[R * 0.93, 48, 48]} />
+        <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} />
       </mesh>
 
       {/* Top hemisphere — eyes and nose are children so they tilt with it */}
       <group ref={topGroupRef}>
         <mesh>
           <sphereGeometry args={[R, 64, 64, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshStandardMaterial color={HEAD_COLOR} roughness={0.25} metalness={0.05} />
+          <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
         </mesh>
         {children}
       </group>
@@ -203,13 +204,13 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
       <group ref={bottomGroupRef}>
         <mesh>
           <sphereGeometry args={[R * 0.95, 64, 64, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]} />
-          <meshStandardMaterial color={HEAD_COLOR} roughness={0.25} metalness={0.05} />
+          <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
         </mesh>
         {/* Tongue: flattened ellipsoid resting on the floor of the bottom
             jaw, tilted slightly forward like it's sticking out a touch. */}
         <mesh position={[0, -0.55, 0.18]} rotation={[-0.25, 0, 0]} scale={[0.55, 0.22, 0.75]}>
           <sphereGeometry args={[0.32, 28, 24]} />
-          <meshStandardMaterial color={TONGUE_COLOR} roughness={0.55} />
+          <meshStandardMaterial color={TONGUE_COLOR} roughness={1.0} metalness={0} />
         </mesh>
       </group>
     </>
@@ -221,7 +222,7 @@ function Nose() {
   return (
     <mesh position={[0, 0.18, 0.95]} scale={[0.88, 1.12, 0.80]}>
       <sphereGeometry args={[0.34, 40, 40]} />
-      <meshStandardMaterial color={NOSE_COLOR} roughness={0.30} metalness={0.06} />
+      <meshStandardMaterial color={NOSE_COLOR} roughness={1.0} metalness={0} />
     </mesh>
   );
 }

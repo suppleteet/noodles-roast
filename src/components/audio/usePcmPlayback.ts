@@ -56,11 +56,13 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const rafRef = useRef<number>(0);
   const lastAmplitudeRef = useRef<number>(0);
-  // ConstantSourceNode that pumps silence continuously through the analyser →
-  // speaker MediaStream so Android Chrome keeps the audio session classified
-  // as "media" instead of "communication". Without this, the routing lock
-  // released between TTS bursts and call-channel routing took over.
-  const silentSourceRef = useRef<ConstantSourceNode | null>(null);
+  // Continuous sub-audible source that keeps the analyser → speaker
+  // MediaStream pumping real samples so Android Chrome locks the audio
+  // session as "media" instead of "communication". DC-zero from a
+  // ConstantSourceNode wasn't enough — the system treated it as silence
+  // and routed via call channel. A 5 Hz oscillator at 0.0005 gain is
+  // subsonic and inaudible but produces non-zero samples.
+  const silentSourceRef = useRef<AudioScheduledSourceNode | null>(null);
 
   // Hidden <audio> element routes output through the media channel on Android.
   // Without this, Chrome Android sends Web Audio through the earpiece when
@@ -112,17 +114,23 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       audioEl.play().catch((e) => console.warn("[playback] audioEl.play failed:", e));
       audioElRef.current = audioEl;
 
-      // Continuous silent signal: ConstantSourceNode at 0 keeps the
-      // MediaStream actively producing samples even when no TTS is playing.
-      // Android Chrome only locks the media-channel routing while the stream
-      // is actively pumping data — gaps between TTS chunks would otherwise
-      // let the system fall back to the communication channel (volume buttons
-      // control call volume instead of media, mic uses near-field gain).
-      const silentSource = ctx.createConstantSource();
-      silentSource.offset.value = 0;
-      silentSource.connect(analyser);
-      silentSource.start();
-      silentSourceRef.current = silentSource;
+      // Continuous sub-audible signal: a low oscillator at very low gain
+      // keeps the MediaStream pumping real (non-zero) samples even when
+      // no TTS is playing. Android Chrome only locks the media-channel
+      // routing while the stream is actively producing audio — silence
+      // (DC zero) was being treated as "no media" and the system fell
+      // back to the communication channel (volume buttons controlled call
+      // volume instead of media, mic switched to near-field gain). 5 Hz
+      // is subsonic; gain of 0.0005 is well below audible threshold.
+      const silentOsc = ctx.createOscillator();
+      silentOsc.frequency.value = 5;
+      silentOsc.type = "sine";
+      const silentGain = ctx.createGain();
+      silentGain.gain.value = 0.0005;
+      silentOsc.connect(silentGain);
+      silentGain.connect(analyser);
+      silentOsc.start();
+      silentSourceRef.current = silentOsc;
     }
     return ctx;
   }
