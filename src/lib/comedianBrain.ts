@@ -713,19 +713,23 @@ export class ComedianBrain {
    * Canned roast for when the LLM pipeline returns nothing (typically an
    * upstream API error — quota, missing key, malformed JSON). Keeps the show
    * going so the user sees a response instead of dead air + the next question.
+   *
+   * Does NOT echo the user's answer — the filler already does that work, so
+   * including it here doubled up ("Smooches, you say." → "Smooches. Stunning…").
    */
-  private static _pickFallbackRoast(answer: string): {
+  private static _pickFallbackRoast(_answer: string): {
     text: string;
     motion: string;
     intensity: number;
   } {
-    const trimmed = answer.trim().replace(/[.?!]+$/, "");
-    const truncated = trimmed.length > 28 ? `${trimmed.slice(0, 28)}…` : trimmed;
     const templates = [
-      `${truncated}. Yeah. Riveting. Real edge-of-my-seat material there.`,
-      `${truncated}. Stunning. The roast practically writes itself.`,
-      `Right. ${truncated}. Give me a second to recover from how interesting that was.`,
-      `${truncated}. Cool. Cool cool cool. Anyway.`,
+      "Stunning. Real edge-of-my-seat material there.",
+      "Yeah. The roast practically writes itself.",
+      "Riveting. Honestly, give me a second to recover.",
+      "Cool. Cool cool cool. Anyway.",
+      "Mhm. Just stunning material to work with.",
+      "Wow. The depth on display here is staggering.",
+      "Sure. Let's just keep moving.",
     ];
     return {
       text: templates[Math.floor(Math.random() * templates.length)],
