@@ -40,7 +40,7 @@ const HEAD_COLOR  = "#5a1a8a";
 const EYE_WHITE   = "#f0f0f0";
 const PUPIL_COLOR = "#0a0a0a";
 const NOSE_COLOR  = "#f5e560"; // light yellow
-const BROW_COLOR  = "#0a0014"; // near-black with a hint of purple
+const BROW_COLOR  = "#241430"; // dark plum — a touch brighter than near-black
 const MOUTH_COLOR = "#3a0510"; // dark red interior cavity
 const TONGUE_COLOR = "#d44d61"; // light red tongue
 
