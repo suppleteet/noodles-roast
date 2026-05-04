@@ -1249,9 +1249,14 @@ export default function LiveSessionController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  // Cleanup on real unmount (navigation away, etc.) — does NOT reset isRunningRef
-  // because React StrictMode simulates unmount/remount and would break the start guard.
-  // isRunningRef is only set false by stopLiveSession (explicit stop).
+  // Cleanup on real unmount (navigation away, etc.). Keep this LIGHT — only
+  // clear timers/intervals. The phase effect above drives the full shutdown
+  // through stopLiveSession when phase flips to "stopped". Heavy teardown here
+  // (mic.stop / vad.stop / playback.flush / session.close) used to fire during
+  // React StrictMode's simulated unmount/remount in dev: the cleanup killed
+  // the mic stream, but isRunningRef stayed true so the remount's
+  // startLiveSession early-exited — leaving an in-progress micPromise that
+  // resolved against a dead stream and never produced PCM chunks.
   useEffect(() => {
     return () => {
       stopDrainPolling();
@@ -1260,11 +1265,6 @@ export default function LiveSessionController({
       if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
       if (wrapupTimerRef.current) clearTimeout(wrapupTimerRef.current);
       if (userSpeakingTimerRef.current) clearTimeout(userSpeakingTimerRef.current);
-      brainRef.current?.stop();
-      vad.stop();
-      mic.stop();
-      playback.flush();
-      try { sessionRef.current?.close(); } catch { /* noop */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
