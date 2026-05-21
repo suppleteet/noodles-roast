@@ -51,7 +51,13 @@ export interface LedgerEntry {
 
 export interface JokeStreamSink {
   pushAudio: (b64Pcm: string) => void;
+  /** Record the joke's full text in transcript / lastSpokenText.
+   *  Called when the LLM closes the joke JSON object. Does NOT mark the
+   *  audio buffer done — EL TTS is still synthesizing remaining audio. */
   finalize: (text: string) => void;
+  /** Signal that EL has finished producing audio for this joke. Closes
+   *  the audio buffer so the playback chain can advance to the next item. */
+  endAudio: () => void;
   cancel: () => void;
 }
 
@@ -1305,8 +1311,17 @@ export class ComedianBrain {
     const incompleteStarters = new Set([
       "i", "i'm", "im", "i've", "ive", "i'll", "ill", "my", "we", "we're", "were",
       "it", "it's", "its", "the", "a", "an", "to", "for", "with", "because", "uh", "um",
+      // Demonstratives — "That's my X", "There's a Y", "These are Z" — almost
+      // always lead into more content. Without these, "That's" by itself
+      // committed at 300 ms silence and the brain fired a filler while the
+      // user was just taking a breath before "my artwork".
+      "that", "that's", "thats", "this", "this's", "those", "these",
+      "there", "there's", "theres", "here", "here's", "heres",
     ]);
     if (words <= 2 && incompleteStarters.has(firstWord)) return true;
+    // Any single word that isn't a yes/no/wave-off / complete-name response
+    // is too thin to commit on. Wait for the user to finish the thought.
+    if (words <= 1 && !this._isViableAnswer(answer)) return true;
     if (words <= 1 && this._isViableAnswer(answer)) return false;
     return words >= 2;
   }
@@ -3048,17 +3063,25 @@ export class ComedianBrain {
             const chunk = event.chunk as string | undefined;
             const sink = jokeSinks.get(index);
             if (sink && chunk) sink.pushAudio(chunk);
+          } else if (event.type === "audio-end" && streamingTtsEnabled) {
+            // EL has finished producing audio for this joke. Close the buffer
+            // so the playback chain can advance. Transcript was already
+            // recorded when the `joke` event arrived earlier.
+            const index = (event.index as number) ?? 0;
+            const sink = jokeSinks.get(index);
+            if (sink) {
+              sink.endAudio();
+              jokeSinks.delete(index);
+            }
           } else if (event.type === "joke") {
             const joke = event as unknown as JokeItem & { index?: number };
-            // Streaming path: audio already in flight; finalize the sink with
-            // the full text so transcript is recorded and the buffer closes.
+            // Streaming path: record transcript now (LLM has all the text),
+            // but DO NOT close the audio buffer — EL is still synthesizing.
+            // The buffer is closed by the `audio-end` event above.
             if (streamingTtsEnabled) {
               const idx = joke.index ?? jokesSeen;
               const sink = jokeSinks.get(idx);
-              if (sink) {
-                sink.finalize(joke.text);
-                jokeSinks.delete(idx);
-              }
+              if (sink) sink.finalize(joke.text);
             }
             // Either path: still notify the caller so brain bookkeeping
             // (jokesAlreadyDelivered, ledger, etc.) runs.
@@ -3115,6 +3138,17 @@ export class ComedianBrain {
 
         if (buffer.trim() && parseLines(buffer.split("\n"))) return;
 
+        // Safety net: SSE ended but some sinks never received audio-end (EL
+        // hung or server dropped the event). Close them so the playback
+        // chain can advance instead of waiting forever.
+        if (jokeSinks.size > 0) {
+          this.deps.logTiming(
+            `brain: stream ended with ${jokeSinks.size} sink(s) still open — closing`,
+          );
+          for (const s of jokeSinks.values()) s.endAudio();
+          jokeSinks.clear();
+        }
+
         if (!metaSeen) {
           this.deps.logTiming("brain: generate-speak stream ended without meta — synthesizing");
           onMeta({ relevant: true });
@@ -3124,6 +3158,9 @@ export class ComedianBrain {
         if ((e as Error).name !== "AbortError") {
           console.error("[brain] generate-speak error:", e);
         }
+        // Cancel any open sinks so playback doesn't stall.
+        for (const s of jokeSinks.values()) s.cancel();
+        jokeSinks.clear();
         onError();
       });
   }

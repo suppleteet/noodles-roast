@@ -229,8 +229,18 @@ export default function LiveSessionController({
     motion: MotionState,
     intensity: number,
     options?: { appendToPrev?: boolean },
-  ): { pushAudio: (b64: string) => void; finalize: (text: string) => void; cancel: () => void } {
-    const noop = { pushAudio: () => {}, finalize: () => {}, cancel: () => {} };
+  ): {
+    pushAudio: (b64: string) => void;
+    finalize: (text: string) => void;
+    endAudio: () => void;
+    cancel: () => void;
+  } {
+    const noop = {
+      pushAudio: () => {},
+      finalize: () => {},
+      endAudio: () => {},
+      cancel: () => {},
+    };
     if (!isRunningRef.current) return noop;
     const gen = ttsGenerationRef.current;
     wasDrainedRef.current = false;
@@ -266,12 +276,17 @@ export default function LiveSessionController({
         audio.push(b64);
       },
       finalize(text: string) {
+        // Record transcript only — EL is still synthesizing the tail of audio.
+        // Do NOT mark `audio.done` here, or scheduleFromPrefetch will exit
+        // before the remaining chunks arrive and the joke gets cut off.
         if (text.trim()) {
           useSessionStore
             .getState()
             .pushTranscriptEntry("puppet", text.trim(), { append: options?.appendToPrev });
           lastSpokenTextRef.current = text.trim();
         }
+      },
+      endAudio() {
         audio.finish(false);
       },
       cancel() {

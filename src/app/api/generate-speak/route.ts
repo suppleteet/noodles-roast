@@ -19,6 +19,10 @@ type StreamEvent =
   | { type: "joke"; index?: number; text: string; motion: string; intensity: number; score: number }
   | { type: "joke-meta"; index: number; motion: string; intensity: number }
   | { type: "audio"; index: number; chunk: string }
+  /** Fired when ElevenLabs has finished producing audio for a given joke
+   *  index — the brain uses this to close the per-joke audio buffer so the
+   *  playback chain can advance. */
+  | { type: "audio-end"; index: number }
   | {
       type: "meta";
       relevant: boolean;
@@ -188,10 +192,15 @@ export async function POST(req: NextRequest) {
                 characters: chars,
               });
             }
+            // Tell the brain it can close the per-joke audio buffer — all
+            // chunks for this joke have been delivered.
+            safeEnqueue({ type: "audio-end", index });
             resolveDone();
           },
           onError: (err) => {
             console.error("[generate-speak] EL WS error:", err);
+            // Still emit audio-end so the brain doesn't wait forever.
+            safeEnqueue({ type: "audio-end", index });
             resolveDone();
           },
         });
