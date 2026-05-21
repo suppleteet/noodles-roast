@@ -634,7 +634,9 @@ describe("ComedianBrain — filler echo gating", () => {
   it("uses a non-echo filler when echo probability misses", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0.99);
     expect(filler.toLowerCase()).not.toContain("tyler");
-    expect(filler).toMatch(/^(Mmm\.|Hm\.|Uh huh\.|Hmm\.|Mmhmm\.|Ohhh\.|Huh\.)$/);
+    // Word-anchored fillers — every entry must contain at least one real dictionary word so
+    // ElevenLabs has prosody to ride. No bare-hum single-syllable forms.
+    expect(filler).toMatch(/^(Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Gotcha\.)$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {
@@ -648,6 +650,16 @@ describe("ComedianBrain — filler echo gating", () => {
     const filler = await captureFillerForAnswer("I work at a bakery.", 0);
     // Echo template wraps the answer text — must contain part of it.
     expect(filler.toLowerCase()).toContain("bakery");
+  });
+
+  it("does not echo a meta-complaint about the comedian repeating itself", async () => {
+    // "You keep asking about the posters." — if echoed back, the puppet sounds
+    // broken ("You keep asking about the posters, you say."). Must fall back to non-word filler.
+    const a = await captureFillerForAnswer("You keep asking about the posters.", 0);
+    expect(a.toLowerCase()).not.toContain("posters");
+    const b = await captureFillerForAnswer("You already asked me that.", 0);
+    expect(b.toLowerCase()).not.toContain("asked");
+    expect(b.toLowerCase()).not.toContain("already");
   });
 
   it("removes a repeated answer lead from a joke after echo filler", () => {

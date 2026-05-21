@@ -25,6 +25,7 @@ import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
+import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
 
 
 interface Props {
@@ -204,7 +205,7 @@ export default function LiveSessionController({
 
     // Fire TTS fetch NOW; starts generating audio while previous joke is still playing.
     // Playback streams chunks as soon as this line reaches the front of the chain.
-    const audioBuffer = prefetchTts(text.trim(), gen, previousText);
+    const audioBuffer = prefetchTts(text.trim(), gen, previousText, motion, intensity);
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
       if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
@@ -230,7 +231,13 @@ export default function LiveSessionController({
    * Start TTS stream immediately — buffer audio chunks.
    * Fires outside the chain so multiple prefetches overlap (no dead air between jokes).
    */
-  function prefetchTts(text: string, gen: number, previousText?: string): TtsChunkBuffer {
+  function prefetchTts(
+    text: string,
+    gen: number,
+    previousText?: string,
+    motion?: MotionState,
+    intensity?: number,
+  ): TtsChunkBuffer {
     const audio = new TtsChunkBuffer();
     if (!isRunningRef.current) {
       audio.finish(true);
@@ -248,13 +255,15 @@ export default function LiveSessionController({
       const startedAt = Date.now();
       let firstAudioLogged = false;
       try {
+        const baseVoice = useSessionStore.getState().voiceSettings;
+        const mergedVoice = voiceSettingsForMotion(baseVoice, motion, intensity);
         const resp = await fetch("/api/tts-ws", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             text,
             ...(previousText ? { previousText } : {}),
-            voiceSettings: useSessionStore.getState().voiceSettings,
+            voiceSettings: mergedVoice,
           }),
         });
 

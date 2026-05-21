@@ -1502,10 +1502,19 @@ export class ComedianBrain {
     return "restate";
   }
 
-  // Short non-word filler reactions — play immediately when generating starts so there's no dead air.
-  // These are speculative/thinking sounds that bridge naturally into the joke via ElevenLabs vocal continuity.
+  // Short conversational filler reactions — play immediately when generating starts so there's no dead air.
+  // IMPORTANT: must contain at least one real word. Isolated "Mmm." / "Hm." render as harsh nasal hums
+  // in ElevenLabs because there's no dictionary-word context to anchor prosody. Pair every hum with a
+  // word so vocal continuity from the previous line carries through naturally.
   private static readonly NONWORD_FILLERS = [
-    "Mmm.", "Hm.", "Uh huh.", "Hmm.", "Mmhmm.", "Ohhh.", "Huh.",
+    "Mm, okay.",
+    "Hm, alright.",
+    "Uh-huh, sure.",
+    "Right, right.",
+    "I see.",
+    "Okay then.",
+    "Yeah, alright.",
+    "Gotcha.",
   ];
 
   // Echo fillers — repeat the complete answer once, then bridge into the joke.
@@ -1520,12 +1529,18 @@ export class ComedianBrain {
   /** Probability of picking an echo filler when the answer is echo-eligible. */
   private static readonly ECHO_FILLER_PROBABILITY = 0.35;
 
+  // Meta-complaints about the comedian's own behavior — never echo these.
+  // Echoing "You keep asking about the posters." back as "...you say." reads as broken/glitchy.
+  private static readonly META_COMPLAINT_RE =
+    /\byou\s+(already|keep|just|always|literally|kept)\b|\byou\s+(asked|ask|said|told|repeated)\b/i;
+
   /** True if the answer is short enough and complete enough to repeat as a filler. */
   private _isFillerEchoable(answer: string): boolean {
     const trimmed = answer.trim();
     const w = wordCount(trimmed);
     if (w < 1 || w > 8) return false;
     if (this._answerEchoesRecentRoast(trimmed)) return false;
+    if (ComedianBrain.META_COMPLAINT_RE.test(trimmed)) return false;
 
     // Reject answers ending mid-thought (preposition/conjunction/article/aux verb).
     // These are the half-sentences that read as "you can't finish a sentence" if echoed.
@@ -2100,6 +2115,7 @@ export class ComedianBrain {
         setting: this.deps.getVisionSetting(),
         knownFacts: this._getThrowbackContext(),
         conversationSoFar: this._getLedgerContext(),
+        previousQuestions: this._getPreviousQuestionTexts(),
         imageBase64: frame,
       }),
     })
@@ -2254,6 +2270,7 @@ export class ComedianBrain {
         setting: this.deps.getVisionSetting(),
         knownFacts: this._getThrowbackContext(),
         conversationSoFar: this._getLedgerContext(),
+        previousQuestions: this._getPreviousQuestionTexts(),
         imageBase64: frame,
       }),
     })
@@ -2717,6 +2734,11 @@ export class ComedianBrain {
     return this.ledger.slice(-6).map(
       (e) => `[${e.type}] ${e.text}${e.tags.length ? ` (${e.tags.join(", ")})` : ""}`
     );
+  }
+
+  /** All question texts asked so far. Passed to generate-question to prevent topic repetition. */
+  private _getPreviousQuestionTexts(): string[] {
+    return this.ledger.filter((e) => e.type === "question").map((e) => e.text);
   }
 
   /** Full ledger summary for throwback references — all facts learned so far. */

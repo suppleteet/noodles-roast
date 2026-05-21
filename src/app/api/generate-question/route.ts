@@ -10,6 +10,7 @@ interface GenerateQuestionRequest {
   setting?: string | null;
   knownFacts?: string[];
   conversationSoFar?: string[];
+  previousQuestions?: string[];
   imageBase64?: string;
 }
 
@@ -29,6 +30,7 @@ RULES:
 - The question must feel like a natural next thing to say in a conversation — NOT like a game show or dating questionnaire.
 - React to what you SEE if you can. If they're in an office: "So what do you do in that office?" If they're in a car: "Where are you headed?" If you can't tell where they are: "Where are you right now?"
 - If you already know things about them (KNOWN FACTS), ask something that builds on what you've learned — not something you already know.
+- ABSOLUTELY DO NOT re-ask about a topic you have already asked about (see ALREADY ASKED list). Even a rephrasing of the same subject is forbidden — if you already asked about the posters, the wall art, the room decor, anything in that vicinity, that ENTIRE TOPIC is dead. Pick a different subject from what you see or a fresh personal angle (their clothing, their face, their voice, their job, their hometown, their hobbies, the lighting, the time of day, what they're holding, etc.).
 - Keep it SHORT. One sentence max. Casual, conversational tone.
 - Easy to answer — don't ask deep philosophical questions or anything that requires a long explanation.
 - The question should set up roastable material — whatever they answer, you should be able to make fun of it.
@@ -65,6 +67,13 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
       contextLines.push(`LOCATION: ${body.setting}`);
     if (body.knownFacts?.length)
       contextLines.push(`WHAT YOU ALREADY KNOW (don't ask about these): ${body.knownFacts.join(", ")}`);
+    if (body.previousQuestions?.length) {
+      // Hard list of dead topics. The prompt rule above forbids any rephrasing of these.
+      contextLines.push(
+        `ALREADY ASKED (FORBIDDEN — DO NOT rephrase or revisit any of these subjects):\n` +
+          body.previousQuestions.map((q) => `- ${q}`).join("\n"),
+      );
+    }
     if (body.conversationSoFar?.length)
       contextLines.push(`RECENT CONVERSATION:\n${body.conversationSoFar.slice(-4).join("\n")}`);
 
