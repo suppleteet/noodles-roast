@@ -70,6 +70,8 @@ function MainApp() {
   const timingLog = useSessionStore((s) => s.timingLog);
   const setSessionStartTs = useSessionStore((s) => s.setSessionStartTs);
   const timeToFirstSpeechMs = useSessionStore((s) => s.timeToFirstSpeechMs);
+  const observations = useSessionStore((s) => s.observations);
+  const lastVisionCallTs = useSessionStore((s) => s.lastVisionCallTs);
   const activePersona = useSessionStore((s) => s.activePersona);
   const setActivePersona = useSessionStore((s) => s.setActivePersona);
   const hasSpokenThisSession = useSessionStore((s) => s.hasSpokenThisSession);
@@ -84,6 +86,7 @@ function MainApp() {
   const ambientRequestInFlightRef = useRef(false);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
+  const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
 
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
   // Pre-fetched Live API token — may start on idle (conversation) so connect is faster after permission
@@ -412,6 +415,14 @@ function MainApp() {
   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (lastVisionCallTs === null) { setVisionElapsedSecs(null); return; }
+    const tick = () => setVisionElapsedSecs(Math.floor((Date.now() - lastVisionCallTs) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastVisionCallTs]);
+
+  useEffect(() => {
     if (!IS_DEV || !debugMode) return;
     let cancelled = false;
 
@@ -599,6 +610,14 @@ function MainApp() {
               <span className="text-white/30">{phase === "roasting" ? "waiting…" : "—"}</span>
             )}
           </div>
+          {observations.length > 0 && (
+            <div className="bg-black/80 border border-cyan-400/40 rounded p-2 font-mono text-[10px] text-cyan-300 leading-tight pointer-events-auto overflow-y-auto max-h-36">
+              <div className="text-cyan-500 mb-1">vision{visionElapsedSecs !== null ? ` · ${visionElapsedSecs}s ago` : ""}</div>
+              {observations.map((obs, i) => (
+                <div key={i}>· {obs}</div>
+              ))}
+            </div>
+          )}
           {llmUsage && (
             <div className="bg-black/80 border border-emerald-400/40 rounded p-2 font-mono text-[10px] leading-tight pointer-events-auto">
               <div className="text-[11px]">
