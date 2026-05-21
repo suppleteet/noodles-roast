@@ -634,9 +634,10 @@ describe("ComedianBrain — filler echo gating", () => {
   it("uses a non-echo filler when echo probability misses", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0.99);
     expect(filler.toLowerCase()).not.toContain("tyler");
-    // Word-anchored fillers — every entry must contain at least one real dictionary word so
-    // ElevenLabs has prosody to ride. No bare-hum single-syllable forms.
-    expect(filler).toMatch(/^(Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Gotcha\.)$/);
+    // Word-anchored fillers wrapped with leading/trailing "..." — ElevenLabs renders the
+    // ellipses as ~250ms breath beats on both sides, which provides the pre-react beat,
+    // inter-filler gaps, and pre-joke breath without any setTimeouts. No bare-hum forms.
+    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Gotcha\.) \.{3}$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

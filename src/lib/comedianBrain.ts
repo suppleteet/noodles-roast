@@ -261,6 +261,16 @@ export class ComedianBrain {
   private prodTimer: ReturnType<typeof setTimeout> | null = null;
   private devNoteTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Filler pump (active during "generating" — keeps audio chain non-silent until joke arrives).
+  // No timers: each filler is wrapped "... <text> ..." so ElevenLabs renders ~250ms breath
+  // beats before and after, which provides the pre-react beat, inter-filler gaps, and the
+  // pre-joke breath naturally. The pump is just a flag + a queue call on each drain event.
+  private fillerPumpActive = false;
+  private fillerLineCount = 0;
+  private fillerAnswerForPump = "";
+  private fillerLastText: string | null = null;
+  private fillerFirstText: string | null = null;
+
   // Availability flags
   private micAvailable = true;
   private cameraAvailable = true;
@@ -910,6 +920,14 @@ export class ComedianBrain {
         } else {
           // Give them another chance before the next prod
           this._startProdTimer();
+        }
+        break;
+      case "generating":
+        // Filler audio drained — queue the next filler directly so the audio chain stays
+        // continuous until the joke arrives. Bails inside _queueNextPumpFiller if the pump was
+        // already stopped (joke is on its way) or we hit fillerMaxStack.
+        if (this.fillerPumpActive) {
+          this._queueNextPumpFiller();
         }
         break;
       case "delivering":
@@ -1588,6 +1606,49 @@ export class ComedianBrain {
     ];
   }
 
+  /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
+  private _pickNonWordFiller(avoid: string | null): string {
+    const opts = ComedianBrain.NONWORD_FILLERS.filter((f) => f !== avoid);
+    const pool = opts.length > 0 ? opts : ComedianBrain.NONWORD_FILLERS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /** Stop the pump immediately. Returns whether at least one filler was queued. */
+  private _stopFillerPump(): { fillerQueued: boolean } {
+    const queued = this.fillerLineCount > 0;
+    this.fillerPumpActive = false;
+    return { fillerQueued: queued };
+  }
+
+  /**
+   * Queue the next filler in the pump. Called directly — no setTimeout. The 250ms pre- and
+   * post-breath is baked into the filler text via "..." padding, so ElevenLabs handles all
+   * pacing. Bails if the pump was stopped, we're no longer generating, or we've hit the cap.
+   */
+  private _queueNextPumpFiller(): void {
+    if (!this.fillerPumpActive) return;
+    if (this.state !== "generating") return;
+    if (this.fillerLineCount >= COMEDIAN_CONFIG.fillerMaxStack) {
+      this.fillerPumpActive = false;
+      this.deps.logTiming(`brain: filler pump stopped at max (${COMEDIAN_CONFIG.fillerMaxStack})`);
+      return;
+    }
+    // First filler can echo the answer; subsequent stacked fillers stay non-word so we don't
+    // repeat the same echo phrase or sound like a broken record.
+    const filler =
+      this.fillerLineCount === 0
+        ? this._pickFiller(this.fillerAnswerForPump)
+        : this._pickNonWordFiller(this.fillerLastText);
+    if (this.fillerLineCount === 0) this.fillerFirstText = filler;
+    this.fillerLastText = filler;
+    this.fillerLineCount++;
+    // Wrap in ellipses → ~250ms breath before and after via ElevenLabs prosody.
+    const wrapped = `... ${filler} ...`;
+    this.deps.queueSpeak(wrapped, "thinking", 0.6);
+    this.deps.logTiming(`brain: filler[${this.fillerLineCount}] — "${filler}"`);
+    // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
+  }
+
   private _removeEchoedAnswerLead(text: string, answer: string, fillerAlreadySaid?: string): string {
     const cleanedAnswer = ComedianBrain._stripLeadingHesitation(
       answer.trim().replace(/[.?!,]+$/, "").trim(),
@@ -1608,17 +1669,22 @@ export class ComedianBrain {
     this.deps.setMotion("thinking", 0.7);
     this._addLedger("answer", answer, []);
 
-    // Queue an immediate filler so the user hears something right away while the API generates.
-    // Either a non-word sound ("Mmm.", "Uh huh.") or an echo of a complete answer ("Alex.",
-    // "So — Seattle.") — both bridge the silence and set the vocal tone via ElevenLabs
-    // previous_text continuity. No extra latency.
+    // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
+    // pause. First filler queues immediately; each filler is wrapped "... <text> ..." so
+    // ElevenLabs renders ~250ms breath beats on both sides. The pre-react beat, inter-filler
+    // gaps, and the pre-joke breath all come from the trailing ellipsis on the prior chain
+    // entry; no setTimeouts. Pump stops when the first joke arrives.
     let fillerAlreadySaid: string | undefined;
     if (!COMEDIAN_CONFIG.skipFiller && !this.fillerFiredForAnswer) {
       this.fillerFiredForAnswer = true;
-      const filler = this._pickFiller(answer);
-      this.deps.queueSpeak(filler, "thinking", 0.6);
-      this.deps.logTiming(`brain: filler — "${filler}"`);
-      fillerAlreadySaid = filler;
+      this.fillerAnswerForPump = answer;
+      this.fillerLineCount = 0;
+      this.fillerLastText = null;
+      this.fillerFirstText = null;
+      this.fillerPumpActive = true;
+      // LLM context — keep generic; the exact filler word doesn't matter for joke prompting.
+      fillerAlreadySaid = "filler sound";
+      this._queueNextPumpFiller();
     }
 
     const q = this.currentQuestion;
@@ -1688,11 +1754,21 @@ export class ComedianBrain {
       (joke) => {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
+        const isFirstJoke = jokesQueued === 0;
+        if (isFirstJoke) {
+          // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
+          // chain. The last filler's trailing "..." already provides the pre-joke breath, so
+          // the joke text itself stays unmodified.
+          this._stopFillerPump();
+        }
         if (this.state === "generating") {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
-        const jokeText = this._removeEchoedAnswerLead(joke.text, answer, fillerAlreadySaid);
+        // Strip echoed answer using the actual first filler text (the pump's echo), not the
+        // generic "filler sound" sentinel passed to the LLM.
+        const echoFiller = this.fillerFirstText ?? fillerAlreadySaid;
+        const jokeText = this._removeEchoedAnswerLead(joke.text, answer, echoFiller);
         const deliveredJoke = jokeText === joke.text ? joke : { ...joke, text: jokeText };
         // Streamed jokes after the first in this batch append to the same transcript paragraph
         const appendToPrev = jokesQueued > 0;
@@ -2826,6 +2902,10 @@ export class ComedianBrain {
     if (this.devNoteTimer) { clearTimeout(this.devNoteTimer); this.devNoteTimer = null; }
     if (this.greetingVisionTimeout) { clearTimeout(this.greetingVisionTimeout); this.greetingVisionTimeout = null; }
     this._clearConfirmTimer();
+    // Pump cancellation — _clearTimers fires on stop / cancellation / wait_answer entry, all
+    // paths where leaving "generating" without delivering a joke is possible. No timer to
+    // cancel (pump runs purely off drain events), just flip the flag.
+    this.fillerPumpActive = false;
   }
 
   private _getPersonaGreetings(): string[] {
