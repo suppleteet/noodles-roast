@@ -49,10 +49,29 @@ export interface LedgerEntry {
   tags: string[];
 }
 
+export interface JokeStreamSink {
+  pushAudio: (b64Pcm: string) => void;
+  finalize: (text: string) => void;
+  cancel: () => void;
+}
+
 export interface ComedianBrainDeps {
   /** appendToPrev: when true, merge this text into the previous puppet transcript entry
    *  (single paragraph for streamed multi-joke deliveries). TTS pipeline is unaffected. */
   queueSpeak: (text: string, motion?: MotionState, intensity?: number, appendToPrev?: boolean) => void;
+  /**
+   * Streaming-TTS variant: when present, the brain enables server-side joke
+   * audio streaming. Returns a sink for the brain to push base64 PCM into as
+   * SSE `audio` events arrive. `finalize(text)` is called when the LLM joke
+   * JSON object closes.
+   */
+  openJokeStream?: (
+    motion: MotionState,
+    intensity: number,
+    options?: { appendToPrev?: boolean },
+  ) => JokeStreamSink;
+  /** Base voice settings for streaming TTS (sent server-side as baseVoiceSettings). */
+  getVoiceSettings?: () => import("@/store/useSessionStore").VoiceSettings;
   cancelSpeech: () => void;
   isQueueEmpty: () => boolean;
   setMotion: (state: MotionState, intensity: number) => void;
@@ -1781,12 +1800,18 @@ export class ComedianBrain {
         const deliveredJoke = jokeText === joke.text ? joke : { ...joke, text: jokeText };
         // Streamed jokes after the first in this batch append to the same transcript paragraph
         const appendToPrev = jokesQueued > 0;
-        this.deps.queueSpeak(
-          deliveredJoke.text,
-          deliveredJoke.motion as import("@/lib/motionStates").MotionState,
-          deliveredJoke.intensity,
-          appendToPrev,
-        );
+        // Streaming-TTS path: audio is already in flight via the server's EL WS,
+        // and the brain's SSE handler already finalized the sink with this text.
+        // Skip the legacy TTS fetch in that case.
+        const streamingTtsActive = !!this.deps.openJokeStream;
+        if (!streamingTtsActive) {
+          this.deps.queueSpeak(
+            deliveredJoke.text,
+            deliveredJoke.motion as import("@/lib/motionStates").MotionState,
+            deliveredJoke.intensity,
+            appendToPrev,
+          );
+        }
         if (COMEDIAN_CONFIG.singleJokeMode) this.pipelinePreviousJokes.push(deliveredJoke.text);
 
         this._addLedger("joke", deliveredJoke.text, []);
@@ -2064,7 +2089,10 @@ export class ComedianBrain {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
-        this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
+        // Streaming-TTS path: audio already in flight via the SSE pipeline.
+        if (!this.deps.openJokeStream) {
+          this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
+        }
         this.pipelinePreviousJokes.push(joke.text);
         this._addLedger("joke", joke.text, []);
         this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
@@ -2952,6 +2980,14 @@ export class ComedianBrain {
     }) => void,
     onError: () => void,
   ): void {
+    const streamingTtsEnabled = !!this.deps.openJokeStream;
+    const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
+    /** Per-joke audio sinks, keyed by index from the server SSE stream. */
+    const jokeSinks: Map<number, JokeStreamSink> = new Map();
+    /** Whether the brain has emitted a transcript entry for this joke yet. */
+    const jokeAppendState: Map<number, boolean> = new Map();
+    let jokesSeen = 0;
+
     fetch("/api/generate-speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2965,6 +3001,8 @@ export class ComedianBrain {
         ambientContext: this.deps.getAmbientContext() ?? undefined,
         ambientAntiRepeatNote: this._ambientAntiRepeatNote(),
         townFlavor: this.deps.getTownFlavor()?.trim() || undefined,
+        streamingTts: streamingTtsEnabled,
+        baseVoiceSettings,
       }),
     })
       .then(async (resp) => {
@@ -2985,12 +3023,51 @@ export class ComedianBrain {
         let buffer = "";
 
         const handleEvent = (event: { type: string; [key: string]: unknown }): boolean => {
-          if (event.type === "joke") {
-            onJoke(event as unknown as JokeItem);
+          if (event.type === "joke-meta" && streamingTtsEnabled) {
+            // Server opened EL WS — open a sink on our side to absorb audio.
+            const index = (event.index as number) ?? 0;
+            const motion = (event.motion as string) ?? "idle";
+            const intensity = (event.intensity as number) ?? 0.7;
+            const appendToPrev = index > 0;
+            jokeAppendState.set(index, appendToPrev);
+            try {
+              const sink = this.deps.openJokeStream!(
+                motion as MotionState,
+                intensity,
+                { appendToPrev },
+              );
+              jokeSinks.set(index, sink);
+            } catch (err) {
+              console.error("[brain] openJokeStream failed:", err);
+            }
+          } else if (event.type === "audio" && streamingTtsEnabled) {
+            const index = (event.index as number) ?? 0;
+            const chunk = event.chunk as string | undefined;
+            const sink = jokeSinks.get(index);
+            if (sink && chunk) sink.pushAudio(chunk);
+          } else if (event.type === "joke") {
+            const joke = event as unknown as JokeItem & { index?: number };
+            // Streaming path: audio already in flight; finalize the sink with
+            // the full text so transcript is recorded and the buffer closes.
+            if (streamingTtsEnabled) {
+              const idx = joke.index ?? jokesSeen;
+              const sink = jokeSinks.get(idx);
+              if (sink) {
+                sink.finalize(joke.text);
+                jokeSinks.delete(idx);
+              }
+            }
+            // Either path: still notify the caller so brain bookkeeping
+            // (jokesAlreadyDelivered, ledger, etc.) runs.
+            onJoke(joke);
+            jokesSeen++;
           } else if (event.type === "error" && event.error === "quota_exceeded") {
             const provider = (event.provider as string) ?? "unknown";
             this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
             this.deps.logTiming(`brain: QUOTA ERROR from ${provider} (stream)`);
+            // Cancel any in-flight sinks so playback unblocks.
+            for (const s of jokeSinks.values()) s.cancel();
+            jokeSinks.clear();
             onError();
             return true;
           } else if (event.type === "meta") {

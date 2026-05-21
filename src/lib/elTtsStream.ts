@@ -187,3 +187,167 @@ export function streamElTtsAsync(
     });
   });
 }
+
+interface ElTtsIncrementalOptions {
+  voiceId?: string;
+  voiceSettings?: Partial<ElVoiceSettings>;
+  previousText?: string;
+  onAudioChunk: (base64Pcm: string) => void;
+  onDone: () => void;
+  onError: (err: Error) => void;
+  /**
+   * Override chunk_length_schedule for this stream. Defaults to a more
+   * aggressive [60, 100, 160, 220] for incremental streaming so first audio
+   * arrives sooner than the single-shot default of [120, 160, 250, 290].
+   */
+  chunkLengthSchedule?: number[];
+}
+
+export interface ElTtsStreamController {
+  /** Append text to the open EL WS. Safe to call many times. */
+  sendText(delta: string): void;
+  /** Signal end-of-input. EL will produce final audio chunks then close. */
+  end(): void;
+  /** Force-close the stream without waiting for remaining audio (e.g. on cancel). */
+  close(): void;
+}
+
+const INCREMENTAL_CHUNK_LENGTH_SCHEDULE = [60, 100, 160, 220];
+
+/**
+ * Open a long-lived ElevenLabs WebSocket and return a controller for
+ * pushing text into it incrementally. Each chunk is sent without `flush`
+ * so EL's internal `chunk_length_schedule` controls TTS timing.
+ *
+ * Voice settings are sent once at handshake and CANNOT be changed mid-stream
+ * — that's the architectural reason motion+intensity must be known before
+ * calling this function.
+ */
+export function openElTtsStream({
+  voiceId,
+  voiceSettings: settingsOverride,
+  previousText,
+  onAudioChunk,
+  onDone,
+  onError,
+  chunkLengthSchedule,
+}: ElTtsIncrementalOptions): ElTtsStreamController {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    onError(new Error("ELEVENLABS_API_KEY not set"));
+    return { sendText: () => {}, end: () => {}, close: () => {} };
+  }
+
+  const vid = voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? ELEVENLABS_VOICE_ID;
+  const autoMode = shouldUseAutoMode();
+  const params = new URLSearchParams({
+    model_id: getElevenLabsModelId(),
+    output_format: EL_OUTPUT_FORMAT,
+    "xi-api-key": apiKey,
+  });
+  if (autoMode) params.set("auto_mode", "true");
+
+  const ws = new WebSocket(
+    `wss://${getElevenLabsHost()}/v1/text-to-speech/${vid}/stream-input?${params.toString()}`,
+  );
+  let closed = false;
+  let opened = false;
+  let pendingText = "";
+  let endRequested = false;
+
+  ws.on("open", () => {
+    opened = true;
+    const voiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...settingsOverride };
+    ws.send(
+      JSON.stringify({
+        text: " ",
+        voice_settings: voiceSettings,
+        xi_api_key: apiKey,
+        generation_config: {
+          chunk_length_schedule: chunkLengthSchedule ?? INCREMENTAL_CHUNK_LENGTH_SCHEDULE,
+        },
+        ...(previousText ? { previous_text: previousText } : {}),
+      }),
+    );
+
+    if (pendingText) {
+      ws.send(JSON.stringify({ text: pendingText }));
+      pendingText = "";
+    }
+    if (endRequested) {
+      ws.send(JSON.stringify({ text: "" }));
+    }
+  });
+
+  ws.on("message", (data: WebSocket.Data) => {
+    try {
+      const msg = JSON.parse(data.toString()) as {
+        audio?: string;
+        isFinal?: boolean;
+        error?: string;
+      };
+
+      if (msg.error) {
+        closed = true;
+        ws.close();
+        onError(new Error(`ElevenLabs WS error: ${msg.error}`));
+        return;
+      }
+
+      if (msg.audio) onAudioChunk(msg.audio);
+
+      if (msg.isFinal) {
+        closed = true;
+        ws.close();
+        onDone();
+      }
+    } catch {
+      // Ignore non-JSON messages.
+    }
+  });
+
+  ws.on("error", (err: Error) => {
+    if (!closed) {
+      closed = true;
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
+  ws.on("close", () => {
+    if (!closed) {
+      closed = true;
+      onDone();
+    }
+  });
+
+  return {
+    sendText(delta: string) {
+      if (closed || !delta) return;
+      if (!opened) {
+        // Buffer until handshake completes.
+        pendingText += delta;
+        return;
+      }
+      ws.send(JSON.stringify({ text: delta }));
+    },
+    end() {
+      if (closed) return;
+      if (!opened) {
+        endRequested = true;
+        return;
+      }
+      // Empty-text terminator signals EOI to ElevenLabs.
+      ws.send(JSON.stringify({ text: "" }));
+    },
+    close() {
+      if (!closed) {
+        closed = true;
+        try {
+          ws.close();
+        } catch {
+          // noop
+        }
+      }
+    },
+  };
+}

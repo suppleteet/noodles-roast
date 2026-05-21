@@ -3,13 +3,22 @@ import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
-import type { JokeContext, JokeItem, JokeResponse } from "@/app/api/generate-joke/route";
+import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
 import { getSession, getContextInstructions, sendMessageStream, compactStableContext } from "@/lib/chatSessionStore";
 import { generateTextStream, QuotaError, type UserPart } from "@/lib/llmClient";
 import { trimObservations } from "@/lib/visionDiff";
+import { createStreamingJokeParser } from "@/lib/partialJokeParser";
+import { openElTtsStream, type ElTtsStreamController } from "@/lib/elTtsStream";
+import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "@/store/useSessionStore";
+import type { MotionState } from "@/lib/motionStates";
+import { recordTtsUsage } from "@/lib/usageTracker";
+import { getElevenLabsModelId } from "@/lib/elTtsStream";
 
 type StreamEvent =
-  | { type: "joke"; text: string; motion: string; intensity: number; score: number }
+  | { type: "joke"; index?: number; text: string; motion: string; intensity: number; score: number }
+  | { type: "joke-meta"; index: number; motion: string; intensity: number }
+  | { type: "audio"; index: number; chunk: string }
   | {
       type: "meta";
       relevant: boolean;
@@ -22,32 +31,6 @@ type StreamEvent =
 
 function sse(event: StreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
-}
-
-/**
- * Extract complete flat joke objects (text+motion+intensity+score) from a partial JSON string.
- * Returns only newly found jokes beyond `emittedCount`.
- */
-function extractNewJokes(accumulated: string, emittedCount: number): JokeItem[] {
-  const jokes: JokeItem[] = [];
-  const flatObjRegex = /\{[^{}]+\}/g;
-  let match;
-  while ((match = flatObjRegex.exec(accumulated)) !== null) {
-    try {
-      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
-      if (
-        typeof parsed.text === "string" &&
-        typeof parsed.motion === "string" &&
-        typeof parsed.intensity === "number" &&
-        typeof parsed.score === "number"
-      ) {
-        jokes.push(parsed as unknown as JokeItem);
-      }
-    } catch {
-      // malformed partial object — skip
-    }
-  }
-  return jokes.slice(emittedCount);
 }
 
 export interface GenerateSpeakRequest {
@@ -79,6 +62,10 @@ export interface GenerateSpeakRequest {
   };
   ambientAntiRepeatNote?: string;
   townFlavor?: string;
+  /** Enable streaming TTS: server opens EL WS and pipes audio back as SSE events. */
+  streamingTts?: boolean;
+  /** Base voice settings (used when streamingTts=true). Falls back to defaults. */
+  baseVoiceSettings?: Partial<VoiceSettings>;
 }
 
 /** Build user message parts from the request body. */
@@ -152,10 +139,79 @@ export async function POST(req: NextRequest) {
   // implicit prefix cache keeps hitting.
   if (session && body.sessionId) compactStableContext(body.sessionId, body);
 
+  const baseVoice: VoiceSettings = {
+    ...DEFAULT_VOICE_SETTINGS,
+    ...(body.baseVoiceSettings ?? {}),
+  };
+  const useStreamingTts = body.streamingTts === true;
+
   const stream = new ReadableStream({
     async start(controller) {
       let accumulated = "";
-      let jokesEmitted = 0;
+      const parser = createStreamingJokeParser();
+      /** EL WS controller per joke index. */
+      const ttsControllers: Map<number, ElTtsStreamController> = new Map();
+      /** Promises that resolve when each EL WS reports done/error. */
+      const ttsDonePromises: Promise<void>[] = [];
+      /** Characters sent to EL per joke (for usage tracking). */
+      const ttsCharCount: Map<number, number> = new Map();
+      const elModelId = useStreamingTts ? getElevenLabsModelId() : "";
+
+      const safeEnqueue = (ev: StreamEvent) => {
+        try {
+          controller.enqueue(encoder.encode(sse(ev)));
+        } catch {
+          // controller closed — ignore
+        }
+      };
+
+      const openTtsForJoke = (index: number, motion: string, intensity: number) => {
+        if (!useStreamingTts) return;
+        const motionState = motion as MotionState;
+        const mergedVoice = voiceSettingsForMotion(baseVoice, motionState, intensity);
+        let resolveDone: () => void = () => {};
+        const done = new Promise<void>((res) => {
+          resolveDone = res;
+        });
+        ttsDonePromises.push(done);
+        const ctl = openElTtsStream({
+          voiceSettings: mergedVoice,
+          onAudioChunk: (b64) => {
+            safeEnqueue({ type: "audio", index, chunk: b64 });
+          },
+          onDone: () => {
+            const chars = ttsCharCount.get(index) ?? 0;
+            if (chars > 0) {
+              recordTtsUsage({
+                route: "generate-speak-stream",
+                model: elModelId,
+                characters: chars,
+              });
+            }
+            resolveDone();
+          },
+          onError: (err) => {
+            console.error("[generate-speak] EL WS error:", err);
+            resolveDone();
+          },
+        });
+        ttsControllers.set(index, ctl);
+      };
+
+      const sendTtsDelta = (index: number, delta: string) => {
+        if (!useStreamingTts) return;
+        const ctl = ttsControllers.get(index);
+        if (!ctl) return;
+        ctl.sendText(delta);
+        ttsCharCount.set(index, (ttsCharCount.get(index) ?? 0) + delta.length);
+      };
+
+      const endTtsForJoke = (index: number) => {
+        if (!useStreamingTts) return;
+        const ctl = ttsControllers.get(index);
+        if (!ctl) return;
+        ctl.end();
+      };
 
       try {
         let textStream: AsyncIterable<string>;
@@ -191,55 +247,113 @@ export async function POST(req: NextRequest) {
           if (!chunkText) continue;
           accumulated += chunkText;
 
-          const newJokes = extractNewJokes(accumulated, jokesEmitted);
-          for (const joke of newJokes) {
-            controller.enqueue(encoder.encode(sse({ type: "joke", ...joke })));
-            jokesEmitted++;
+          for (const ev of parser.feed(chunkText)) {
+            if (ev.type === "joke-start") {
+              if (useStreamingTts) {
+                openTtsForJoke(ev.index, ev.motion, ev.intensity);
+                safeEnqueue({
+                  type: "joke-meta",
+                  index: ev.index,
+                  motion: ev.motion,
+                  intensity: ev.intensity,
+                });
+              }
+            } else if (ev.type === "joke-text-delta") {
+              sendTtsDelta(ev.index, ev.delta);
+            } else if (ev.type === "joke-end") {
+              endTtsForJoke(ev.index);
+              safeEnqueue({
+                type: "joke",
+                index: ev.index,
+                text: ev.text,
+                motion: ev.motion,
+                intensity: ev.intensity,
+                score: ev.score,
+              });
+            }
           }
         }
 
-        // Parse full response for meta fields + any jokes missed by streaming
+        // Flush any pending events from the parser at end-of-stream.
+        for (const ev of parser.finish()) {
+          if (ev.type === "joke-start") {
+            if (useStreamingTts) {
+              openTtsForJoke(ev.index, ev.motion, ev.intensity);
+              safeEnqueue({
+                type: "joke-meta",
+                index: ev.index,
+                motion: ev.motion,
+                intensity: ev.intensity,
+              });
+            }
+          } else if (ev.type === "joke-text-delta") {
+            sendTtsDelta(ev.index, ev.delta);
+          } else if (ev.type === "joke-end") {
+            endTtsForJoke(ev.index);
+            safeEnqueue({
+              type: "joke",
+              index: ev.index,
+              text: ev.text,
+              motion: ev.motion,
+              intensity: ev.intensity,
+              score: ev.score,
+            });
+          }
+        }
+
+        // Parse full response for meta fields (followUp/redirect/callback/tags).
         const jsonMatch = accumulated.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           try {
             const full = JSON.parse(jsonMatch[0]) as JokeResponse;
-
-            const remainingJokes = (Array.isArray(full.jokes) ? full.jokes : []).slice(jokesEmitted);
-            for (const joke of remainingJokes) {
-              controller.enqueue(encoder.encode(sse({ type: "joke", ...joke })));
-              jokesEmitted++;
-            }
-
-            controller.enqueue(
-              encoder.encode(
-                sse({
-                  type: "meta",
-                  relevant: full.relevant ?? true,
-                  followUp: full.followUp,
-                  redirect: full.redirect,
-                  tags: full.tags,
-                  callback: full.callback,
-                }),
-              ),
-            );
+            safeEnqueue({
+              type: "meta",
+              relevant: full.relevant ?? true,
+              followUp: full.followUp,
+              redirect: full.redirect,
+              tags: full.tags,
+              callback: full.callback,
+            });
           } catch {
-            controller.enqueue(encoder.encode(sse({ type: "meta", relevant: true })));
+            safeEnqueue({ type: "meta", relevant: true });
           }
         } else {
-          controller.enqueue(encoder.encode(sse({ type: "meta", relevant: true })));
+          safeEnqueue({ type: "meta", relevant: true });
         }
       } catch (e) {
         if (e instanceof QuotaError) {
           console.error("[generate-speak] QUOTA:", e.message);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: "quota_exceeded", provider: e.provider, detail: e.message })}\n\n`));
+          try {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "error", error: "quota_exceeded", provider: e.provider, detail: e.message })}\n\n`,
+              ),
+            );
+          } catch {
+            // ignore
+          }
         } else {
           console.error("[generate-speak]", e);
-          controller.enqueue(encoder.encode(sse({ type: "meta", relevant: true })));
+          safeEnqueue({ type: "meta", relevant: true });
         }
       }
 
-      controller.enqueue(encoder.encode(sse({ type: "done" })));
-      controller.close();
+      // Wait for all EL WS streams to finish producing audio so we don't
+      // close the SSE before the last audio chunks arrive.
+      if (useStreamingTts && ttsDonePromises.length > 0) {
+        try {
+          await Promise.all(ttsDonePromises);
+        } catch {
+          // ignore — individual onError already logged
+        }
+      }
+
+      safeEnqueue({ type: "done" });
+      try {
+        controller.close();
+      } catch {
+        // already closed
+      }
     },
   });
 

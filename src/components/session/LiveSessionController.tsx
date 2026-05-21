@@ -218,6 +218,69 @@ export default function LiveSessionController({
     });
   }
 
+  /**
+   * Streaming-TTS variant: open an audio sink for a joke that's being
+   * generated AND TTS-streamed server-side. Audio bytes arrive via SSE
+   * `audio` events and get pushed into the returned sink. The sink slots
+   * into the same ttsChainRef so playback stays in order vs other jokes
+   * and non-streaming speech (fillers, questions, prods).
+   */
+  function openJokeStream(
+    motion: MotionState,
+    intensity: number,
+    options?: { appendToPrev?: boolean },
+  ): { pushAudio: (b64: string) => void; finalize: (text: string) => void; cancel: () => void } {
+    const noop = { pushAudio: () => {}, finalize: () => {}, cancel: () => {} };
+    if (!isRunningRef.current) return noop;
+    const gen = ttsGenerationRef.current;
+    wasDrainedRef.current = false;
+    const audio = new TtsChunkBuffer();
+    const ttsSpanId = useSessionStore.getState().beginSpan("tts", `stream:${motion}`);
+    let spanEnded = false;
+    const endSpan = () => {
+      if (spanEnded) return;
+      spanEnded = true;
+      useSessionStore.getState().endSpan(ttsSpanId);
+    };
+
+    ttsChainRef.current = ttsChainRef.current.then(async () => {
+      if (ttsGenerationRef.current !== gen || !isRunningRef.current) {
+        audio.finish(true);
+        endSpan();
+        return;
+      }
+      useSessionStore.getState().setActiveMotionState(motion, intensity);
+      useSessionStore.getState().logTiming(
+        `tts-stream: motion=${motion} intensity=${intensity.toFixed(2)}`,
+      );
+      try {
+        await scheduleFromPrefetch(audio, gen);
+      } finally {
+        endSpan();
+      }
+    });
+
+    return {
+      pushAudio(b64: string) {
+        if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
+        audio.push(b64);
+      },
+      finalize(text: string) {
+        if (text.trim()) {
+          useSessionStore
+            .getState()
+            .pushTranscriptEntry("puppet", text.trim(), { append: options?.appendToPrev });
+          lastSpokenTextRef.current = text.trim();
+        }
+        audio.finish(false);
+      },
+      cancel() {
+        audio.finish(true);
+        endSpan();
+      },
+    };
+  }
+
   function cancelSpeech(): void {
     ttsGenerationRef.current++;
     ttsChainRef.current = Promise.resolve();
@@ -973,6 +1036,7 @@ export default function LiveSessionController({
     // Build ComedianBrain
     brainRef.current = new ComedianBrain({
       queueSpeak,
+      openJokeStream,
       cancelSpeech,
       isQueueEmpty: () => playback.isQueueEmpty(),
       setMotion: (state, intensity) =>
@@ -987,6 +1051,7 @@ export default function LiveSessionController({
       getVisionSetting: () => useSessionStore.getState().visionSetting,
       getAmbientContext: () => useSessionStore.getState().ambientContext,
       getTownFlavor: () => useSessionStore.getState().townFlavorBlurb,
+      getVoiceSettings: () => useSessionStore.getState().voiceSettings,
       getSessionId: () => comedianSessionIdRef.current,
       setBrainState: (s) => useSessionStore.getState().setBrainState(s),
       setCurrentQuestion: (q) => useSessionStore.getState().setCurrentQuestion(q),
