@@ -2555,6 +2555,16 @@ export class ComedianBrain {
   private static readonly WRAPUP_FALLBACK = "And on that note, we're done here. Goodnight.";
   private static readonly WRAPUP_GENERATION_TIMEOUT_MS = 6000;
 
+  /** Spoken synchronously when entering wrapup so the user hears something while the
+   *  closing line generates (~2-3s on Sonnet). Without a bridge there's a long dead pause. */
+  private static readonly WRAPUP_BRIDGES = [
+    "Alright, alright, before I go —",
+    "Welllll, on that note —",
+    "Anyway, one last thing —",
+    "Okay, last word and I'm out —",
+    "Right, before I peace out —",
+  ];
+
   private enterWrapup(): void {
     this.pendingWrapup = false;
     this._clearTimers();
@@ -2568,6 +2578,18 @@ export class ComedianBrain {
     this.pipelinePrefetch = null;
     this._transition("wrapup");
     this.deps.setMotion("smug", 0.8);
+
+    // Bridge phrase fills the ~2-3s LLM generation gap so the user hears speech the moment
+    // the comedian "starts wrapping up" instead of staring at silence. Queued synchronously
+    // so its TTS fetch happens in parallel with the closing-line generation.
+    if (!COMEDIAN_CONFIG.skipScriptedLines) {
+      const bridge =
+        ComedianBrain.WRAPUP_BRIDGES[
+          Math.floor(Math.random() * ComedianBrain.WRAPUP_BRIDGES.length)
+        ];
+      this.deps.queueSpeak(bridge, "smug", 0.7);
+      this.deps.logTiming(`brain: wrapup bridge — "${bridge}"`);
+    }
 
     const knownFacts = this._getThrowbackContext();
     const conversation = this._getLedgerContext();
