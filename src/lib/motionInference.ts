@@ -54,3 +54,36 @@ export function inferMotionFromTranscript(
   // Default: idle, scaled by energy
   return ["idle", 0.3 + audioEnergy * 0.4];
 }
+
+/**
+ * Infer puppet REACTION motion from the user's answer text, used to drive the filler
+ * animation while the LLM generates the joke. The filler is a non-verbal reaction
+ * (think "uh-huh, mm-okay") so its motion should reflect how the puppet is processing
+ * what the user just said — not what the puppet is about to say.
+ *
+ * Patterns are deliberately narrow (insult / laughter / question-back / refusal / earnest)
+ * with conservative regexes — the default falls through to "thinking" which matches the
+ * comedian's processing-the-input headspace.
+ */
+const INSULT_RE = /\b(fuck\s*(you|off)|shut\s*(up|the|your)|piss\s*off|asshole|jerk|loser|idiot|stupid|dumb|sucks?|shitty|stfu)\b/i;
+// 2+ reps of "ha"/"he"/"ho" or "lol"/"lolol" or literal "heh"/"hah"/"lmao"/"rofl".
+// Avoid false positives on "hello"/"hey"/"happy" (single rep only).
+const LAUGHTER_RE = /^\s*((ha){2,}|(he){2,}|(ho){2,}|(lo)+l|lmao|rofl|heh|hah)/i;
+const QUESTION_BACK_RE = /^\s*(why|what|how|who|when|where|huh|excuse\s*me|what\s*about\s*you|are\s*you|do\s*you)\b/i;
+const REFUSAL_RE = /\b(whatever|i\s*don'?t\s*(know|care)|none\s*of\s*your|not\s*telling|maybe|kinda|sort\s*of)\b/i;
+const SHORT_FACTUAL_WORDS = 3;
+
+export function inferFillerMotionFromAnswer(answer: string): [MotionState, number] {
+  const trimmed = answer.trim();
+  if (!trimmed) return ["thinking", 0.6];
+
+  if (INSULT_RE.test(trimmed)) return ["smug", 0.85];
+  if (LAUGHTER_RE.test(trimmed)) return ["energetic", 0.7];
+  if (QUESTION_BACK_RE.test(trimmed) && trimmed.endsWith("?")) return ["shocked", 0.6];
+  if (REFUSAL_RE.test(trimmed)) return ["smug", 0.7];
+
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  if (words <= SHORT_FACTUAL_WORDS) return ["conspiratorial", 0.6];
+
+  return ["thinking", 0.6];
+}

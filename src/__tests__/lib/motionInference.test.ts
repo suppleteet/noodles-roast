@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inferMotionFromTranscript } from "@/lib/motionInference";
+import { inferMotionFromTranscript, inferFillerMotionFromAnswer } from "@/lib/motionInference";
 
 describe("inferMotionFromTranscript", () => {
   it("returns laugh for laughter sounds", () => {
@@ -64,5 +64,46 @@ describe("inferMotionFromTranscript", () => {
     const [, lowIntensity] = inferMotionFromTranscript("hello", 0.0);
     const [, highIntensity] = inferMotionFromTranscript("hello", 0.9);
     expect(highIntensity).toBeGreaterThan(lowIntensity);
+  });
+});
+
+describe("inferFillerMotionFromAnswer", () => {
+  it("returns smug for hostile/insulting answers", () => {
+    expect(inferFillerMotionFromAnswer("fuck you")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("Hey fuck you, man.")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("shut your mouth")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("you suck")[0]).toBe("smug");
+  });
+
+  it("returns energetic when user laughs", () => {
+    expect(inferFillerMotionFromAnswer("haha that's funny")[0]).toBe("energetic");
+    expect(inferFillerMotionFromAnswer("hehehe")[0]).toBe("energetic");
+  });
+
+  it("returns shocked when user fires a question back ending in '?'", () => {
+    expect(inferFillerMotionFromAnswer("why do you care?")[0]).toBe("shocked");
+    expect(inferFillerMotionFromAnswer("what about you?")[0]).toBe("shocked");
+  });
+
+  it("returns smug for refusal/dismissal answers", () => {
+    expect(inferFillerMotionFromAnswer("I don't know")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("whatever, man")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("none of your business")[0]).toBe("smug");
+  });
+
+  it("returns conspiratorial for short factual answers (≤3 words)", () => {
+    expect(inferFillerMotionFromAnswer("John")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("twenty three")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("Seattle")[0]).toBe("conspiratorial");
+  });
+
+  it("returns thinking for longer earnest answers", () => {
+    expect(inferFillerMotionFromAnswer("I work in agriculture and farming")[0]).toBe("thinking");
+    expect(inferFillerMotionFromAnswer("I'm just here for the show tonight")[0]).toBe("thinking");
+  });
+
+  it("returns thinking on empty input as a safe default", () => {
+    expect(inferFillerMotionFromAnswer("")[0]).toBe("thinking");
+    expect(inferFillerMotionFromAnswer("   ")[0]).toBe("thinking");
   });
 });

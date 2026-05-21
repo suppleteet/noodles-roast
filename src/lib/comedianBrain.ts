@@ -15,6 +15,7 @@
  */
 
 import type { MotionState } from "@/lib/motionStates";
+import { inferFillerMotionFromAnswer } from "@/lib/motionInference";
 import type { BrainState, MicMode } from "@/lib/comedianBrainConfig";
 import { STATE_CONFIG } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
@@ -169,13 +170,12 @@ function smartJoin(buffer: string, chunk: string): string {
   // Previous buffer ends with space or opening bracket — no extra space
   if (/[\s(["']$/.test(lastChar)) return buffer + chunk;
 
-  // Previous buffer ends with a letter and chunk starts with lowercase letter.
-  // Only join when at least one side is very short (syllable-level continuation),
-  // e.g. "Ye" + "s" -> "Yes". For normal words ("a" + "dentist"), add a space.
+  // Previous buffer ends with a letter and chunk starts with lowercase letter, with no
+  // leading space on the chunk. STT consistently emits a leading space on real word
+  // boundaries — its absence is a strong signal that this is a continuation of the same
+  // word ("agri" + "cul" → "agricul", "Ye" + "s" → "Yes"). Always concat without space.
   if (/[a-zA-Z]$/.test(lastChar) && /^[a-z]/.test(firstChar)) {
-    const prevToken = lastWordToken(buffer);
-    const nextToken = chunk.trimStart().match(/^[a-z]+/)?.[0] ?? "";
-    if (prevToken.length <= 2 || nextToken.length <= 2) return buffer + chunk;
+    return buffer + chunk;
   }
 
   // Digit followed by digit — likely a number continuation ("4" + "2" → "42")
@@ -270,6 +270,9 @@ export class ComedianBrain {
   private fillerAnswerForPump = "";
   private fillerLastText: string | null = null;
   private fillerFirstText: string | null = null;
+  /** Reaction motion + intensity for fillers, inferred once from the user's answer. */
+  private fillerMotion: MotionState = "thinking";
+  private fillerIntensity = 0.6;
 
   // Availability flags
   private micAvailable = true;
@@ -1644,8 +1647,10 @@ export class ComedianBrain {
     this.fillerLineCount++;
     // Wrap in ellipses → ~250ms breath before and after via ElevenLabs prosody.
     const wrapped = `... ${filler} ...`;
-    this.deps.queueSpeak(wrapped, "thinking", 0.6);
-    this.deps.logTiming(`brain: filler[${this.fillerLineCount}] — "${filler}"`);
+    this.deps.queueSpeak(wrapped, this.fillerMotion, this.fillerIntensity);
+    this.deps.logTiming(
+      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}) — "${filler}"`,
+    );
     // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
   }
 
@@ -1682,6 +1687,10 @@ export class ComedianBrain {
       this.fillerLastText = null;
       this.fillerFirstText = null;
       this.fillerPumpActive = true;
+      // Infer puppet's reaction motion once from the answer — drives ALL fillers in the
+      // stack so the puppet's body language matches how it's processing what was said
+      // (smug at an insult, conspiratorial at a short factual answer, etc.).
+      [this.fillerMotion, this.fillerIntensity] = inferFillerMotionFromAnswer(answer);
       // LLM context — keep generic; the exact filler word doesn't matter for joke prompting.
       fillerAlreadySaid = "filler sound";
       this._queueNextPumpFiller();
