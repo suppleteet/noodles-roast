@@ -53,7 +53,7 @@ describe("usageTracker", () => {
   it("records direct Gemini vision usage", () => {
     recordGeminiUsage({
       route: "analyze-vision",
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       text: "{}",
       userText: "look at this",
       imageCount: 1,

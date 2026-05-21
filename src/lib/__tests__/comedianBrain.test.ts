@@ -61,7 +61,7 @@ function makeDeps(overrides?: Partial<ComedianBrainDeps>): ComedianBrainDeps {
     getPersona: vi.fn().mockReturnValue("kvetch"),
     getBurnIntensity: vi.fn().mockReturnValue(3),
     getContentMode: vi.fn().mockReturnValue("clean"),
-    getRoastModel: vi.fn().mockReturnValue("gemini-2.5-flash"),
+    getRoastModel: vi.fn().mockReturnValue("gemini-3.5-flash"),
     getInputAmplitude: vi.fn().mockReturnValue(0.1),
     getObservations: vi.fn().mockReturnValue([]),
     getVisionSetting: vi.fn().mockReturnValue(null),

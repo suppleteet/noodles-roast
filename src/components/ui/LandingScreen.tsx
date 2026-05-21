@@ -7,7 +7,8 @@ import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monet
 const IS_DEV = process.env.NODE_ENV !== "production";
 
 const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
   { id: "gpt-4o", label: "GPT-4o" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },

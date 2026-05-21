@@ -18,6 +18,7 @@ import type { MotionState } from "@/lib/motionStates";
 import type { BrainState, MicMode } from "@/lib/comedianBrainConfig";
 import { STATE_CONFIG } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
+import { VISION_MODEL } from "@/lib/constants";
 
 import {
   QUESTION_BANK,
@@ -63,7 +64,7 @@ export interface ComedianBrainDeps {
   getAmbientContext: () => import("@/store/useSessionStore").AmbientContext | null;
   /** Optional async local culture/vibe line (filled after geolocation). */
   getTownFlavor: () => string | null;
-  /** LLM model ID for joke generation (e.g. "gemini-2.5-flash", "gpt-4o"). */
+  /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-4o"). */
   getRoastModel: () => string;
   /** Current mic input RMS (0-1) — used for background noise gating. */
   getInputAmplitude: () => number;
@@ -959,7 +960,7 @@ export class ComedianBrain {
       const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
       this.visionJokePrefetch = this._generateJoke({
         context: "greeting",
-        model: "gemini-2.5-flash", // greeting always uses Gemini — fastest + best at vision
+        model: VISION_MODEL, // greeting always uses Gemini — fastest + best at vision
         observations,
         imageBase64: frame,
       });
@@ -1000,7 +1001,7 @@ export class ComedianBrain {
       const observations = this.deps.getObservations();
       this._generateJoke({
         context: "greeting",
-        model: "gemini-2.5-flash",
+        model: VISION_MODEL,
         observations,
       }).then((response) => queueGreeting(response));
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);

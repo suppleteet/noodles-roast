@@ -49,7 +49,8 @@ const llmUsageEntries: LlmUsageEntry[] = [];
 const ttsUsageEntries: TtsUsageEntry[] = [];
 
 const MODEL_PRICE_PER_MILLION: Record<string, { input: number; output: number }> = {
-  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-3.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
   "gpt-4o": { input: 2.5, output: 10 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5 },

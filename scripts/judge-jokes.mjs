@@ -43,7 +43,8 @@ const visionQuestions = [
 
 const models = [
   { id: "gpt-4o", label: "GPT-4o" },
-  { id: "gemini-2.5-flash", label: "Gemini Flash" },
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
@@ -158,7 +159,7 @@ async function judgeGpt4o() {
 async function judgeGemini() {
   const ai = new GoogleGenAI({ apiKey: gemKey });
   const r = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.5-flash",
     config: {
       systemInstruction: sysPrompt,
       thinkingConfig: { thinkingBudget: 0 },

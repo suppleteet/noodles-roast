@@ -13,7 +13,8 @@ import {
 export type ContentMode = "clean" | "vulgar";
 
 export type RoastModelId =
-  | "gemini-2.5-flash"
+  | "gemini-3.5-flash"
+  | "gemini-3.1-flash-lite"
   | "gpt-4o"
   | "claude-sonnet-4-6"
   | "claude-haiku-4-5-20251001";
@@ -203,7 +204,7 @@ const initialState = {
   sessionMode: "conversation" as SessionMode,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
-  roastModel: "claude-sonnet-4-6" as RoastModelId,
+  roastModel: "gemini-3.5-flash" as RoastModelId,
   activePersona: DEFAULT_PERSONA,
   isSpeaking: false,
   isListening: false,

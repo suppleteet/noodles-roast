@@ -1,4 +1,5 @@
 import type { JokeResponse } from "@/app/api/generate-joke/route";
+import { VISION_MODEL } from "@/lib/constants";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { ContentMode } from "@/store/useSessionStore";
@@ -78,7 +79,7 @@ async function generateGreetingFromObservations(
     "/api/generate-joke",
     {
       context: "greeting",
-      model: "gemini-2.5-flash",
+      model: VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,
@@ -97,7 +98,7 @@ async function generateDirectImageGreeting(
     "/api/generate-joke",
     {
       context: "greeting",
-      model: "gemini-2.5-flash",
+      model: VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,
