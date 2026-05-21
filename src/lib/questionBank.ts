@@ -108,6 +108,29 @@ export const QUESTION_BANK: ComedyQuestion[] = [
     ],
   },
   {
+    id: "where_from",
+    question: "Where are you from?",
+    vulgarQuestions: [
+      "Where the hell are you from?",
+      "Where you out of? Don't lie, I'll roast it either way.",
+      "What's your hometown, you tragic specimen?",
+      "Where'd you grow up? I need geographic ammo.",
+      "Where you from? Be specific, I need targets.",
+    ],
+    jokeContext: "Hometown / region roast — stereotypes, geography clichés, what the place says about them.",
+    prodLines: [
+      "A city. A state. A zip code. Anything.",
+      "Where you from? It's a one-word answer for most people.",
+    ],
+    confirmThreshold: 0.6,
+    confirmTemplates: [
+      "{answer}?",
+      "From {answer}?",
+      "So — {answer}.",
+      "{answer}, huh?",
+    ],
+  },
+  {
     id: "single",
     question: "Are you single?",
     vulgarQuestions: [
@@ -157,7 +180,7 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   },
   {
     id: "bad_habit",
-    question: "What's your worst habit that you pretend is a personality?",
+    question: "What's your worst habit?",
     vulgarQuestions: [
       "What's your worst habit that you pretend is a personality, you menace?",
       "Name the red flag you keep rebranding as charm.",
@@ -173,7 +196,7 @@ export const QUESTION_BANK: ComedyQuestion[] = [
   },
   {
     id: "free_time",
-    question: "What do you do when nobody is making you be useful?",
+    question: "What do you do for fun?",
     vulgarQuestions: [
       "What do you do when nobody is making you be useful, if that ever happens?",
       "How do you waste time when nobody's supervising the disaster?",
