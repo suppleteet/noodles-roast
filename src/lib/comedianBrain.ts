@@ -2027,6 +2027,18 @@ export class ComedianBrain {
       .filter((e) => e.type === "joke")
       .at(-1)?.text ?? "";
 
+    const knownFacts = this._getThrowbackContext();
+
+    // Skip rephrase when there's nothing to anchor it against — rephrase only
+    // wins when it can bridge from a prior line or personalize with facts.
+    if (!lastJoke && knownFacts.length === 0) {
+      this.deps.queueSpeak(questionText, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(questionText);
+      this._addLedger("question", questionText, []);
+      this.deps.logTiming("brain: rephrase skipped — no prior context");
+      return;
+    }
+
     // Race: rephrase vs timeout
     const rephrasePromise = fetch("/api/rephrase-question", {
       method: "POST",
@@ -2036,7 +2048,7 @@ export class ComedianBrain {
         model: this.deps.getRoastModel(),
         persona: this.deps.getPersona(),
         burnIntensity: this.deps.getBurnIntensity(),
-        knownFacts: this._getThrowbackContext(),
+        knownFacts,
         previousLine: lastJoke,
       }),
     })
@@ -2192,7 +2204,15 @@ export class ComedianBrain {
 
   private _fetchRephraseForPreQueue(questionText: string): void {
     const lastJoke = this.ledger.filter((e) => e.type === "joke").at(-1)?.text ?? "";
+    const knownFacts = this._getThrowbackContext();
     const targetSlot = this.preQueuedQuestion;
+
+    // Same skip rule as the in-line path — nothing to anchor against.
+    if (!lastJoke && knownFacts.length === 0) {
+      this.preQueuedRephrasedText = questionText;
+      this.deps.logTiming("brain: pre-queue rephrase skipped — no prior context");
+      return;
+    }
 
     fetch("/api/rephrase-question", {
       method: "POST",
@@ -2202,7 +2222,7 @@ export class ComedianBrain {
         model: this.deps.getRoastModel(),
         persona: this.deps.getPersona(),
         burnIntensity: this.deps.getBurnIntensity(),
-        knownFacts: this._getThrowbackContext(),
+        knownFacts,
         previousLine: lastJoke,
       }),
     })

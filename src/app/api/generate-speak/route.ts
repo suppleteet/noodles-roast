@@ -4,8 +4,9 @@ import { getJokePrompt } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { JokeContext, JokeItem, JokeResponse } from "@/app/api/generate-joke/route";
-import { getSession, getContextInstructions, sendMessageStream } from "@/lib/chatSessionStore";
+import { getSession, getContextInstructions, sendMessageStream, compactStableContext } from "@/lib/chatSessionStore";
 import { generateTextStream, QuotaError, type UserPart } from "@/lib/llmClient";
+import { trimObservations } from "@/lib/visionDiff";
 
 type StreamEvent =
   | { type: "joke"; text: string; motion: string; intensity: number; score: number }
@@ -99,7 +100,7 @@ function buildUserParts(
   if (body.jokesAlreadyDelivered?.length)
     contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
   if (body.observations?.length)
-    contextLines.push(`CURRENT OBSERVATIONS: ${body.observations.join("; ")}`);
+    contextLines.push(`CURRENT OBSERVATIONS: ${trimObservations(body.observations, body.setting).join("; ")}`);
   if (body.setting)
     contextLines.push(`SETTING: The person appears to be in their ${body.setting}.`);
   if (body.previousObservations?.length)
@@ -145,6 +146,11 @@ export async function POST(req: NextRequest) {
 
   // Try to use an existing chat session (multi-turn — persona already loaded)
   const session = body.sessionId ? getSession(body.sessionId) : null;
+
+  // Strip stable blocks (townFlavor, setting, ambient, conversationSoFar) the
+  // session has already seen, so per-turn prompts stay compact and Gemini's
+  // implicit prefix cache keeps hitting.
+  if (session && body.sessionId) compactStableContext(body.sessionId, body);
 
   const stream = new ReadableStream({
     async start(controller) {

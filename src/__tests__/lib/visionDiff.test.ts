@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { diffObservations } from "@/lib/visionDiff";
+import { diffObservations, trimObservations } from "@/lib/visionDiff";
 
 describe("diffObservations", () => {
   it("returns no changes and not interesting when current is empty", () => {
@@ -72,5 +72,55 @@ describe("diffObservations", () => {
     const result = diffObservations(["curly hair"], ["looking down"]);
     expect(result.isInteresting).toBe(false);
     expect(result.changes).toEqual(["looking down"]);
+  });
+});
+
+describe("trimObservations", () => {
+  it("returns empty for empty input", () => {
+    expect(trimObservations([])).toEqual([]);
+  });
+
+  it("returns up to 4 observations and preserves order when none are high-value", () => {
+    const result = trimObservations(["a", "b", "c", "d", "e"]);
+    expect(result).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("promotes high-value observations to the front", () => {
+    const result = trimObservations([
+      "wearing black shirt",
+      "thoughtful expression",
+      "smiling broadly",
+      "looking down",
+    ]);
+    // "smiling" matches the laugh/smile pattern → ranked first
+    expect(result[0]).toBe("smiling broadly");
+  });
+
+  it("drops observations that only restate the setting", () => {
+    const result = trimObservations(
+      ["home office", "bearded man", "wearing glasses"],
+      "home office",
+    );
+    expect(result).not.toContain("home office");
+    expect(result).toEqual(["bearded man", "wearing glasses"]);
+  });
+
+  it("keeps observations that mention setting tokens but add new info", () => {
+    const result = trimObservations(
+      ["home office with messy shelves and a window behind him"],
+      "home office",
+    );
+    // Long phrase with extra info — not just restating setting
+    expect(result).toHaveLength(1);
+  });
+
+  it("respects custom max", () => {
+    const result = trimObservations(["a", "b", "c", "d", "e"], null, 2);
+    expect(result).toHaveLength(2);
+  });
+
+  it("stable sort: equal-score items keep original order", () => {
+    const result = trimObservations(["a", "b", "c"]);
+    expect(result).toEqual(["a", "b", "c"]);
   });
 });

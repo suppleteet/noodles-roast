@@ -52,6 +52,46 @@ export interface VisionDiffResult {
   changes: string[];
 }
 
+/** Observation traits that give the model something specific to roast.
+ *  Generic appearance lines ("wearing black t-shirt", "thoughtful expression")
+ *  get filtered behind these in `trimObservations`. */
+const HIGH_VALUE_OBS_PATTERNS = [
+  /\b(laugh|smil|grin|cry|wince|frown|sigh|grimac)/i,
+  /\b(beard|glasses|hat|hood|cap|piercing|tattoo|earring|jewelry)/i,
+  /\b(pet|dog|cat|child|kid|baby|partner|friend|person)/i,
+  /\b(phone|laptop|drink|food|cup|bottle|book|controller|microphone|camera)/i,
+  /\b(window|sunlight|dark|lit|messy|cluttered|empty|bare)/i,
+];
+
+/** Cap observations to `max` (default 4), prioritising high-value lines
+ *  (expressions, props, people, room cues) over generic appearance. Drops
+ *  observations that just restate `setting` (e.g. "home office setting" when
+ *  setting is already "home office"). */
+export function trimObservations(
+  observations: string[],
+  setting?: string | null,
+  max = 4,
+): string[] {
+  const settingTokens = (setting ?? "")
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((t) => t.length >= 4);
+  const isJustSetting = (obs: string): boolean => {
+    if (settingTokens.length === 0) return false;
+    const lower = obs.toLowerCase();
+    return settingTokens.every((t) => lower.includes(t)) && lower.length < 30;
+  };
+  const filtered = observations.filter((o) => !isJustSetting(o));
+  const scored = filtered.map((o, i) => ({
+    obs: o,
+    score: HIGH_VALUE_OBS_PATTERNS.some((re) => re.test(o)) ? 1 : 0,
+    originalIndex: i,
+  }));
+  // Stable sort: high-value first, ties broken by original order.
+  scored.sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex));
+  return scored.slice(0, max).map((s) => s.obs);
+}
+
 /**
  * Compare two sets of vision observations.
  * Returns { isInteresting, changes } where changes are observations in `current`

@@ -215,7 +215,13 @@ export async function generateText(req: LlmRequest): Promise<string> {
           const resp = await client.messages.create({
             model: req.model,
             max_tokens: req.maxOutputTokens ?? 1024,
-            system: req.systemPrompt,
+            // System prompt as a cache breakpoint — persona block is stable
+            // across the session, so prefix-cache hits drop input cost ~90%
+            // and latency ~50% on subsequent turns. Anthropic silently skips
+            // caching when below the minimum (1024 tokens for most models).
+            system: [
+              { type: "text", text: req.systemPrompt, cache_control: { type: "ephemeral" } },
+            ],
             messages: [{ role: "user", content: toAnthropicParts(req.userParts) }],
           });
           const textBlock = resp.content.find((b) => b.type === "text");
@@ -330,7 +336,10 @@ export async function* generateTextStream(
           const stream = client.messages.stream({
             model: req.model,
             max_tokens: req.maxOutputTokens ?? 1024,
-            system: req.systemPrompt,
+            // See note in generateText — persona prompt is the cache breakpoint.
+            system: [
+              { type: "text", text: req.systemPrompt, cache_control: { type: "ephemeral" } },
+            ],
             messages: [{ role: "user", content: toAnthropicParts(req.userParts) }],
           });
           let accumulated = "";

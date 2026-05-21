@@ -46,6 +46,15 @@ interface SessionEntry {
   persona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode: "clean" | "vulgar";
+  /** Tracks which stable-per-session context blocks have already been sent
+   *  through the chat. Lets per-turn routes skip re-sending them — the
+   *  model has them in chat history and Gemini implicit caching benefits
+   *  from a stable prefix. */
+  sentStableBlocks: {
+    townFlavor?: string;
+    setting?: string;
+    ambientCity?: string;
+  };
 }
 
 const sessions = new Map<string, SessionEntry>();
@@ -119,6 +128,7 @@ export function createSession(
     persona,
     burnIntensity,
     contentMode,
+    sentStableBlocks: {},
   });
 
   ensureCleanup();
@@ -278,6 +288,58 @@ export async function* sendMessageStream(
  */
 export function deleteSession(id: string): void {
   sessions.delete(id);
+}
+
+/**
+ * Fields a per-turn LLM route may carry that are stable across an entire
+ * comedian session (town flavor, ambient context, setting) — the chat
+ * history already includes them after the first turn, so retransmitting
+ * burns tokens and disrupts implicit prompt caching.
+ */
+export interface StableContextFields {
+  townFlavor?: string;
+  setting?: string | null;
+  ambientContext?: { city: string; [key: string]: unknown } | null;
+  conversationSoFar?: string[];
+}
+
+/**
+ * Mutates `body` to strip context blocks the session has already seen.
+ * - `conversationSoFar`: always dropped when a session exists — chat history has it.
+ * - `townFlavor` / `setting` / `ambientContext`: dropped when identical to what
+ *   was sent earlier in this session. New values are kept (and remembered).
+ *
+ * Caller must have already validated the sessionId — this no-ops on unknown IDs.
+ */
+export function compactStableContext<T extends StableContextFields>(
+  sessionId: string,
+  body: T,
+): T {
+  const session = sessions.get(sessionId);
+  if (!session) return body;
+
+  // Chat history has the conversation; re-sending it is pure waste.
+  body.conversationSoFar = undefined;
+
+  const sent = session.sentStableBlocks;
+
+  if (body.townFlavor != null) {
+    const trimmed = body.townFlavor.trim();
+    if (trimmed === sent.townFlavor) body.townFlavor = undefined;
+    else sent.townFlavor = trimmed;
+  }
+
+  if (body.setting != null) {
+    if (body.setting === sent.setting) body.setting = null;
+    else sent.setting = body.setting;
+  }
+
+  if (body.ambientContext != null) {
+    if (body.ambientContext.city === sent.ambientCity) body.ambientContext = null;
+    else sent.ambientCity = body.ambientContext.city;
+  }
+
+  return body;
 }
 
 /**

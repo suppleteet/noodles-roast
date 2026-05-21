@@ -4,9 +4,10 @@ import { getJokePrompt } from "@/lib/prompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { MotionState } from "@/lib/motionStates";
-import { getSession, getContextInstructions, sendMessage } from "@/lib/chatSessionStore";
+import { getSession, getContextInstructions, sendMessage, compactStableContext } from "@/lib/chatSessionStore";
 import { QuotaError } from "@/lib/llmClient";
 import { generateText, type UserPart } from "@/lib/llmClient";
+import { trimObservations } from "@/lib/visionDiff";
 
 export type JokeContext =
   | "greeting"
@@ -80,7 +81,7 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
   if (body.jokesAlreadyDelivered?.length)
     contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
   if (body.observations?.length)
-    contextLines.push(`CURRENT OBSERVATIONS: ${body.observations.join("; ")}`);
+    contextLines.push(`CURRENT OBSERVATIONS: ${trimObservations(body.observations, body.setting).join("; ")}`);
   if (body.setting)
     contextLines.push(`SETTING: The person appears to be in their ${body.setting}.`);
   if (body.previousObservations?.length)
@@ -115,6 +116,10 @@ export async function POST(req: NextRequest) {
 
     // Try to use an existing chat session
     const session = body.sessionId ? getSession(body.sessionId) : null;
+
+    // Strip stable blocks already in chat history (townFlavor, setting,
+    // ambientContext, conversationSoFar) so per-turn prompts stay compact.
+    if (session && body.sessionId) compactStableContext(body.sessionId, body);
 
     let rawText: string;
 
