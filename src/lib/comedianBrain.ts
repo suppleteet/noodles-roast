@@ -1664,8 +1664,11 @@ export class ComedianBrain {
     if (this.fillerLineCount === 0) this.fillerFirstText = filler;
     this.fillerLastText = filler;
     this.fillerLineCount++;
-    // Wrap in ellipses → ~250ms breath before and after via ElevenLabs prosody.
-    const wrapped = `... ${filler} ...`;
+    // Leading-only ellipsis → ~250ms breath BEFORE each filler. No trailing ellipsis: the
+    // next filler's leading "..." already provides the inter-filler gap, and the joke after
+    // the last filler shouldn't have a long pause either. Trailing ellipses would double-up
+    // between stacked fillers (~500ms gap), which felt like an audible dead beat.
+    const wrapped = `... ${filler}`;
     this.deps.queueSpeak(wrapped, this.fillerMotion, this.fillerIntensity);
     this.deps.logTiming(
       `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}) — "${filler}"`,

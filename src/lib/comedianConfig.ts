@@ -60,10 +60,10 @@ const defaults = {
   singleJokeMode: false,     // false: 1-2 jokes stream from one API call; true: pipeline 1 joke at a time
 
   // Filler pump — keeps audio flowing while the joke generates so there are no long pauses.
-  // Each filler is wrapped "... <text> ..." so ElevenLabs renders ~250ms breath beats before
-  // AND after, which gives us the pre-react beat, the inter-filler gap, and the pre-joke
-  // breath without any setTimeouts. Hard cap on stacked fillers as a safety net if the LLM
-  // hangs — ~6 covers >12s of stack at average filler length.
+  // Each filler is prefixed with "..." so ElevenLabs renders a ~250ms breath beat BEFORE
+  // each one. No trailing ellipsis: the next filler's leading "..." provides the inter-
+  // filler gap, and the joke after the last filler shouldn't have a long pause either.
+  // Hard cap as a safety net if the LLM hangs — ~6 covers >12s of stack at avg filler length.
   fillerMaxStack: 6,
 };
 
