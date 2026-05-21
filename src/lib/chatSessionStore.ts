@@ -87,6 +87,18 @@ function isGemini(model: string): boolean {
   return !model.startsWith("gpt-") && !model.startsWith("claude-") && !model.startsWith("o1") && !model.startsWith("o3");
 }
 
+/** Most recent N history entries the non-Gemini path replays per turn.
+ *  History grows un-cached every call, so cap it before it costs us
+ *  hundreds of tokens of context overhead late in a session. */
+const HISTORY_REPLAY_CAP = 16;
+
+function buildHistoryText(history: HistoryEntry[]): string {
+  return history
+    .slice(-HISTORY_REPLAY_CAP)
+    .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
+    .join("\n\n");
+}
+
 /**
  * Create a new chat session with the comedian persona baked in.
  */
@@ -187,10 +199,8 @@ export async function sendMessage(
     return text;
   }
 
-  // Non-Gemini: build full message list with history
-  const historyText = session.history
-    .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
-    .join("\n\n");
+  // Non-Gemini: build capped message list with history
+  const historyText = buildHistoryText(session.history);
 
   const contextParts: UserPart[] = [];
   if (historyText) {
@@ -257,10 +267,8 @@ export async function* sendMessageStream(
     return;
   }
 
-  // Non-Gemini: replay history
-  const historyText = session.history
-    .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
-    .join("\n\n");
+  // Non-Gemini: replay capped history
+  const historyText = buildHistoryText(session.history);
 
   const contextParts: UserPart[] = [];
   if (historyText) {
@@ -288,6 +296,36 @@ export async function* sendMessageStream(
  */
 export function deleteSession(id: string): void {
   sessions.delete(id);
+}
+
+/**
+ * Fire-and-forget Anthropic-cache warmup. Sends one minimal call with the
+ * session's system prompt so Anthropic writes the ephemeral cache breakpoint
+ * — the user's first real turn then hits it for ~90% input-cost discount and
+ * ~50% latency reduction (on Sonnet; Haiku's 2048-token minimum may exclude
+ * shorter persona prompts).
+ *
+ * Skipped for Gemini and OpenAI:
+ * - Gemini implicit caching keys on prefix length; a 5-token warmup is too
+ *   short to seed a useful prefix for the chat-session's longer calls.
+ * - OpenAI chat.completions has no comparable cache mechanism that benefits
+ *   from a warmup call.
+ *
+ * Errors are swallowed — best-effort, must not block session start.
+ */
+export function warmSession(sessionId: string): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  if (!session.model.startsWith("claude-")) return;
+
+  generateText({
+    model: session.model,
+    systemPrompt: session.systemPrompt,
+    userParts: [{ text: "Acknowledge with a single word." }],
+    maxOutputTokens: 5,
+  }).catch(() => {
+    /* best-effort warmup; cold first-turn just pays full latency */
+  });
 }
 
 /**

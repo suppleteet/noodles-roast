@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSession, deleteSession } from "@/lib/chatSessionStore";
+import { createSession, deleteSession, warmSession } from "@/lib/chatSessionStore";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 
@@ -34,6 +34,10 @@ export async function POST(req: NextRequest) {
   const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
 
   const sessionId = createSession(apiKey, persona, burnIntensity, contentMode, body.model);
+
+  // Prime provider prompt caches with the session's system prompt so the
+  // user's first turn isn't paying cold-cache latency. Best-effort, async.
+  warmSession(sessionId);
 
   return NextResponse.json({ sessionId });
 }
