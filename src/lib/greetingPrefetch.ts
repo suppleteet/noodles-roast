@@ -2,8 +2,11 @@ import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { VISION_MODEL } from "@/lib/constants";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
-import type { ContentMode } from "@/store/useSessionStore";
+import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
+import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
+import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import type { MotionState } from "@/lib/motionStates";
 
 export interface GreetingPrefetchSnapshot {
   activePersona: PersonaId;
@@ -182,4 +185,88 @@ export async function prefetchParallelVisionAndGreeting(
 
   useSessionStore.getState().logTiming("live: greeting generic fallback fired");
   return generateGreetingFromObservations([], snapshot);
+}
+
+/**
+ * Fire ElevenLabs TTS for the greeting joke as soon as we have the text,
+ * accumulating audio chunks into a TtsChunkBuffer. The browser hands the
+ * buffer to the brain when the session enters greeting, so playback starts
+ * with audio already in flight — no extra round-trip to /api/tts-ws.
+ *
+ * The first call to this in a session also benefits from /api/prewarm-tts
+ * having pre-warmed the EL DNS/TLS path.
+ */
+export function prefetchGreetingAudio(
+  text: string,
+  motion: MotionState | string | undefined,
+  intensity: number | undefined,
+  baseVoiceSettings: VoiceSettings,
+): TtsChunkBuffer {
+  const buffer = new TtsChunkBuffer();
+  if (!text.trim()) {
+    buffer.finish(true);
+    return buffer;
+  }
+
+  const startedAt = Date.now();
+  const mergedVoice = voiceSettingsForMotion(
+    baseVoiceSettings,
+    motion as MotionState | undefined,
+    intensity ?? 0.7,
+  );
+
+  void (async () => {
+    try {
+      const resp = await fetch("/api/tts-ws", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text.trim(),
+          voiceSettings: mergedVoice,
+        }),
+      });
+
+      if (!resp.ok || !resp.body) {
+        useSessionStore.getState().logTiming(`live: greeting tts prefetch failed (${resp.status})`);
+        buffer.finish(true);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuf = "";
+      let firstAudioLogged = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuf += decoder.decode(value, { stream: true });
+        const lines = sseBuf.split("\n");
+        sseBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as { type: string; chunk?: string };
+            if (event.type === "audio" && event.chunk) {
+              if (!firstAudioLogged) {
+                firstAudioLogged = true;
+                useSessionStore
+                  .getState()
+                  .logTiming(`live: greeting tts prefetch first audio ${Date.now() - startedAt}ms`);
+              }
+              buffer.push(event.chunk);
+            }
+          } catch {
+            // ignore malformed SSE
+          }
+        }
+      }
+      buffer.finish(false);
+    } catch (err) {
+      console.error("[greetingPrefetch] tts error:", err);
+      buffer.finish(true);
+    }
+  })();
+
+  return buffer;
 }

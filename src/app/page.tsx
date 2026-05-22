@@ -16,7 +16,8 @@ import LiveSessionController from "@/components/session/LiveSessionController";
 import { useCompositor } from "@/components/recording/useCompositor";
 import { PERSONA_IDS, PERSONAS } from "@/lib/personas";
 import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
-import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
+import { prefetchParallelVisionAndGreeting, prefetchGreetingAudio } from "@/lib/greetingPrefetch";
+import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import RigEditMode from "@/engine/ui/RigEditMode";
@@ -93,6 +94,7 @@ function MainApp() {
   const tokenPromiseRef = useRef<Promise<string> | null>(null);
   /** Vision analyze + greeting joke — starts as soon as we have a MediaStream, before phase is roasting */
   const warmupGreetingPromiseRef = useRef<Promise<JokeResponse | null> | null>(null);
+  const warmupGreetingAudioRef = useRef<Promise<TtsChunkBuffer | null> | null>(null);
 
   const webcamRef = useRef<WebcamCaptureHandle>(null);
   const audioPlayerRef = useRef<AudioPlayerHandle>(null);
@@ -129,12 +131,29 @@ function MainApp() {
       });
   }
 
-  /** Fire parallel /api/analyze + /api/generate-joke (greeting) before we leave the permission screen */
+  /**
+   * Fires immediately after the user grants permissions (post-click). Runs:
+   *   - /api/prewarm-tts: warms EL DNS/TLS so the first real TTS request
+   *     gets a faster WS handshake.
+   *   - prefetchParallelVisionAndGreeting: vision + direct-image joke in
+   *     parallel; returns the greeting JokeResponse.
+   *   - prefetchGreetingAudio (chained off the joke): fires /api/tts-ws as
+   *     soon as we have the joke text, accumulating audio chunks into a
+   *     TtsChunkBuffer that the brain consumes on enterGreeting. Eliminates
+   *     the sequential gap between "joke ready" and "EL handshake starting".
+   */
   function startPreRoastGreetingWarmup(stream: MediaStream): void {
     if (sessionMode !== "conversation" || mockModeRef.current) {
       warmupGreetingPromiseRef.current = null;
+      warmupGreetingAudioRef.current = null;
       return;
     }
+
+    // Fire-and-forget — completes in ~200-800ms, warms EL's DNS/TLS path on
+    // this Node process. Failure is harmless; the real TTS call falls back
+    // to a cold handshake.
+    fetch("/api/prewarm-tts", { method: "POST" }).catch(() => {});
+
     warmupGreetingPromiseRef.current = (async () => {
       const frame = await captureSquareJpegFromStream(stream);
       const s = useSessionStore.getState();
@@ -144,6 +163,17 @@ function MainApp() {
         contentMode: s.contentMode,
       });
     })().catch(() => null);
+
+    // As soon as the joke text lands, fire EL TTS so audio chunks start
+    // streaming into a buffer the brain will pick up at enterGreeting.
+    warmupGreetingAudioRef.current = warmupGreetingPromiseRef.current
+      .then((response) => {
+        if (!response?.jokes.length) return null;
+        const joke = response.jokes[0];
+        const baseVoice = useSessionStore.getState().voiceSettings;
+        return prefetchGreetingAudio(joke.text, joke.motion, joke.intensity, baseVoice);
+      })
+      .catch(() => null);
   }
 
   const handleStartSession = async () => {
@@ -526,6 +556,7 @@ function MainApp() {
           mediaStream={webcamStream}
           prefetchedTokenPromise={tokenPromiseRef.current}
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
+          warmupGreetingAudio={warmupGreetingAudioRef.current}
           mockMode={mockMode}
         />
       )}

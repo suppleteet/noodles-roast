@@ -26,6 +26,7 @@ import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
 import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 
 
 interface Props {
@@ -36,35 +37,10 @@ interface Props {
   prefetchedTokenPromise?: Promise<string> | null;
   /** Parallel vision + greeting jokes started in page.tsx as soon as the camera stream exists (before roasting). */
   warmupGreetingPrefetch?: Promise<JokeResponse | null> | null;
+  /** Audio chunks already streaming in for the greeting joke — saves the
+   *  EL handshake/synth round-trip when the brain reaches enterGreeting. */
+  warmupGreetingAudio?: Promise<TtsChunkBuffer | null> | null;
   mockMode?: boolean;
-}
-
-class TtsChunkBuffer {
-  chunks: string[] = [];
-  done = false;
-  failed = false;
-  private waiters: Array<() => void> = [];
-
-  push(chunk: string): void {
-    this.chunks.push(chunk);
-    this.notify();
-  }
-
-  finish(failed = false): void {
-    this.failed = failed;
-    this.done = true;
-    this.notify();
-  }
-
-  waitForUpdate(): Promise<void> {
-    if (this.done) return Promise.resolve();
-    return new Promise((resolve) => this.waiters.push(resolve));
-  }
-
-  private notify(): void {
-    const waiters = this.waiters.splice(0);
-    for (const resolve of waiters) resolve();
-  }
 }
 
 export default function LiveSessionController({
@@ -74,6 +50,7 @@ export default function LiveSessionController({
   mediaStream,
   prefetchedTokenPromise,
   warmupGreetingPrefetch,
+  warmupGreetingAudio,
   mockMode = false,
 }: Props) {
   // Only subscribe to phase + pendingDebugTranscription for lifecycle/debug.
@@ -307,6 +284,42 @@ export default function LiveSessionController({
     ttsChainRef.current = Promise.resolve();
     playback.flush();
     useSessionStore.getState().setIsSpeaking(false);
+  }
+
+  /**
+   * Play an audio buffer that has already started filling from a prefetch
+   * (greeting audio prefetched in page.tsx while permissions were being
+   * granted). Saves the EL handshake + synth round-trip on greeting.
+   * Falls back to legacy queueSpeak if the prefetch failed or no buffer.
+   */
+  function playPrefetchedAudio(
+    text: string,
+    buffer: TtsChunkBuffer,
+    motion?: MotionState,
+    intensity?: number,
+    appendToPrev?: boolean,
+  ): void {
+    if (!text.trim() || !isRunningRef.current) return;
+    if (buffer.failed) {
+      // TTS prefetch errored — fall back to legacy queueSpeak.
+      queueSpeak(text, motion, intensity, appendToPrev);
+      return;
+    }
+    useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
+    wasDrainedRef.current = false;
+    const gen = ttsGenerationRef.current;
+    const previousText = lastSpokenTextRef.current;
+    lastSpokenTextRef.current = text.trim();
+
+    ttsChainRef.current = ttsChainRef.current.then(async () => {
+      if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
+      if (motion) useSessionStore.getState().setActiveMotionState(motion, intensity ?? 0.7);
+      const prevTail = previousText.length > 60 ? `…${previousText.slice(-60)}` : previousText;
+      useSessionStore.getState().logTiming(
+        `tts-prefetched: "${text.trim().slice(0, 60)}" chunks=${buffer.chunks.length} done=${buffer.done} prev="${prevTail}"`,
+      );
+      await scheduleFromPrefetch(buffer, gen);
+    });
   }
 
   // ─── TTS pipeline ─────────────────────────────────────────────────────────────
@@ -1084,6 +1097,8 @@ export default function LiveSessionController({
       setError: (e) => useSessionStore.getState().setError(e),
       revealSession: () => useSessionStore.getState().setHasSpokenThisSession(true),
       prefetchedGreeting: greetingPrefetch,
+      prefetchedGreetingAudio: warmupGreetingAudio ?? undefined,
+      playPrefetchedAudio,
       saveCritique: (text, ctx) => {
         fetch("/api/save-feedback", {
           method: "POST",

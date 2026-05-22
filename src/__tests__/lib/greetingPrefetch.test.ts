@@ -188,3 +188,84 @@ describe("prefetchParallelVisionAndGreeting", () => {
     expect(analyzeCalls).toHaveLength(0);
   });
 });
+
+describe("prefetchGreetingAudio", () => {
+  // Use REAL timers — the async stream reader uses real Promises that
+  // don't make progress under vi.useFakeTimers().
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const BASE_VOICE = {
+    stability: 0.72,
+    similarity_boost: 0.7,
+    style: 1,
+    speed: 1.0,
+    use_speaker_boost: true,
+  };
+
+  it("populates buffer with chunks from SSE stream and marks done at end", async () => {
+    // Build an SSE response body that emits two audio chunks then done.
+    const sseBody = [
+      `data: ${JSON.stringify({ type: "audio", chunk: "AAAA" })}\n\n`,
+      `data: ${JSON.stringify({ type: "audio", chunk: "BBBB" })}\n\n`,
+      `data: ${JSON.stringify({ type: "done" })}\n\n`,
+    ].join("");
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseBody));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: stream,
+      }),
+    );
+
+    const { prefetchGreetingAudio } = await import("@/lib/greetingPrefetch");
+    const buffer = prefetchGreetingAudio("Hello there.", "smug", 0.7, BASE_VOICE);
+
+    // Wait for the async SSE reader to finish populating the buffer.
+    while (!buffer.done) {
+      await new Promise<void>((r) => setTimeout(r, 10));
+    }
+
+    expect(buffer.chunks).toEqual(["AAAA", "BBBB"]);
+    expect(buffer.done).toBe(true);
+    expect(buffer.failed).toBe(false);
+  });
+
+  it("marks buffer failed when fetch returns !ok", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500, body: null }),
+    );
+
+    const { prefetchGreetingAudio } = await import("@/lib/greetingPrefetch");
+    const buffer = prefetchGreetingAudio("Hi.", "smug", 0.7, BASE_VOICE);
+
+    while (!buffer.done) {
+      await new Promise<void>((r) => setTimeout(r, 10));
+    }
+
+    expect(buffer.failed).toBe(true);
+    expect(buffer.done).toBe(true);
+  });
+
+  it("returns immediately-failed buffer for empty text", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Re-import is unnecessary — we just need the function.
+    return import("@/lib/greetingPrefetch").then(({ prefetchGreetingAudio }) => {
+      const buffer = prefetchGreetingAudio("   ", "smug", 0.7, BASE_VOICE);
+      expect(buffer.failed).toBe(true);
+      expect(buffer.done).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+});

@@ -121,6 +121,20 @@ export interface ComedianBrainDeps {
   initialLedger?: LedgerEntry[];
   /** Pre-fetched greeting result — if set, enterGreeting() skips generation. */
   prefetchedGreeting?: Promise<JokeResponse | null>;
+  /**
+   * Pre-fetched greeting audio — chunks already streaming in from /api/tts-ws
+   * fired during permissions grant. enterGreeting calls `playPrefetchedAudio`
+   * with this buffer instead of `queueSpeak`, saving the EL round-trip.
+   */
+  prefetchedGreetingAudio?: Promise<import("@/lib/ttsChunkBuffer").TtsChunkBuffer | null>;
+  /** Play a buffer that's already being filled by a prefetched TTS call. */
+  playPrefetchedAudio?: (
+    text: string,
+    buffer: import("@/lib/ttsChunkBuffer").TtsChunkBuffer,
+    motion?: MotionState,
+    intensity?: number,
+    appendToPrev?: boolean,
+  ) => void;
 }
 
 // ─── Fisher-Yates shuffle ───────────────────────────────────────────────────────
@@ -1060,7 +1074,10 @@ export class ComedianBrain {
       this.deps.logTiming("brain: greeting generation fired (no prefetch)");
     }
 
-    const queueGreeting = (response: JokeResponse | null) => {
+    const queueGreeting = (
+      response: JokeResponse | null,
+      audioBuffer: import("@/lib/ttsChunkBuffer").TtsChunkBuffer | null,
+    ) => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       if (this.greetingVisionTimeout) {
         clearTimeout(this.greetingVisionTimeout);
@@ -1075,7 +1092,24 @@ export class ComedianBrain {
         const joke = response.jokes[0];
         const text = compactGreetingText(joke.text);
         if (text !== joke.text) this.deps.logTiming(`brain: compacted greeting to ${wordCount(text)}w`);
-        this.deps.queueSpeak(text, joke.motion, joke.intensity);
+        // If we have a prefetched audio buffer AND the text wasn't rewritten
+        // by compactGreetingText (otherwise the audio doesn't match the
+        // transcript), use the prefetched audio path — saves the EL round-trip.
+        const canUsePrefetched =
+          audioBuffer && !audioBuffer.failed && text === joke.text && this.deps.playPrefetchedAudio;
+        if (canUsePrefetched) {
+          this.deps.logTiming(
+            `brain: greeting using prefetched audio (chunks=${audioBuffer.chunks.length} done=${audioBuffer.done})`,
+          );
+          this.deps.playPrefetchedAudio!(
+            text,
+            audioBuffer,
+            joke.motion as import("@/lib/motionStates").MotionState,
+            joke.intensity,
+          );
+        } else {
+          this.deps.queueSpeak(text, joke.motion, joke.intensity);
+        }
         this._addLedger("joke", text, response.tags ?? []);
         this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
         this.lastJokeIntensity = joke.intensity;
@@ -1087,7 +1121,10 @@ export class ComedianBrain {
       this._maybeAdvanceFromGreeting();
     };
 
-    this.visionJokePrefetch.then((response) => queueGreeting(response));
+    Promise.all([
+      this.visionJokePrefetch,
+      this.deps.prefetchedGreetingAudio ?? Promise.resolve(null),
+    ]).then(([response, audioBuffer]) => queueGreeting(response, audioBuffer));
     this.greetingVisionTimeout = setTimeout(() => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
@@ -1096,7 +1133,7 @@ export class ComedianBrain {
         context: "greeting",
         model: VISION_MODEL,
         observations,
-      }).then((response) => queueGreeting(response));
+      }).then((response) => queueGreeting(response, null));
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 
