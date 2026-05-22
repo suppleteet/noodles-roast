@@ -31,6 +31,7 @@
 | @types/ws | ^8.18.1 | TypeScript types for ws |
 | @vercel/blob | ^2.3.3 | Durable feedback storage (Vercel Blob) |
 | jsdom | ^29.0.0 | DOM environment for Vitest |
+| openai | ^6.34.0 | Used by `llmClient.ts` for `gpt-*` and `o*` models |
 
 ## AI Models in Use
 
@@ -91,18 +92,18 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, comedian-session, generate-joke, generate-speak, list-feedback, rephrase-question, roast, tts, tts-ws, vision, live-token, save-transcript, save-video, save-log, save-feedback, serve-video, open-videos-folder, ambient-context)
+src/app/api/           Next.js API routes (analyze, ambient-context, comedian-session, debug-usage, generate-joke, generate-question, generate-speak, list-feedback, live-token, monetization/{checkout,redeem,status,webhook}, open-videos-folder, prewarm-tts, rephrase-question, roast, save-feedback, save-log, save-transcript, save-video, save-voice-note, serve-video, town-flavor, tts, tts-ws, vision)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, FeedbackBox, DebugTranscript)
-src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream, chatSessionStore
+src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets, ttsChunkBuffer, llmClient
 src/lib/stateMachine/      State machine types, transitions, and configs (SessionPhase, BrainState, MotionState)
 src/lib/comedianBrain.ts   State machine class (conversation mode)
 src/lib/comedianBrainConfig.ts  Declarative STATE_CONFIG map
 src/lib/comedianConfig.ts  All timing/threshold tuning parameters (window-injectable for tests)
-src/lib/questionBank.ts    4 questions with prod lines + confirm templates (hot-swappable)
+src/lib/questionBank.ts    8 questions with prod lines + confirm templates (hot-swappable)
 src/lib/transcriptConfidence.ts  Heuristic confidence scoring for STT transcriptions
 src/lib/visionDiff.ts      Observation diff + interest scoring
 src/store/             Zustand store (useSessionStore.ts)
@@ -129,7 +130,7 @@ src/puppet/            Paper-thin puppet-specific layer
 ## Key Invariants — Do Not Violate
 
 1. **useFrame + store**: Inside `useFrame`, ALWAYS use `useSessionStore.getState()`, never `useSessionStore(selector)`. React hooks cannot run inside rAF callbacks.
-2. **API routes use Gemini**: Despite `@anthropic-ai/sdk` being installed, all current routes use `@google/genai`.
+2. **Routes call `llmClient.ts`, not provider SDKs directly**: All joke/question generation flows through the multi-provider adapter (`src/lib/llmClient.ts`). Routes choose a model id (`gemini-*`, `gpt-*`/`o*`, `claude-*`); SDK plumbing for each provider lives inside `llmClient.ts`.
 3. **ElevenLabs uses raw fetch/WebSocket**: `/api/tts` uses `fetch()` (REST), `/api/tts-ws` uses `ws` (WebSocket streaming via `elTtsStream.ts`). `/api/generate-speak` streams joke text only (no TTS). Do not refactor to the ElevenLabs SDK without testing streaming.
 4. **Zustand v5**: `create<SessionState>((set) => ...)` — no curried form.
 5. **No `any`**: strict mode is on. Comment-justify any type assertion.

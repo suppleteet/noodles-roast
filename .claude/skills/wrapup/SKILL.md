@@ -96,12 +96,16 @@ OVERALL: SHIP IT ✓  |  NEEDS WORK ✗
 
 ## Step 6 — Commit & Push
 
-After the report, if there are any uncommitted changes (from knowledge base sync or bug fixes during review):
+After the report, the wrapup ALWAYS ends by pushing the current branch — including any pre-existing commits that haven't been pushed yet.
 
-1. Stage only the files changed during this wrapup session
-2. Commit with a descriptive message
-3. `git push`
+1. **If there are uncommitted changes** (from knowledge base sync or bug fixes during this wrapup):
+   - Stage only the files changed during this wrapup session
+   - Commit with a descriptive message
 
-If there are no uncommitted changes, skip this step.
+2. **Always check the remote sync state** — run `git status` to see whether the current branch is ahead of its upstream. If ahead by any number of commits (whether from this wrapup or earlier work), run `git push`.
 
-Always push at the end — the wrapup is the finish line.
+3. **If the branch has no upstream yet** (e.g., a fresh local branch), push with `git push -u origin <branch>`.
+
+4. **If the working tree is clean AND the branch is already in sync with origin**, the push is a no-op — say "Already up to date — nothing to push." and finish.
+
+The wrapup is the finish line. Don't leave commits stranded locally just because this run didn't make new ones.

@@ -17,7 +17,7 @@ After the table, include these API usage notes for the packages most likely to c
 - **`zustand` ^5.x** — use `create<State>((set) => ...)`. Do NOT use the curried v4 form `create<State>()(...)`.
 - **`react` ^19.x** — `forwardRef` is still valid. `useRef` type changed: prefer `React.RefObject<T>` over `MutableRefObject`. Ref callbacks now support cleanup return values.
 - **`three` ^0.175.x** — check the Three.js migration guide for any deprecated APIs before using geometry or material constructors.
-- **`@anthropic-ai/sdk` ^0.39.x** — installed but NOT used in any routes yet. If adding Anthropic routes, the current recommended models are `claude-sonnet-4-6` and `claude-opus-4-6` (confirm these haven't changed).
+- **`@anthropic-ai/sdk` ^0.39.x** — used via `src/lib/llmClient.ts` (not imported directly by API routes). Current models in the `RoastModelId` union: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. Newer Anthropic models (Opus 4.7, etc.) are NOT wired up — check `src/store/useSessionStore.ts` for the canonical model list.
 
 ## 2. AI Models Currently in Use
 
