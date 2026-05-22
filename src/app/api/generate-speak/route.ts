@@ -169,21 +169,31 @@ export async function POST(req: NextRequest) {
         }
       };
 
+      /** Hard ceiling per EL WS stream — if neither onDone nor onError fires within this
+       *  window, force-close so the SSE response isn't pinned open by a stuck connection.
+       *  30s is long enough for a normal 20-word joke (~3-5s of audio) plus tail; well
+       *  past anything a real stream should take. */
+      const EL_STREAM_TIMEOUT_MS = 30_000;
+
       const openTtsForJoke = (index: number, motion: string, intensity: number) => {
         if (!useStreamingTts) return;
         const motionState = motion as MotionState;
         const mergedVoice = voiceSettingsForMotion(baseVoice, motionState, intensity);
         let resolveDone: () => void = () => {};
+        let settled = false;
         const done = new Promise<void>((res) => {
           resolveDone = res;
         });
         ttsDonePromises.push(done);
-        const ctl = openElTtsStream({
-          voiceSettings: mergedVoice,
-          onAudioChunk: (b64) => {
-            safeEnqueue({ type: "audio", index, chunk: b64 });
-          },
-          onDone: () => {
+
+        /** Single-shot finalize used by onDone, onError, and the watchdog so a hang on
+         *  any side still drains the per-joke audio buffer in the client and unblocks
+         *  the outer Promise.all. */
+        const finalize = (reason: "done" | "error" | "timeout") => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(watchdog);
+          if (reason === "done") {
             const chars = ttsCharCount.get(index) ?? 0;
             if (chars > 0) {
               recordTtsUsage({
@@ -192,16 +202,32 @@ export async function POST(req: NextRequest) {
                 characters: chars,
               });
             }
-            // Tell the brain it can close the per-joke audio buffer — all
-            // chunks for this joke have been delivered.
-            safeEnqueue({ type: "audio-end", index });
-            resolveDone();
+          }
+          if (reason === "timeout") {
+            console.warn(`[generate-speak] EL WS timed out (index=${index}); forcing audio-end`);
+            try {
+              ttsControllers.get(index)?.close();
+            } catch {
+              // ignore — close is best-effort
+            }
+          }
+          // Tell the brain it can close the per-joke audio buffer — all
+          // chunks for this joke have been delivered (or we gave up).
+          safeEnqueue({ type: "audio-end", index });
+          resolveDone();
+        };
+
+        const watchdog = setTimeout(() => finalize("timeout"), EL_STREAM_TIMEOUT_MS);
+
+        const ctl = openElTtsStream({
+          voiceSettings: mergedVoice,
+          onAudioChunk: (b64) => {
+            safeEnqueue({ type: "audio", index, chunk: b64 });
           },
+          onDone: () => finalize("done"),
           onError: (err) => {
             console.error("[generate-speak] EL WS error:", err);
-            // Still emit audio-end so the brain doesn't wait forever.
-            safeEnqueue({ type: "audio-end", index });
-            resolveDone();
+            finalize("error");
           },
         });
         ttsControllers.set(index, ctl);

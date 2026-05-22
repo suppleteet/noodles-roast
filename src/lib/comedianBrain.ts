@@ -1705,7 +1705,10 @@ export class ComedianBrain {
     // Short viable answers (names, ages, "single", short jobs).
     if (this._isViableAnswer(trimmed)) return true;
 
-    return true;
+    // Otherwise the answer is unpunctuated AND not obviously a complete viable answer
+    // (e.g. a 2-word fragment like "yeah dude" mid-thought). Skip the echo and let the
+    // non-word filler take over.
+    return false;
   }
 
   /** Strip leading hesitations ("Uh,", "Um,", "So,") so the echo doesn't mock the user's filler. */
@@ -2958,8 +2961,9 @@ export class ComedianBrain {
     if (this.ledger.length > 30) this.ledger = this.ledger.slice(-30);
   }
 
-  /** IDs of questions to skip when ambient context provides location. */
-  private static readonly LOCATION_QUESTION_IDS = new Set(["hometown", "city"]);
+  /** IDs of questions to skip when ambient context provides location. Stay in sync with
+   *  questionBank.ts — currently only `where_from` asks about location. */
+  private static readonly LOCATION_QUESTION_IDS = new Set(["where_from"]);
 
   /** Returns the next valid question, skipping excluded ones. Null if exhausted. */
   private _nextValidQuestion(): ComedyQuestion | null {

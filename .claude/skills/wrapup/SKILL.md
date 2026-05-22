@@ -17,6 +17,19 @@ Use the Skill tool to invoke the `review` skill. This reviews recently changed f
 
 Wait for results before proceeding.
 
+### Step 2b — Fix the low-risk findings in-place
+
+This is the finish line, not a homework dump. Apply every Critical finding and most Warnings yourself before moving on. "Low-risk" means:
+- Stale references / wrong identifiers (e.g., a Set contains old ids after a rename)
+- Dead code branches, unreachable returns, no-op checks
+- Missing guards / clamps / null-checks at boundaries
+- Hardcoded values that should reference a constant
+- Documentation that contradicts the code
+
+Skip only items that need product / design judgment, behavioral changes that need a real user-feel test, or non-obvious cross-file tradeoffs. Note those briefly in the final report under "Deferred."
+
+After the fixes, **re-run typecheck + vitest** to confirm green before continuing. Don't push red.
+
 ## Step 3 — Test Suite
 
 Use the Skill tool to invoke the `test` skill. This runs typecheck, Vitest unit tests, and conditionally Playwright E2E.
