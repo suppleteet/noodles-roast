@@ -192,7 +192,13 @@ export default function LiveSessionController({
 
   // ─── Brain helpers ────────────────────────────────────────────────────────────
 
-  function queueSpeak(text: string, motion?: MotionState, intensity?: number, appendToPrev?: boolean): void {
+  function queueSpeak(
+    text: string,
+    motion?: MotionState,
+    intensity?: number,
+    appendToPrev?: boolean,
+    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+  ): void {
     if (!text.trim() || !isRunningRef.current) return;
     useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
     wasDrainedRef.current = false; // reset edge so drain detection fires when this plays through
@@ -205,7 +211,7 @@ export default function LiveSessionController({
 
     // Fire TTS fetch NOW; starts generating audio while previous joke is still playing.
     // Playback streams chunks as soon as this line reaches the front of the chain.
-    const audioBuffer = prefetchTts(text.trim(), gen, previousText, motion, intensity);
+    const audioBuffer = prefetchTts(text.trim(), gen, previousText, motion, intensity, voiceOverride);
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
       if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
@@ -315,6 +321,7 @@ export default function LiveSessionController({
     previousText?: string,
     motion?: MotionState,
     intensity?: number,
+    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
   ): TtsChunkBuffer {
     const audio = new TtsChunkBuffer();
     if (!isRunningRef.current) {
@@ -334,7 +341,9 @@ export default function LiveSessionController({
       let firstAudioLogged = false;
       try {
         const baseVoice = useSessionStore.getState().voiceSettings;
-        const mergedVoice = voiceSettingsForMotion(baseVoice, motion, intensity);
+        const motionMerged = voiceSettingsForMotion(baseVoice, motion, intensity);
+        // voiceOverride wins last — used to slow fillers below the base speed.
+        const mergedVoice = voiceOverride ? { ...motionMerged, ...voiceOverride } : motionMerged;
         const resp = await fetch("/api/tts-ws", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

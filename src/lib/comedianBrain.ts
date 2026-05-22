@@ -63,8 +63,16 @@ export interface JokeStreamSink {
 
 export interface ComedianBrainDeps {
   /** appendToPrev: when true, merge this text into the previous puppet transcript entry
-   *  (single paragraph for streamed multi-joke deliveries). TTS pipeline is unaffected. */
-  queueSpeak: (text: string, motion?: MotionState, intensity?: number, appendToPrev?: boolean) => void;
+   *  (single paragraph for streamed multi-joke deliveries). TTS pipeline is unaffected.
+   *  voiceOverride: partial ElevenLabs voice settings to merge over the resolved settings —
+   *  used to slow fillers (speed 0.75) without affecting the base voice or jokes. */
+  queueSpeak: (
+    text: string,
+    motion?: MotionState,
+    intensity?: number,
+    appendToPrev?: boolean,
+    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+  ) => void;
   /**
    * Streaming-TTS variant: when present, the brain enables server-side joke
    * audio streaming. Returns a sink for the brain to push base64 PCM into as
@@ -324,6 +332,10 @@ export class ComedianBrain {
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
   private wrapupSessionEnded = false;   // guards onSessionEnd from firing twice
+  /** True once the wrapup closing line (or its fallback) has been queueSpeak'd. Until this
+   *  flips true, drain events during wrapup are just the bridge phrase finishing — firing
+   *  session end then would cut the closing line off mid-sentence when it eventually arrives. */
+  private wrapupClosingQueued = false;
 
   // Deps
   private readonly deps: ComedianBrainDeps;
@@ -360,6 +372,7 @@ export class ComedianBrain {
     this._cancelRephrase();
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
+    this.wrapupClosingQueued = false;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -423,14 +436,13 @@ export class ComedianBrain {
     if (this.pendingWrapup || this.state === "wrapup") return;
     this.pendingWrapup = true;
     this.deps.logTiming("brain: wrapup requested — will route to wrapup at next transition");
-
-    // If we're idle waiting for an answer, enter wrapup immediately —
-    // otherwise the transition fires when current speech finishes.
-    if (this.state === "wait_answer" || this.state === "prodding") {
-      this._clearTimers();
-      this._cancelSpeculative();
-      this.enterWrapup();
-    }
+    // No immediate-enter shortcut. Previously this cut the user off mid-answer (state
+    // was wait_answer/prodding when the wrapup timer fired). The flag will be picked up
+    // at the next safe transition — _onDeliveringDrained, enterCheckVision, or
+    // enterAskQuestion — all of which fire only after the puppet has delivered its
+    // current line. If the user stays silent, the prod timer chain exhausts and routes
+    // through check_vision, which respects pendingWrapup. Either way the closing line
+    // lands only AFTER the next joke delivers.
   }
 
   // ─── Dev voice notes (gesture-triggered) ──────────────────────────────────────
@@ -655,6 +667,33 @@ export class ComedianBrain {
     // the brain with an empty buffer that prodded "I asked X, not for a moment of silence" while
     // the user could see their words on screen).
     if (this.state === "ask_question") {
+      // Barge-in: if the user says something substantive while the puppet is still asking,
+      // cut the question audio and treat the speech as the answer. Without this, insults
+      // and corrections fired mid-question were quietly buffered, then surfaced as "the
+      // answer" once the question finished — so the user's cut-off jumped in late as the
+      // answer instead of interrupting. Same gate as the delivering-state barge-in.
+      if (this._shouldInterruptDelivering(text)) {
+        this.deps.logTiming(`brain: user barge-in during ask_question — "${text}" (cutting question)`);
+        this.deps.cancelSpeech();
+        this._clearTimers();
+        this._cancelSpeculative();
+        this._addLedger("reaction", "[interrupted]", []);
+
+        this.answerBuffer = "";
+        this._accumulateAnswer(text, finished);
+        if (finished) this.sttHadFinalSegment = true;
+        this.fillerFiredForAnswer = false;
+
+        this._transition("pre_generate");
+        if (finished) {
+          this._onAnswerComplete();
+        } else {
+          this._startLateSilenceTimer();
+        }
+        return;
+      }
+      // Small/tiny chatter: keep the old passive-buffer behavior — let the question finish
+      // and have the buffered text waiting in wait_answer.
       this._accumulateAnswer(text, finished);
       if (finished) this.sttHadFinalSegment = true;
       this.deps.logTiming(
@@ -975,7 +1014,12 @@ export class ComedianBrain {
         this.enterAskQuestion();
         break;
       case "wrapup":
-        this._fireSessionEnd();
+        // Bridge audio drains BEFORE the closing-line LLM call returns (~2-3s). Don't fire
+        // session end here — that would cut the closing line off mid-sentence when it
+        // eventually arrives. _fireSessionEnd happens only after the closing line itself drains.
+        if (this.wrapupClosingQueued) {
+          this._fireSessionEnd();
+        }
         break;
     }
   }
@@ -1694,13 +1738,15 @@ export class ComedianBrain {
     // the last filler shouldn't have a long pause either. Trailing ellipses would double-up
     // between stacked fillers (~500ms gap), which felt like an audible dead beat.
     const wrapped = `... ${filler}`;
-    // Drive puppet animation via setMotion (visual cue), but DO NOT pass motion to queueSpeak
-    // — voice presets layer stability/style/speed deltas on every stacked filler, and the
-    // compounded drift made the chain sound erratic. Fillers keep the base voice settings.
+    // Drive puppet animation via setMotion (visual cue) but DO NOT pass motion to queueSpeak
+    // — voice presets layer stability/style/speed deltas and compounded drift across stacked
+    // fillers sounded erratic. Slow the speed to 0.75 so the filler audibly feels like
+    // pondering rather than another sentence the comedian is delivering. The joke that
+    // follows naturally returns to base speed (1.0) so the punch line lands at full pace.
     this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
-    this.deps.queueSpeak(wrapped);
+    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.75 });
     this.deps.logTiming(
-      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, voice=base) — "${filler}"`,
+      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.75) — "${filler}"`,
     );
     // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
   }
@@ -2617,6 +2663,10 @@ export class ComedianBrain {
       resolved = true;
       this.deps.queueSpeak(text, motion, intensity);
       this._addLedger("joke", text, []);
+      // Flip the gate so the next wrapup drain event fires session end. If the bridge has
+      // already drained by now, queueing the closing line resets the chain to non-empty;
+      // the next drain (when the closing line itself finishes) will fire session end.
+      this.wrapupClosingQueued = true;
     };
 
     // Safety net: if the LLM hangs, queue the fallback so the session can still end.
