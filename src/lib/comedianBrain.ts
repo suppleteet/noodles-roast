@@ -1684,9 +1684,13 @@ export class ComedianBrain {
     // the last filler shouldn't have a long pause either. Trailing ellipses would double-up
     // between stacked fillers (~500ms gap), which felt like an audible dead beat.
     const wrapped = `... ${filler}`;
-    this.deps.queueSpeak(wrapped, this.fillerMotion, this.fillerIntensity);
+    // Drive puppet animation via setMotion (visual cue), but DO NOT pass motion to queueSpeak
+    // — voice presets layer stability/style/speed deltas on every stacked filler, and the
+    // compounded drift made the chain sound erratic. Fillers keep the base voice settings.
+    this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
+    this.deps.queueSpeak(wrapped);
     this.deps.logTiming(
-      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}) — "${filler}"`,
+      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, voice=base) — "${filler}"`,
     );
     // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
   }

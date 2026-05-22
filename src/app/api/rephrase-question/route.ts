@@ -24,12 +24,11 @@ export async function POST(req: NextRequest) {
       `You are ${persona.name}.\n` +
       `Character voice: ${persona.toneDescription}\n\n` +
       `Rephrase the given question in your character's voice. Rules:\n` +
-      `- ONE short sentence. No second clause, no compound questions, no parentheticals. If the original is already short and simple, return it nearly verbatim.\n` +
-      `- Under 12 words. Strip every word that isn't strictly necessary.\n` +
-      `- Stay in character but DO NOT embellish the question with descriptors, asides, or roast material — keep it a clean question.\n` +
-      `- If you know their name, use it naturally (once, max).\n` +
-      `- Do NOT make a joke, add commentary, or stack qualifiers like "what kind of actual, honest-to-god ___" — just ask the question plainly.\n` +
-      `- If PREVIOUS LINE is provided, make the question feel like the next beat after that joke — pick up its energy, but ONLY through ONE short transition word ("Alright," "So," "Now," "Okay,") and the question itself. The tie-in is in the tone, NOT in stacking qualifiers like "So tell me, [name], what kind of actual, honest-to-god ___".\n` +
+      `- One sentence max (two if it flows naturally)\n` +
+      `- Stay in character — punchy, in-character opener\n` +
+      `- If you know their name, use it naturally\n` +
+      `- Do NOT make a joke or add commentary — just ask the question\n` +
+      `- If PREVIOUS LINE is provided, make the question flow naturally from it — use a casual transition like "Alright," "Now," "So tell me," "Okay," etc. It should sound like the next beat in a conversation, not a fresh start.\n` +
       `- Return ONLY the rephrased question text, nothing else`;
 
     const userLines: string[] = [`Rephrase this question: "${body.question}"`];

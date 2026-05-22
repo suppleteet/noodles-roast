@@ -179,22 +179,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
     ],
   },
   {
-    id: "bad_habit",
-    question: "What's your worst habit?",
-    vulgarQuestions: [
-      "What's your worst habit that you pretend is a personality, you menace?",
-      "Name the red flag you keep rebranding as charm.",
-      "What's the habit everyone around you is sick of?",
-      "Tell me your worst habit. I want fresh ammunition.",
-      "What toxic little routine are we calling self-care today?",
-    ],
-    jokeContext: "Bad habit roast - self-sabotage, annoying routines, red flags, and the gap between self-image and reality.",
-    prodLines: [
-      "Don't worry, your face already suggested a few. Pick one.",
-      "Worst habit. Not all of them, we'll be here until winter.",
-    ],
-  },
-  {
     id: "free_time",
     question: "What do you do for fun?",
     vulgarQuestions: [
