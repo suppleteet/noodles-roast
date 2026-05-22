@@ -106,4 +106,34 @@ describe("inferFillerMotionFromAnswer", () => {
     expect(inferFillerMotionFromAnswer("")[0]).toBe("thinking");
     expect(inferFillerMotionFromAnswer("   ")[0]).toBe("thinking");
   });
+
+  it("returns smug on bragging answers", () => {
+    expect(inferFillerMotionFromAnswer("I'm a millionaire")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("I make six figures a year")[0]).toBe("smug");
+    expect(inferFillerMotionFromAnswer("I'm pretty famous in my field")[0]).toBe("smug");
+  });
+
+  it("returns conspiratorial on self-deprecating answers", () => {
+    expect(inferFillerMotionFromAnswer("I'm a loser")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("I suck at everything")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("I'm a disaster")[0]).toBe("conspiratorial");
+  });
+
+  it("returns conspiratorial on sad / vulnerable answers", () => {
+    expect(inferFillerMotionFromAnswer("I'm depressed lately")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("Just got divorced")[0]).toBe("conspiratorial");
+    expect(inferFillerMotionFromAnswer("I feel really lonely")[0]).toBe("conspiratorial");
+  });
+
+  it("returns energetic on genuine enthusiasm", () => {
+    expect(inferFillerMotionFromAnswer("It's amazing!!")[0]).toBe("energetic");
+    expect(inferFillerMotionFromAnswer("I love that game so much")[0]).toBe("energetic");
+    expect(inferFillerMotionFromAnswer("It's the best thing ever")[0]).toBe("energetic");
+  });
+
+  it("returns thinking on hedging / hesitation openers", () => {
+    expect(inferFillerMotionFromAnswer("Uh, I guess I sell software")[0]).toBe("thinking");
+    expect(inferFillerMotionFromAnswer("Well, sort of a designer")[0]).toBe("thinking");
+    expect(inferFillerMotionFromAnswer("Um, probably about three years")[0]).toBe("thinking");
+  });
 });
