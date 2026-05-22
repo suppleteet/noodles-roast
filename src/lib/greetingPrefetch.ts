@@ -110,10 +110,19 @@ async function generateDirectImageGreeting(
 }
 
 /**
- * Pre-roast startup path:
- * 1. Analyze the frame into compact observations.
- * 2. Generate the opening joke from those observations as text.
- * 3. Only if analysis fails, try one direct image greeting, then a generated generic fallback.
+ * Pre-roast startup path. Vision and the greeting joke run in TRUE parallel:
+ *  - `/api/analyze` fires in the background to populate observations for
+ *    subsequent turns. It does NOT block the greeting.
+ *  - `/api/generate-joke` with the raw image (direct-image) runs concurrently
+ *    and returns the actual greeting joke as soon as it's ready.
+ *
+ * The old sequential design waited up to 6.5s for vision to time out before
+ * even trying direct-image — that compounded to 13+ s of dead air on slow
+ * vision responses. Now direct-image returns in its own latency budget.
+ *
+ * Fallbacks (only if direct-image fails):
+ *  1. Wait for vision; if observations land, generate-from-observations.
+ *  2. Last resort: generic empty-observations generate-joke.
  */
 export async function prefetchParallelVisionAndGreeting(
   greetingFrame: string | undefined,
@@ -126,31 +135,49 @@ export async function prefetchParallelVisionAndGreeting(
     if (fromExisting?.jokes.length) return fromExisting;
   }
 
-  let observations: string[] = [];
-  if (greetingFrame) {
-    useSessionStore.getState().logTiming("live: greeting vision fired");
-    const visionData = await postJsonWithRetry<VisionData>(
-      "/api/analyze",
-      {
-        imageBase64: greetingFrame,
-        burnIntensity: snapshot.burnIntensity,
-        mode: "vision",
-        persona: snapshot.activePersona,
-      },
-      { retries: 0, timeoutMs: 6500 },
-    );
-    observations = rememberVisionData(visionData);
+  if (!greetingFrame) {
+    useSessionStore.getState().logTiming("live: greeting generic fallback fired (no frame)");
+    return generateGreetingFromObservations([], snapshot);
   }
 
+  useSessionStore.getState().logTiming("live: greeting vision + direct-image fired in parallel");
+
+  // Vision runs in the background — its observations feed subsequent turns
+  // but do NOT gate the greeting. Allow a longer window since we no longer
+  // block on it.
+  const visionPromise = postJsonWithRetry<VisionData>(
+    "/api/analyze",
+    {
+      imageBase64: greetingFrame,
+      burnIntensity: snapshot.burnIntensity,
+      mode: "vision",
+      persona: snapshot.activePersona,
+    },
+    { retries: 0, timeoutMs: 8000 },
+  ).then((visionData) => {
+    rememberVisionData(visionData);
+    return visionData;
+  });
+
+  // Direct-image greeting: Gemini sees the image and writes the joke in
+  // one call (no separate analyze step). This is the primary path.
+  const direct = await generateDirectImageGreeting(greetingFrame, snapshot);
+  if (direct?.jokes.length) {
+    useSessionStore.getState().logTiming("live: greeting joke ready (direct-image)");
+    return direct;
+  }
+
+  // Direct-image failed. If vision is still running or already done, try
+  // generating from its observations as a secondary path.
+  useSessionStore.getState().logTiming("live: greeting direct-image failed — falling back to vision");
+  const visionData = await visionPromise.catch(() => null);
+  const observations = normalizeObservations(visionData?.observations);
   if (observations.length) {
     const fromVision = await generateGreetingFromObservations(observations, snapshot);
-    if (fromVision?.jokes.length) return fromVision;
-  }
-
-  if (greetingFrame) {
-    useSessionStore.getState().logTiming("live: greeting direct-image fallback fired");
-    const direct = await generateDirectImageGreeting(greetingFrame, snapshot);
-    if (direct?.jokes.length) return direct;
+    if (fromVision?.jokes.length) {
+      useSessionStore.getState().logTiming("live: greeting joke ready (vision-fallback)");
+      return fromVision;
+    }
   }
 
   useSessionStore.getState().logTiming("live: greeting generic fallback fired");
