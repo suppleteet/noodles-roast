@@ -646,11 +646,30 @@ describe("ComedianBrain — filler echo gating", () => {
     expect(filler.toLowerCase()).not.toContain("software engineer at");
   });
 
-  it("echoes a sentence-terminated answer even though it's longer (random=0)", async () => {
-    // 4 words and ends in period → still echo-eligible.
-    const filler = await captureFillerForAnswer("I work at a bakery.", 0);
-    // Echo template wraps the answer text — must contain part of it.
-    expect(filler.toLowerCase()).toContain("bakery");
+  it("echoes a sentence-terminated short answer (random=0)", async () => {
+    // 3 words, ends in period → echo-eligible (cap is 4 words to keep fillers brief).
+    const filler = await captureFillerForAnswer("Just a baker.", 0);
+    expect(filler.toLowerCase()).toContain("baker");
+  });
+
+  it("does NOT echo a long answer — falls back to non-word filler", async () => {
+    // 5+ words, sentence-terminated. Used to be echoed (limit was 8 words) but the
+    // result ("I work at a bakery, you say.") read as the puppet reciting the answer
+    // back, not as a brief filler. Cap is now 4 words.
+    const filler = await captureFillerForAnswer("I work at a small bakery.", 0);
+    expect(filler.toLowerCase()).not.toContain("bakery");
+  });
+
+  it("does NOT echo a vulgar answer — voice renders profanity harshly", () => {
+    // Test the predicate directly: captureFillerForAnswer routes "Fuck you." through the
+    // name-question confirm path (short hostile reply), not the echo gate. Calling the
+    // private gate directly is cleaner than orchestrating a non-confirmed question slot.
+    const brain = new ComedianBrain(makeDeps()) as unknown as {
+      _isFillerEchoable: (s: string) => boolean;
+    };
+    expect(brain._isFillerEchoable("Fuck you.")).toBe(false);
+    expect(brain._isFillerEchoable("I just jerk off all night.")).toBe(false);
+    expect(brain._isFillerEchoable("Shit.")).toBe(false);
   });
 
   it("does not echo a meta-complaint about the comedian repeating itself", async () => {

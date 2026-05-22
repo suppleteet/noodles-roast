@@ -730,8 +730,11 @@ export class ComedianBrain {
     if (qId === "single") {
       return /^(yes|yeah|yep|yup|no|nah|nope|single|married|divorced|taken|it's complicated)\b/i.test(trimmed);
     }
-    // Generic short-but-valid responses ("dentist", "Seattle", "teacher")
-    return words.length >= 2 || normalized.length >= 4;
+    // 2+ words is enough to be a real answer. Single non-canonical words ("Super",
+    // "Yeah", "Okay") are usually hesitations or sentence starters — wait for more
+    // STT instead of generating a joke off one word. Single-word job titles like
+    // "Dentist" are rare enough to lose vs. catching real multi-word answers early.
+    return words.length >= 2;
   }
 
   /** Short confirmation chatter that often trails a just-confirmed answer. */
@@ -1589,11 +1592,18 @@ export class ComedianBrain {
   private static readonly META_COMPLAINT_RE =
     /\byou\s+(already|keep|just|always|literally|kept)\b|\byou\s+(asked|ask|said|told|repeated)\b/i;
 
-  /** True if the answer is short enough and complete enough to repeat as a filler. */
+  /** Profanity/vulgar phrases — never echo. The puppet reading these back lands as
+   *  awkward parroting and ElevenLabs renders strong language with harsh prosody. */
+  private static readonly VULGAR_RE = /\b(fuck|shit|cunt|cock|dick|pussy|asshole|bitch|bastard|jerk\s*off|jack\s*off|wank|piss)\w*/i;
+
+  /** True if the answer is short enough and complete enough to repeat as a filler.
+   *  Capped at 4 words — anything longer reads as the puppet reciting the answer,
+   *  not as a brief "I heard you" filler. */
   private _isFillerEchoable(answer: string): boolean {
     const trimmed = answer.trim();
     const w = wordCount(trimmed);
-    if (w < 1 || w > 8) return false;
+    if (w < 1 || w > 4) return false;
+    if (ComedianBrain.VULGAR_RE.test(trimmed)) return false;
     if (this._answerEchoesRecentRoast(trimmed)) return false;
     if (ComedianBrain.META_COMPLAINT_RE.test(trimmed)) return false;
 
