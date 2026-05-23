@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeFilename } from "@/app/api/name-video/route";
+import { sanitizeFilename } from "@/lib/videoNaming";
 
 describe("sanitizeFilename", () => {
   it("accepts a well-formed LLM response verbatim", () => {

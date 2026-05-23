@@ -9,11 +9,15 @@
  *
  * If the LLM returns garbage or no transcript exists, falls back to a
  * timestamp-style name so we never block the save-video flow.
+ *
+ * Pure helpers live in `src/lib/videoNaming.ts` (Next.js route files can only
+ * export reserved names, so unit-testable logic stays outside).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { generateText } from "@/lib/llmClient";
+import { sanitizeFilename, fallbackName } from "@/lib/videoNaming";
 
 interface NameVideoRequest {
   /** Recent transcript lines, role-prefixed (e.g. "puppet: ..." / "user: ...") */
@@ -27,50 +31,6 @@ interface NameVideoRequest {
 }
 
 const MAX_TRANSCRIPT_LINES = 24;
-
-/** Strip everything except [A-Za-z0-9], split CamelCase runs into tokens. */
-function tokenize(raw: string): string[] {
-  // Split on underscores, spaces, hyphens, and case-boundaries.
-  return raw
-    .replace(/[^A-Za-z0-9_\s-]/g, "")
-    .split(/[_\s-]+/)
-    .flatMap((chunk) => chunk.split(/(?=[A-Z])/))
-    .filter(Boolean);
-}
-
-/** Title-case a single token: "shitty" -> "Shitty". */
-function titleCase(tok: string): string {
-  if (!tok) return tok;
-  return tok[0]!.toUpperCase() + tok.slice(1).toLowerCase();
-}
-
-/**
- * Take the LLM's raw response (which may include quotes, prefixes, extra prose)
- * and normalize to `Roastie_<2-4 PascalCase tokens>`. Returns null if it can't
- * be salvaged — caller falls back.
- */
-export function sanitizeFilename(raw: string): string | null {
-  if (!raw) return null;
-  const trimmed = raw.trim().split(/\r?\n/)[0]?.trim() ?? "";
-  if (!trimmed) return null;
-  // Strip a leading "Roastie_" if the LLM already prepended it.
-  const body = trimmed.replace(/^["']?roastie[_\s-]*/i, "").replace(/["']$/, "");
-  const tokens = tokenize(body).slice(0, 4);
-  if (tokens.length === 0) return null;
-  const pascal = tokens.map(titleCase).join("");
-  if (pascal.length < 2 || pascal.length > 64) return null;
-  return `Roastie_${pascal}`;
-}
-
-function fallbackName(userName?: string | null): string {
-  const safeName = (userName ?? "").replace(/[^A-Za-z0-9]/g, "");
-  const base = safeName ? titleCase(safeName) : "Anonymous";
-  const ts = new Date()
-    .toISOString()
-    .replace(/[-:TZ.]/g, "")
-    .slice(0, 12); // "202605231423"
-  return `Roastie_${base}Roast${ts}`;
-}
 
 const SYSTEM_PROMPT = `You name a short video file based on a stand-up roast transcript.
 
