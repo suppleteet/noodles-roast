@@ -97,8 +97,23 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as { question?: string; jokeContext?: string };
+    const rawQuestion = parsed.question ?? "So what's going on with you?";
+
+    // Hard cap — same rationale as /api/rephrase-question. In-character LLMs love to pad
+    // questions with preambles ("So rather than wasting my time...") and tails ("...and don't
+    // bullshit me"). If the result blows past the cap, replace with a stripped-down fallback
+    // so the puppet doesn't recite a paragraph.
+    const MAX_QUESTION_WORDS = 15;
+    const wc = rawQuestion.trim().split(/\s+/).filter(Boolean).length;
+    const question = wc <= MAX_QUESTION_WORDS ? rawQuestion : "So what's going on with you?";
+    if (question !== rawQuestion) {
+      console.warn(
+        `[generate-question] LLM exceeded ${MAX_QUESTION_WORDS}-word cap (${wc}w) — using fallback. raw="${rawQuestion.slice(0, 120)}"`,
+      );
+    }
+
     return NextResponse.json({
-      question: parsed.question ?? "So what's going on with you?",
+      question,
       jokeContext: parsed.jokeContext ?? "General roast.",
     });
   } catch (err) {
