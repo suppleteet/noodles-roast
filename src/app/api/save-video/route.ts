@@ -30,6 +30,14 @@ function cleverBaseName(): string {
   return `${adj}-${noun}-${ts}`;
 }
 
+/** Accept only safe file-base characters so a client-supplied name can't path-traverse. */
+function sanitizeRequestedName(raw: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+  if (cleaned.length < 3) return null;
+  return cleaned;
+}
+
 function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // Targeting universal sharing: iMessage, WhatsApp, Instagram, Android, iOS, Mac, Windows.
@@ -92,7 +100,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Video too large" }, { status: 413 });
   }
 
-  const base = cleverBaseName();
+  // Caller can pass a pre-generated name via ?name=... (from /api/name-video). The
+  // sanitizer enforces [A-Za-z0-9_-] only so a hostile string can't escape the videos
+  // folder. Falls back to the random adjective-noun-timestamp name on empty/short input.
+  const requestedName = sanitizeRequestedName(req.nextUrl.searchParams.get("name"));
+  const base = requestedName ?? cleverBaseName();
   const inputType = req.headers.get("content-type") ?? "video/webm";
   const inputExt: VideoExtension = extensionForMimeType(inputType);
   const inputPath = join(VIDEOS_FOLDER, `${base}.${inputExt}`);

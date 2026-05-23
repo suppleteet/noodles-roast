@@ -19,6 +19,18 @@ function preferredFilename(filename: string | null, blob: Blob | null): string {
   return blob?.type === "video/mp4" ? "roastie.mp4" : "roastie.webm";
 }
 
+/** Build the last-N lines of the conversation as role-prefixed text for /api/name-video. */
+function buildTranscriptForNaming(
+  history: { role: "user" | "puppet"; text: string }[],
+  maxLines: number = 24,
+): string[] {
+  return history
+    .slice(-maxLines)
+    .map(({ role, text }) => ({ role, text: text.trim() }))
+    .filter((entry) => entry.text.length > 0)
+    .map((entry) => `${entry.role}: ${entry.text}`);
+}
+
 export default function ShareScreen() {
   const recordedBlob = useSessionStore((s) => s.recordedBlob);
   const reset = useSessionStore((s) => s.reset);
@@ -61,7 +73,30 @@ export default function ShareScreen() {
 
     (async () => {
       try {
-        const saveResp = await fetch("/api/save-video", {
+        // Ask the LLM for a clever name based on the conversation. Snapshot the transcript
+        // via getState() so the effect can stay keyed on the recorded blob only — and so we
+        // capture the FULL transcript that existed at session end, not whatever fragment
+        // happened to be in scope when the effect closed over the store value.
+        const transcript = buildTranscriptForNaming(useSessionStore.getState().transcriptHistory);
+        let suggestedName: string | null = null;
+        try {
+          const nameResp = await fetch("/api/name-video", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transcript }),
+          });
+          if (nameResp.ok) {
+            const data = (await nameResp.json().catch(() => ({}))) as { filename?: string };
+            suggestedName = typeof data.filename === "string" ? data.filename : null;
+          }
+        } catch {
+          // Best-effort — save-video will fall back to its random adjective-noun name.
+        }
+
+        const saveUrl = suggestedName
+          ? `/api/save-video?name=${encodeURIComponent(suggestedName)}`
+          : "/api/save-video";
+        const saveResp = await fetch(saveUrl, {
           method: "POST",
           headers: { "Content-Type": recordedBlob.type || "video/webm" },
           body: recordedBlob,
