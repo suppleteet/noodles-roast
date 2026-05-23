@@ -1797,14 +1797,13 @@ export class ComedianBrain {
     const wrapped = `... ${filler}`;
     // Drive puppet animation via setMotion (visual cue) but DO NOT pass motion to queueSpeak
     // — voice presets layer stability/style/speed deltas and compounded drift across stacked
-    // fillers sounded erratic. Slow the speed to 0.85 so the filler reads as pondering
-    // rather than another sentence; 0.75 introduced audible stretching artifacts in EL,
-    // 0.85 keeps the pondering feel without the warbliness. Joke that follows returns to
-    // base speed (1.0) so the punch line lands at full pace.
+    // fillers sounded erratic. Slow the speed to 0.7 so the filler reads as pondering rather
+    // than another sentence. Joke that follows returns to base speed (1.0) so the punch
+    // line lands at full pace.
     this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
-    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.85 });
+    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.7 });
     this.deps.logTiming(
-      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.85) — "${filler}"`,
+      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.7) — "${filler}"`,
     );
     // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
   }
