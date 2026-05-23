@@ -753,11 +753,28 @@ export class ComedianBrain {
     }
   }
 
+  /** Words that strongly imply more is coming — if the answer's last real token is one
+   *  of these, don't trust a terminal period. STT routinely inserts periods inside
+   *  mid-sentence pauses ("No, my name is." → user about to say "Mr. Peanut man.").
+   *  Kept in sync with the dangler list inside _isFillerEchoable. */
+  private static readonly END_DANGLER_WORDS = new Set([
+    "and", "but", "or", "so", "the", "a", "an", "to", "of", "in", "on", "at",
+    "with", "for", "from", "by", "is", "was", "be", "are", "am", "my",
+    "your", "his", "her", "their", "our", "its", "this", "that", "these",
+    "those", "im", "ive", "ill",
+  ]);
+
   /** Heuristic: does this transcript look like a complete thought? */
   private static _looksComplete(text: string): boolean {
     const trimmed = text.trim();
-    // Sentence-ending punctuation
-    if (/[.?!]\s*$/.test(trimmed)) return true;
+    // Sentence-ending punctuation … BUT only when the final word isn't a dangler
+    // that almost certainly leads into more content (e.g. "No, my name is.").
+    if (/[.?!]\s*$/.test(trimmed)) {
+      const stripped = trimmed.replace(/[.?!,]+\s*$/, "").trim();
+      const lastWord = lastWordToken(stripped).toLowerCase();
+      if (ComedianBrain.END_DANGLER_WORDS.has(lastWord)) return false;
+      return true;
+    }
     // Common phrase terminals
     if (/\b(I guess|you know|I dunno|that's it|yeah|nope|no|yes)\s*$/i.test(trimmed)) return true;
     return false;
@@ -1780,13 +1797,14 @@ export class ComedianBrain {
     const wrapped = `... ${filler}`;
     // Drive puppet animation via setMotion (visual cue) but DO NOT pass motion to queueSpeak
     // — voice presets layer stability/style/speed deltas and compounded drift across stacked
-    // fillers sounded erratic. Slow the speed to 0.75 so the filler audibly feels like
-    // pondering rather than another sentence the comedian is delivering. The joke that
-    // follows naturally returns to base speed (1.0) so the punch line lands at full pace.
+    // fillers sounded erratic. Slow the speed to 0.85 so the filler reads as pondering
+    // rather than another sentence; 0.75 introduced audible stretching artifacts in EL,
+    // 0.85 keeps the pondering feel without the warbliness. Joke that follows returns to
+    // base speed (1.0) so the punch line lands at full pace.
     this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
-    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.75 });
+    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.85 });
     this.deps.logTiming(
-      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.75) — "${filler}"`,
+      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.85) — "${filler}"`,
     );
     // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
   }
@@ -1906,10 +1924,15 @@ export class ComedianBrain {
           // chain. The last filler's trailing "..." already provides the pre-joke breath, so
           // the joke text itself stays unmodified.
           this._stopFillerPump();
+          // Retarget puppet body language to anticipate the joke's mood while the last
+          // filler audio is still draining. The motion-inferred-from-user-answer pose
+          // (smug/conspiratorial/etc.) was a reaction to the user; this swaps to the
+          // mood the comedian is about to deliver in, which feels more "alive".
+          const jokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
+          this.deps.setMotion(jokeMotion, joke.intensity);
         }
         if (this.state === "generating") {
           this._transition("delivering");
-          this.deps.setMotion("energetic", 0.8);
         }
         // Strip echoed answer using the actual first filler text (the pump's echo), not the
         // generic "filler sound" sentinel passed to the LLM.

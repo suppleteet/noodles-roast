@@ -225,9 +225,22 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     addInputToRecording: (stream: MediaStream): (() => void) => {
       const ctx = getOrCreateContext();
       const source = ctx.createMediaStreamSource(stream);
-      // Route to recording destination ONLY — not speakers — to avoid feedback
-      source.connect(destRef.current!);
-      return () => { source.disconnect(); };
+      // Boost the mic going into the recording mix. Raw mic levels from the browser
+      // post-AGC sit around RMS 0.005-0.02 — barely audible next to the puppet's full-
+      // loudness TTS. STT gets a 3× boost inside useMicCapture.ts (manual MIC_GAIN), but
+      // the recording sees the raw stream; without this gain, users sound far away in
+      // the saved video. 2.5× is the safe ceiling — high enough to match speaking
+      // levels in the recording without clipping when the user shouts.
+      const RECORDING_MIC_GAIN = 2.5;
+      const gain = ctx.createGain();
+      gain.gain.value = RECORDING_MIC_GAIN;
+      // Route to recording destination ONLY — not speakers — to avoid feedback.
+      source.connect(gain);
+      gain.connect(destRef.current!);
+      return () => {
+        try { gain.disconnect(); } catch { /* ignore */ }
+        try { source.disconnect(); } catch { /* ignore */ }
+      };
     },
   };
 }
