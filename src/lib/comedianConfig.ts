@@ -54,7 +54,7 @@ const defaults = {
 
   // Latency experiments (temporary)
   skipGreeting: false,         // skip greeting → jump straight to ask_question
-  skipPreGeneration: false,   // speculative pre-generation fires after 1st word in wait_answer
+  skipPreGeneration: true,    // disabled — speculative LLM calls on partial input added cost without clearly winning TTFR; the brain's dangler/_looksComplete checks (May 2026) are doing the real work
   skipFiller: false,          // non-word filler ("Mmm.", "Uh huh.") bridges silence before joke
   skipScriptedLines: false,   // skip ALL canned speech (bridges, prods, confirm templates, reject templates)
   singleJokeMode: false,     // false: 1-2 jokes stream from one API call; true: pipeline 1 joke at a time
