@@ -32,6 +32,12 @@
 | @vercel/blob | ^2.3.3 | Durable feedback storage (Vercel Blob) |
 | jsdom | ^29.0.0 | DOM environment for Vitest |
 | openai | ^6.34.0 | Used by `llmClient.ts` for `gpt-*` and `o*` models |
+| googleapis | ^172.0.0 | OAuth + Drive v3 for auto-upload of finished roast MP4s |
+| eslint | ^9 | Lint runner; `npm run lint` just aliases `typecheck` |
+| eslint-config-next | ^16.1.6 | Next.js ESLint preset |
+| @types/node | ^20 | Node typings |
+| @types/react | ^19 | React typings (matches react ^19.0.0) |
+| @types/react-dom | ^19 | React DOM typings |
 
 ## AI Models in Use
 
@@ -186,4 +192,12 @@ GEMINI_API_KEY
 ELEVENLABS_API_KEY
 ELEVENLABS_VOICE_ID   (optional, defaults to Rachel)
 BLOB_READ_WRITE_TOKEN (Vercel Blob — feedback persistence)
+
+# Optional — enables auto-upload of saved MP4s to Google Drive.
+# Missing any one of these silently skips the upload (local save still works).
+# Mint with: node scripts/google-drive-auth.mjs
+GOOGLE_DRIVE_CLIENT_ID
+GOOGLE_DRIVE_CLIENT_SECRET
+GOOGLE_DRIVE_REFRESH_TOKEN
+GOOGLE_DRIVE_FOLDER_ID
 ```

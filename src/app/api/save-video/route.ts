@@ -4,6 +4,7 @@ import { join } from "path";
 import { spawn } from "child_process";
 import { VIDEOS_FOLDER } from "@/lib/videoPaths";
 import { extensionForMimeType, type VideoExtension } from "@/lib/mediaRecorderSupport";
+import { uploadVideoToDrive } from "@/lib/googleDriveUpload";
 
 const MAX_VIDEO_BYTES = 250 * 1024 * 1024;
 const FFMPEG_TIMEOUT_MS = 90_000;
@@ -128,6 +129,14 @@ export async function POST(req: NextRequest) {
     await convertToMp4(inputPath, mp4Path);
     await unlink(inputPath);
     console.log(`[save-video] converted -> ${mp4Path}`);
+
+    // Fire-and-forget Drive upload. Don't await — the share UI shouldn't wait on Drive latency.
+    void uploadVideoToDrive(mp4Path, `${base}.mp4`)
+      .then((result) => {
+        if (result) console.log(`[save-video] uploaded to Drive: ${result.webViewLink}`);
+      })
+      .catch((err) => console.error("[save-video] drive upload threw:", err));
+
     return NextResponse.json({
       filename: `${base}.mp4`,
       folder: VIDEOS_FOLDER,

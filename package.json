@@ -24,6 +24,7 @@
     "@vercel/blob": "^2.3.3",
     "autoprefixer": "^10.4.27",
     "elevenlabs": "^1.57.0",
+    "googleapis": "^172.0.0",
     "next": "^16.1.6",
     "openai": "^6.34.0",
     "postcss": "^8.5.8",
