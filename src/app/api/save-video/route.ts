@@ -115,6 +115,14 @@ export async function POST(req: NextRequest) {
   console.log(`[save-video] wrote ${arrayBuffer.byteLength} bytes -> ${inputPath}`);
 
   if (inputExt === "mp4") {
+    // Chrome on Windows / iOS Safari can produce MP4 directly — no ffmpeg
+    // conversion needed. Still fire the Drive upload so this path uploads too.
+    void uploadVideoToDrive(inputPath, `${base}.mp4`)
+      .then((result) => {
+        if (result) console.log(`[save-video] uploaded to Drive: ${result.webViewLink}`);
+      })
+      .catch((err) => console.error("[save-video] drive upload threw:", err));
+
     return NextResponse.json({
       filename: `${base}.mp4`,
       folder: VIDEOS_FOLDER,
