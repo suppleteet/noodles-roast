@@ -4,7 +4,7 @@ import { join } from "path";
 import { spawn } from "child_process";
 import { VIDEOS_FOLDER } from "@/lib/videoPaths";
 import { extensionForMimeType, type VideoExtension } from "@/lib/mediaRecorderSupport";
-import { uploadVideoToDrive } from "@/lib/googleDriveUpload";
+import { uploadVideoToDropbox } from "@/lib/dropboxUpload";
 
 const MAX_VIDEO_BYTES = 250 * 1024 * 1024;
 const FFMPEG_TIMEOUT_MS = 90_000;
@@ -130,12 +130,12 @@ export async function POST(req: NextRequest) {
     await unlink(inputPath);
     console.log(`[save-video] converted -> ${mp4Path}`);
 
-    // Fire-and-forget Drive upload. Don't await — the share UI shouldn't wait on Drive latency.
-    void uploadVideoToDrive(mp4Path, `${base}.mp4`)
+    // Fire-and-forget Dropbox upload. Don't await — the share UI shouldn't wait on Dropbox latency.
+    void uploadVideoToDropbox(mp4Path, `${base}.mp4`)
       .then((result) => {
-        if (result) console.log(`[save-video] uploaded to Drive: ${result.webViewLink}`);
+        if (result) console.log(`[save-video] uploaded to Dropbox: ${result.path}`);
       })
-      .catch((err) => console.error("[save-video] drive upload threw:", err));
+      .catch((err) => console.error("[save-video] dropbox upload threw:", err));
 
     return NextResponse.json({
       filename: `${base}.mp4`,
