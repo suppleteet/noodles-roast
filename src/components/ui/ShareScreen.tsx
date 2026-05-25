@@ -5,6 +5,11 @@ import FeedbackBox from "@/components/ui/FeedbackBox";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
+// Tyler's public Drive folder for roast collection. Must be shared as
+// "Anyone with the link → Editor" so visitors can upload.
+const TYLER_DRIVE_FOLDER_URL =
+  "https://drive.google.com/drive/folders/1W5-3ciAzFXeLJ1GEF3jz6it3lvD52LUP";
+
 interface SaveVideoResponse {
   folder?: string;
   filename?: string;
@@ -175,6 +180,20 @@ export default function ShareScreen() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function handleSendToTyler() {
+    if (!shareBlob) return;
+    // Kick off the download first so the file is in the user's Downloads
+    // folder by the time the Drive tab steals focus. Then open Tyler's
+    // shared folder so they can upload the just-downloaded file.
+    const url = URL.createObjectURL(shareBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = shareFilename;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    window.open(TYLER_DRIVE_FOLDER_URL, "_blank", "noopener,noreferrer");
+  }
+
   function handleOpenFolder() {
     fetch("/api/open-videos-folder", { method: "POST" }).catch((e) =>
       console.warn("[open-folder] failed:", e),
@@ -239,6 +258,14 @@ export default function ShareScreen() {
           className="rounded-xl bg-white/10 px-6 py-3 font-black transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white/10"
         >
           Download
+        </button>
+        <button
+          onClick={handleSendToTyler}
+          disabled={buttonsDisabled}
+          title="Downloads the video + opens Tyler's Drive folder so you can drop it in"
+          className="rounded-xl bg-purple-600 px-6 py-3 font-black transition-all hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-purple-600"
+        >
+          Send to Tyler
         </button>
       </div>
 
