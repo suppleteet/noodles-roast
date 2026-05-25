@@ -46,7 +46,9 @@ const AudioPlayer = forwardRef<AudioPlayerHandle>(function AudioPlayer(_props, r
   function getOrCreateContext(): AudioContext {
     let ctx = contextRef.current;
     if (!ctx || ctx.state === "closed") {
-      ctx = new AudioContext({ sampleRate: 44100 });
+      // latencyHint: "playback" routes through Android's MEDIA volume stream
+      // instead of VOICE_CALL. See usePcmPlayback.ts for the full rationale.
+      ctx = new AudioContext({ sampleRate: 44100, latencyHint: "playback" });
       contextRef.current = ctx;
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;

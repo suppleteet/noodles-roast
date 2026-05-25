@@ -65,7 +65,11 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       // path its built-in AudioBufferSourceNode resampler glitches the first ~500ms
       // of audio (chipmunk effect). Resampling ourselves in enqueueChunk gives a
       // single deterministic code path on every device.
-      ctx = new AudioContext();
+      // latencyHint: "playback" tells Android Chrome this is media (not VoIP),
+      // so output routes through the MEDIA volume stream instead of VOICE_CALL.
+      // VOICE_CALL has a non-zero floor on Android — even at min volume you can
+      // still hear it. MEDIA goes to true silence at 0.
+      ctx = new AudioContext({ latencyHint: "playback" });
       ctxRef.current = ctx;
 
       const analyser = ctx.createAnalyser();
