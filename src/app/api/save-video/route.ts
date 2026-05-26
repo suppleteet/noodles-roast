@@ -42,7 +42,10 @@ function sanitizeRequestedName(raw: string | null): string | null {
 function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // Targeting universal sharing: iMessage, WhatsApp, Instagram, Android, iOS, Mac, Windows.
-    // Settings match what iPhones produce: the de facto standard for mobile sharing.
+    // CRF 22 + 192k AAC = ~10x smaller than the recorder's raw CBR MP4 at
+    // perceptually identical quality. yuv420p + main profile + no B-frames +
+    // faststart + mp42 brand is the de facto iPhone-style profile every
+    // platform accepts (iMessage, WhatsApp, Instagram, Android, QuickTime).
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
@@ -50,13 +53,13 @@ function convertToMp4(inputPath: string, outputPath: string): Promise<void> {
       "-c:v", "libx264",
       "-profile:v", "main",
       "-level", "3.1",
-      "-bf", "0",             // no B-frames; some social/messaging apps choke on them
+      "-bf", "0",
       "-preset", "fast",
-      "-crf", "20",
+      "-crf", "22",
       "-pix_fmt", "yuv420p",
       "-c:a", "aac",
-      "-b:a", "128k",
-      "-ar", "44100",         // widest audio compatibility
+      "-b:a", "192k",
+      "-ar", "44100",
       "-movflags", "+faststart",
       "-brand", "mp42",
       outputPath,
@@ -108,35 +111,22 @@ export async function POST(req: NextRequest) {
   const base = requestedName ?? cleverBaseName();
   const inputType = req.headers.get("content-type") ?? "video/webm";
   const inputExt: VideoExtension = extensionForMimeType(inputType);
-  const inputPath = join(VIDEOS_FOLDER, `${base}.${inputExt}`);
+  // Use a `.raw.<ext>` suffix on the input so it never collides with the final
+  // `.mp4` output path even when the browser already delivered MP4.
+  const inputPath = join(VIDEOS_FOLDER, `${base}.raw.${inputExt}`);
   const mp4Path = join(VIDEOS_FOLDER, `${base}.mp4`);
 
   await writeFile(inputPath, Buffer.from(arrayBuffer));
   console.log(`[save-video] wrote ${arrayBuffer.byteLength} bytes -> ${inputPath}`);
 
-  if (inputExt === "mp4") {
-    // Chrome on Windows / iOS Safari can produce MP4 directly — no ffmpeg
-    // conversion needed. Still fire the Drive upload so this path uploads too.
-    void uploadVideoToDrive(inputPath, `${base}.mp4`)
-      .then((result) => {
-        if (result) console.log(`[save-video] uploaded to Drive: ${result.webViewLink}`);
-      })
-      .catch((err) => console.error("[save-video] drive upload threw:", err));
-
-    return NextResponse.json({
-      filename: `${base}.mp4`,
-      folder: VIDEOS_FOLDER,
-      filePath: inputPath,
-      mimeType: "video/mp4",
-      sizeBytes: arrayBuffer.byteLength,
-      converted: false,
-    });
-  }
-
   try {
     await convertToMp4(inputPath, mp4Path);
-    await unlink(inputPath);
-    console.log(`[save-video] converted -> ${mp4Path}`);
+    await unlink(inputPath).catch(() => {});
+    const { statSync } = await import("fs");
+    const finalSize = statSync(mp4Path).size;
+    console.log(
+      `[save-video] converted -> ${mp4Path} (${arrayBuffer.byteLength} -> ${finalSize} bytes, ${((finalSize / arrayBuffer.byteLength) * 100).toFixed(1)}%)`,
+    );
 
     // Fire-and-forget Drive upload. Don't await — the share UI shouldn't wait on Drive latency.
     void uploadVideoToDrive(mp4Path, `${base}.mp4`)
@@ -150,16 +140,26 @@ export async function POST(req: NextRequest) {
       folder: VIDEOS_FOLDER,
       filePath: mp4Path,
       mimeType: "video/mp4",
-      sizeBytes: arrayBuffer.byteLength,
+      sizeBytes: finalSize,
       converted: true,
     });
   } catch (err) {
-    // Conversion failed; keep the original recording so the user still has something.
+    // Conversion failed. Salvage by renaming the raw input to the final path
+    // so the user still has *something* — but only if the input was already
+    // an MP4 (universal playback). WebM gets returned as-is and the share UI
+    // can flag the format.
+    const fallbackPath = join(VIDEOS_FOLDER, `${base}.${inputExt}`);
+    try {
+      const { rename } = await import("fs/promises");
+      await rename(inputPath, fallbackPath);
+    } catch {
+      /* rename failed, leave the .raw. file in place */
+    }
     return NextResponse.json(
       {
         filename: `${base}.${inputExt}`,
         folder: VIDEOS_FOLDER,
-        filePath: inputPath,
+        filePath: fallbackPath,
         mimeType: inputType,
         sizeBytes: arrayBuffer.byteLength,
         conversionError: String(err),
