@@ -30,6 +30,8 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
+import { matchExpectedAnswer } from "@/lib/expectedAnswerMatch";
+import type { ExpectedJokesResponse } from "@/app/api/generate-expected-jokes/route";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
 import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
@@ -290,11 +292,25 @@ export class ComedianBrain {
   /** Queued vision interrupt — consumed at the next natural transition point. */
   private pendingVisionInterrupt: { changes: string[]; current: string[]; previous: string[] } | null = null;
 
-  // Speculative generation
+  // Speculative generation (Original flow — partial-answer-snapshot prefetch).
   private speculativeRequest: {
     snapshot: string;
     abort: AbortController;
     result: Promise<JokeResponse | null>;
+  } | null = null;
+
+  // Speculative pre-generation by expected answer (Rapid Fire flow).
+  // Fired when the next question is pre-queued; resolves to a map of
+  // {answerKey -> 2 jokes}. On answer arrival, the brain fuzzy-matches the
+  // STT to a key and delivers the cached pair instantly. questionId scopes
+  // the cache so a stale request for a different question doesn't fire.
+  private expectedJokesCache: {
+    questionId: string;
+    abort: AbortController;
+    /** null until the fetch resolves. */
+    jokesByAnswer: Map<string, JokeItem[]> | null;
+    /** Awaitable handle if a consumer wants to briefly wait for resolution. */
+    ready: Promise<void>;
   } | null = null;
 
   // Hopper
@@ -407,6 +423,7 @@ export class ComedianBrain {
   stop(): void {
     this._clearTimers();
     this._cancelSpeculative();
+    this._cancelExpectedJokesGen();
     this._cancelHopper();
     this._cancelRephrase();
     this.deps.setBrainState(null);
@@ -1224,6 +1241,11 @@ export class ComedianBrain {
         this.bankQuestionsInARow++;
         questionWillBeQueuedAsync = true;
         this._queueQuestionWithBridge(this._pickQuestionText(this.currentQuestion));
+        // Rapid Fire: fire speculative joke pre-gen for this question. The
+        // pre-queue path also fires this from _preQueueNextQuestion; this
+        // covers the first-question case (no preceding delivery to pre-queue
+        // during) plus any non-pre-queued bank ask.
+        this._fireExpectedJokesGen(question);
       } else {
         // Generate a contextual question based on what we see + know
         this.bankQuestionsInARow = 0;
@@ -1739,6 +1761,20 @@ export class ComedianBrain {
     this.deliveryGeneration++;
     this.deps.setMotion("thinking", 0.7);
     this._addLedger("answer", answer, []);
+
+    // Rapid Fire fast path: if speculative pre-gen has produced jokes for
+    // this question's expected answers, fuzzy-match the user's answer and
+    // deliver the cached pair instantly. No filler, no fresh LLM round-trip.
+    // Falls through silently when:
+    //   - flow is "original" (cache is never populated)
+    //   - question has no expectedAnswers (e.g., "name")
+    //   - speculative request hasn't resolved yet
+    //   - user's answer doesn't fuzzy-match any expected key
+    const cachedJokes = this._tryConsumeExpectedJokes(answer);
+    if (cachedJokes) {
+      this.enterDelivering(answer, { relevant: true, jokes: cachedJokes }, undefined);
+      return;
+    }
 
     // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
     // pause. First filler queues immediately; each filler is wrapped "... <text> ..." so
@@ -2341,6 +2377,10 @@ export class ComedianBrain {
     this.preQueuedQuestion = nextQ;
     this.preQueuedRephrasedText = null;
     this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
+    // Rapid Fire: fire speculative joke pre-gen now so it's ready by the
+    // time the user finishes answering. No-op in Original flow or when the
+    // question has no expectedAnswers (e.g., "name").
+    this._fireExpectedJokesGen(nextQ);
     this.deps.logTiming(`brain: pre-queue bank question — "${nextQ.id}"`);
   }
 
@@ -2563,6 +2603,7 @@ export class ComedianBrain {
     this.pendingWrapup = false;
     this._clearTimers();
     this._cancelSpeculative();
+    this._cancelExpectedJokesGen();
     this._cancelHopper();
     this._cancelPipelinePrefetch();
     this._cancelRephrase();
@@ -2715,6 +2756,114 @@ export class ComedianBrain {
       this.speculativeRequest.abort.abort();
       this.speculativeRequest = null;
     }
+  }
+
+  // ─── Speculative pre-gen by expected answer (Rapid Fire) ─────────────────────
+
+  /**
+   * Fire a single LLM call that generates jokes for EACH expected answer of
+   * the given question. Result is cached on `expectedJokesCache`. When the
+   * user actually answers, the brain matches the STT to a key and delivers
+   * the cached pair without waiting on a fresh LLM round-trip.
+   *
+   * No-op when:
+   *   - flowMode !== "rapid_fire" (Original flow doesn't use this path)
+   *   - the question has no `expectedAnswers` (e.g., "name" — open-ended)
+   *   - a cache is already in flight or resolved for this same questionId
+   *
+   * Failures resolve to an empty cache, which the consumer treats as a miss
+   * and falls back to fresh gen — silently degrading, never throwing.
+   */
+  private _fireExpectedJokesGen(question: ComedyQuestion): void {
+    if (this.deps.getFlowMode() !== "rapid_fire") return;
+    if (!question.expectedAnswers || question.expectedAnswers.length === 0) return;
+    // Already cached/in-flight for this question? Reuse.
+    if (this.expectedJokesCache?.questionId === question.id) return;
+    // Different question pending — cancel before we replace.
+    this._cancelExpectedJokesGen();
+
+    const abort = new AbortController();
+    const ready = fetch("/api/generate-expected-jokes", {
+      method: "POST",
+      signal: abort.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: question.question,
+        expectedAnswers: question.expectedAnswers,
+        persona: this.deps.getPersona(),
+        burnIntensity: this.deps.getBurnIntensity(),
+        contentMode: this.deps.getContentMode(),
+        model: this.deps.getRoastModel(),
+        knownFacts: this._getThrowbackContext(),
+      }),
+    })
+      .then((r) => r.json() as Promise<ExpectedJokesResponse>)
+      .then((data) => {
+        if (abort.signal.aborted) return;
+        if (this.expectedJokesCache?.questionId !== question.id) return; // stale
+        const map = new Map<string, JokeItem[]>();
+        for (const [key, jokes] of Object.entries(data.jokesByAnswer ?? {})) {
+          if (Array.isArray(jokes) && jokes.length > 0) {
+            map.set(key, jokes as JokeItem[]);
+          }
+        }
+        this.expectedJokesCache.jokesByAnswer = map;
+        this.deps.logTiming(
+          `brain: expected-jokes ready q=${question.id} keys=${[...map.keys()].join("|")}`,
+        );
+      })
+      .catch((err) => {
+        if (abort.signal.aborted) return;
+        this.deps.logTiming(`brain: expected-jokes fetch failed q=${question.id}: ${String(err).slice(0, 80)}`);
+        if (this.expectedJokesCache?.questionId === question.id) {
+          this.expectedJokesCache.jokesByAnswer = new Map(); // empty → consumer falls back
+        }
+      });
+
+    this.expectedJokesCache = {
+      questionId: question.id,
+      abort,
+      jokesByAnswer: null,
+      ready,
+    };
+    this.deps.logTiming(`brain: expected-jokes fired q=${question.id} keys=${question.expectedAnswers.join("|")}`);
+  }
+
+  private _cancelExpectedJokesGen(): void {
+    if (this.expectedJokesCache) {
+      this.expectedJokesCache.abort.abort();
+      this.expectedJokesCache = null;
+    }
+  }
+
+  /**
+   * Look up cached pre-gen'd jokes for the given answer. Returns the joke
+   * array if there's a confident match, else null (caller falls back to
+   * fresh generation).
+   *
+   * Consumes the cache on hit — same pair won't be reused on a re-ask.
+   */
+  private _tryConsumeExpectedJokes(answer: string): JokeItem[] | null {
+    const cache = this.expectedJokesCache;
+    if (!cache) return null;
+    if (cache.questionId !== this.currentQuestion?.id) return null;
+    if (cache.jokesByAnswer === null) {
+      // Cache still resolving — too early to use, fall through.
+      return null;
+    }
+    const keys = [...cache.jokesByAnswer.keys()];
+    if (keys.length === 0) return null;
+    const matched = matchExpectedAnswer(answer, keys);
+    if (!matched) {
+      this.deps.logTiming(`brain: expected-jokes miss "${answer.slice(0, 30)}" — fall back`);
+      return null;
+    }
+    const jokes = cache.jokesByAnswer.get(matched) ?? null;
+    if (!jokes || jokes.length === 0) return null;
+    // Consume — clear so a re-ask doesn't reuse the same pair.
+    this.expectedJokesCache = null;
+    this.deps.logTiming(`brain: expected-jokes hit "${matched}" — ${jokes.length} jokes`);
+    return jokes;
   }
 
   // ─── Joke Hopper ──────────────────────────────────────────────────────────────
