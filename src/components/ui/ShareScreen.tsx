@@ -2,8 +2,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
 import FeedbackBox from "@/components/ui/FeedbackBox";
-
-const IS_DEV = process.env.NODE_ENV !== "production";
+import { useDevUnlock } from "@/lib/devUnlock";
 
 // Tyler's public Drive folder for roast collection. Must be shared as
 // "Anyone with the link → Editor" so visitors can upload.
@@ -39,6 +38,7 @@ function buildTranscriptForNaming(
 export default function ShareScreen() {
   const recordedBlob = useSessionStore((s) => s.recordedBlob);
   const reset = useSessionStore((s) => s.reset);
+  const IS_DEV = useDevUnlock();
   const [playing, setPlaying] = useState(false);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);

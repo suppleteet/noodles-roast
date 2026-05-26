@@ -3,8 +3,7 @@ import { useEffect, useState } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
 import type { ContentMode, FlowMode, RoastModelId } from "@/store/useSessionStore";
 import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monetizationCatalog";
-
-const IS_DEV = process.env.NODE_ENV !== "production";
+import { useDevUnlock } from "@/lib/devUnlock";
 
 const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
@@ -41,6 +40,7 @@ export default function LandingScreen() {
   const setRoastModel = useSessionStore((s) => s.setRoastModel);
   const flowMode = useSessionStore((s) => s.flowMode);
   const setFlowMode = useSessionStore((s) => s.setFlowMode);
+  const IS_DEV = useDevUnlock();
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
   const [paymentBusy, setPaymentBusy] = useState<RoastPassSku | "redeem" | null>(null);
 

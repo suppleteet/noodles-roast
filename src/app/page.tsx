@@ -22,6 +22,7 @@ import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
+import { useDevUnlock, toggleDevUnlock } from "@/lib/devUnlock";
 
 interface DebugUsageSnapshot {
   llm: {
@@ -79,8 +80,14 @@ function MainApp() {
   const puppetRevealed = useSessionStore((s) => s.puppetRevealed);
   const isEnding = useSessionStore((s) => s.isEnding);
   const brainState = useSessionStore((s) => s.brainState);
-  const IS_DEV = process.env.NODE_ENV !== "production";
-  const [debugMode, setDebugMode] = useState(IS_DEV);
+  const IS_DEV = useDevUnlock();
+  const [debugMode, setDebugMode] = useState(false);
+  // Auto-enable debug overlays the first time IS_DEV becomes true (dev build
+  // hydrates, or user taps the build stamp to unlock). User can still toggle
+  // off manually via the dev controls — we only flip on the false→true edge.
+  useEffect(() => {
+    if (IS_DEV) setDebugMode(true);
+  }, [IS_DEV]);
   const [mockMode, setMockMode] = useState(false);
   const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
   const lastNonZeroUsageRef = useRef<DebugUsageSnapshot | null>(null);
@@ -676,10 +683,53 @@ function MainApp() {
         </div>
       )}
       {process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_BUILD_TIME && (
-        <div className="fixed bottom-2 right-3 text-white/40 text-[10px] sm:text-xs select-none pointer-events-none z-50">
-          {new Date(process.env.NEXT_PUBLIC_BUILD_TIME).toLocaleString()}
-        </div>
+        <BuildTimeStamp />
       )}
     </main>
+  );
+}
+
+/**
+ * Build-time stamp in the bottom-right corner. Five quick taps within 2.5
+ * seconds toggle the dev-features unlock (flips a localStorage flag — see
+ * src/lib/devUnlock.ts). On unlock/lock a short toast confirms which state
+ * we're in. The 5-tap gesture is hard to trigger by accident on a phone
+ * while keeping the prod UI uncluttered.
+ */
+function BuildTimeStamp() {
+  const tapsRef = useRef<number[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
+  if (!buildTime) return null;
+
+  function handleTap() {
+    const now = Date.now();
+    const windowMs = 2500;
+    const recent = tapsRef.current.filter((t) => now - t < windowMs);
+    recent.push(now);
+    tapsRef.current = recent;
+    if (recent.length >= 5) {
+      tapsRef.current = [];
+      const nowUnlocked = toggleDevUnlock();
+      setToast(nowUnlocked ? "Dev mode unlocked" : "Dev mode locked");
+      window.setTimeout(() => setToast(null), 2000);
+    }
+  }
+
+  return (
+    <div className="fixed bottom-2 right-3 z-50 flex flex-col items-end gap-1">
+      {toast && (
+        <div className="rounded-md bg-orange-600/90 px-2 py-1 text-[10px] font-bold text-white shadow-lg sm:text-xs">
+          {toast}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={handleTap}
+        className="select-none text-[10px] text-white/40 transition-colors hover:text-white/70 sm:text-xs"
+      >
+        {new Date(buildTime).toLocaleString()}
+      </button>
+    </div>
   );
 }
