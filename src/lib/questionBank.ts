@@ -24,6 +24,15 @@ export interface ComedyQuestion {
   confirmThreshold?: number;
   /** Echo-only templates (misheard repeat). {answer} = transcription; brain appends a tail filler after. */
   confirmTemplates?: string[];
+  /**
+   * (Rapid Fire flow only.) The most likely STT outcomes for this question
+   * (lowercase, no punctuation). The brain pre-generates a joke per expected
+   * answer in parallel with the question being spoken, then fuzzy-matches the
+   * real answer to pick which pre-generated joke to deliver. Leave undefined
+   * for open-ended questions (e.g. "name") — brain falls back to standard
+   * answer-then-generate.
+   */
+  expectedAnswers?: string[];
 }
 
 /** Short skeptical pause beats after the confirm echo — gives the user a beat to correct, silence = roll with it. */

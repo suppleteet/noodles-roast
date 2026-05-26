@@ -12,6 +12,15 @@ import {
 
 export type ContentMode = "clean" | "vulgar";
 
+/**
+ * Conversation flow style. "original" = current behavior (LLM-personalized
+ * bank questions, vision_react interrupts, single-joke-per-cycle delivery).
+ * "rapid_fire" = short Q&As with binary/short-answer questions, jokes fired
+ * as 2-joke bursts about the gathered info, no vision_react interrupts.
+ * Dev-only toggle for now — production users always get "original".
+ */
+export type FlowMode = "original" | "rapid_fire";
+
 export type RoastModelId =
   | "gemini-3.5-flash"
   | "gemini-3.1-flash-lite"
@@ -88,6 +97,7 @@ export interface RoastSentence {
 interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
+  flowMode: FlowMode;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
   roastModel: RoastModelId;
@@ -153,6 +163,7 @@ interface SessionState {
   // actions
   setPhase: (phase: SessionPhase, trigger: SessionTrigger) => void;
   setSessionMode: (mode: SessionMode) => void;
+  setFlowMode: (mode: FlowMode) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
   setContentMode: (mode: ContentMode) => void;
   setRoastModel: (model: RoastModelId) => void;
@@ -202,6 +213,7 @@ interface SessionState {
 const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
+  flowMode: "original" as FlowMode,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
   roastModel: "gemini-3.5-flash" as RoastModelId,
@@ -257,6 +269,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ phase });
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
+  setFlowMode: (flowMode) => set({ flowMode }),
   setBurnIntensity: (burnIntensity) => set({ burnIntensity }),
   setContentMode: (contentMode) => set({ contentMode }),
   setRoastModel: (roastModel) => set({ roastModel }),

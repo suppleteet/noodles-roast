@@ -1100,6 +1100,7 @@ export default function LiveSessionController({
       getBurnIntensity: () => useSessionStore.getState().burnIntensity,
       getContentMode: () => useSessionStore.getState().contentMode,
       getRoastModel: () => useSessionStore.getState().roastModel,
+      getFlowMode: () => useSessionStore.getState().flowMode,
       getInputAmplitude: () => mic.getInputAmplitude(),
       getObservations: () => useSessionStore.getState().observations,
       getVisionSetting: () => useSessionStore.getState().visionSetting,

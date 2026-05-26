@@ -29,6 +29,7 @@ import {
   REJECT_TEMPLATES,
   type ComedyQuestion,
 } from "@/lib/questionBank";
+import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
 import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
@@ -100,6 +101,8 @@ export interface ComedianBrainDeps {
   getTownFlavor: () => string | null;
   /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-4o"). */
   getRoastModel: () => string;
+  /** Conversation flow style. Drives which question bank the brain pulls from. */
+  getFlowMode: () => import("@/store/useSessionStore").FlowMode;
   /** Current mic input RMS (0-1) — used for background noise gating. */
   getInputAmplitude: () => number;
   /** Multi-turn chat session ID — if set, API routes reuse the session instead of sending the full persona. */
@@ -369,9 +372,15 @@ export class ComedianBrain {
 
     // Always lead with name so the puppet has something personal to work with.
     // Everything else shuffles freely — avoids the show feeling like a questionnaire.
-    const nameQuestion = QUESTION_BANK.find((q) => q.id === "name");
-    const rest = shuffle(QUESTION_BANK.filter((q) => q.id !== "name"));
-    this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(QUESTION_BANK);
+    // Flow mode determines which bank we pull from. Rapid Fire uses short-answer
+    // questions with expectedAnswers populated for speculative pre-gen (future
+    // commit); Original uses the open-ended bank with rephrase-personalization.
+    const flowMode = this.deps.getFlowMode();
+    const bank = flowMode === "rapid_fire" ? RAPID_FIRE_QUESTION_BANK : QUESTION_BANK;
+    this.deps.logTiming(`brain: flow=${flowMode} bank=${bank.length}q`);
+    const nameQuestion = bank.find((q) => q.id === "name");
+    const rest = shuffle(bank.filter((q) => q.id !== "name"));
+    this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(bank);
     this.questionIndex = 0;
     this.askedQuestionIds = new Set();
     this.ledger = [];

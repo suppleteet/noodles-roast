@@ -42,6 +42,7 @@ function makeDeps(overrides?: Partial<ComedianBrainDeps>): ComedianBrainDeps {
     getBurnIntensity: vi.fn(() => 5 as 1 | 2 | 3 | 4 | 5),
     getContentMode: vi.fn(() => "vulgar" as const),
     getRoastModel: vi.fn(() => "gemini-3.5-flash"),
+    getFlowMode: vi.fn(() => "original" as const),
     getInputAmplitude: vi.fn(() => 0.1),
     getObservations: vi.fn(() => []),
     getVisionSetting: vi.fn(() => null),
