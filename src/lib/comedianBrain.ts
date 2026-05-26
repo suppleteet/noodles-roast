@@ -858,41 +858,35 @@ export class ComedianBrain {
    *
    * Reject when:
    *   - The follow-up is A/B / multiple-choice / either-or
-   *   - The previous answer was too thin to dig into (< 3 words)
-   *   - The previous question was already a short canonical (name/age/single)
-   *   - The follow-up is just a rephrase of the same topic ("so what kind of X?")
+   *   - The follow-up text matches an already-asked bank topic's keywords
+   *     (i.e., we'd be asking about the same thing twice)
+   *
+   * `answer` is kept in the signature for callers but is no longer used to
+   * gate based on answer length — short answers ("Tyler") can still produce
+   * great name-as-hook follow-ups, so the previous wc < 3 filter dropped
+   * good lines.
    */
-  private _isSmartFollowUp(followUp: string, answer: string): boolean {
+  private _isSmartFollowUp(followUp: string, _answer: string): boolean {
     const fu = followUp.trim();
     if (!fu) return false;
     const fuLower = fu.toLowerCase();
 
-    // A/B and either-or formats
+    // A/B and either-or formats — these are bad question shapes regardless of topic.
     if (/\bor\s+(?:not\s+)?[a-z]+[.?\s]*\?\s*$/i.test(fu)) return false;
     if (/\bwould you rather\b/i.test(fuLower)) return false;
     if (/\beither\b[^.?!]*\bor\b/i.test(fuLower)) return false;
     // "Are you a morning person or a night owl?" — flag any "or" sandwiched between commas/words ending in ?
     if (/[a-z]\s+or\s+[a-z][^?]*\?/i.test(fuLower)) return false;
 
-    // Previous answer too thin
-    const ans = answer.trim();
-    const wc = ans ? ans.split(/\s+/).filter(Boolean).length : 0;
-    if (wc < 3) return false;
-
-    // Canonical-short-answer topics — name/age don't unlock more by digging
-    const qId = this.currentQuestion?.id ?? "";
-    if (qId === "name" || qId === "age" || qId === "single") return false;
-
-    // Rephrase-of-same-topic check: if the follow-up shares meaningful nouns
-    // with the just-asked question, it's probably "so what kind of [same thing]?".
-    const lastQuestionText = (this.currentQuestion?.question ?? "").toLowerCase();
-    if (lastQuestionText) {
-      const nouns = (lastQuestionText.match(/\b[a-z]{4,}\b/g) ?? []).filter(
-        (w) => !["what", "your", "you", "have", "with", "that", "this", "they", "would", "about", "going"].includes(w),
-      );
-      const fuNouns = new Set((fuLower.match(/\b[a-z]{4,}\b/g) ?? []));
-      const overlap = nouns.filter((n) => fuNouns.has(n)).length;
-      if (overlap >= 2) return false;
+    // Topic-repeat check: if the follow-up text contains any already-asked
+    // bank topic's keywords, reject. This covers both "rephrase the question
+    // we just asked" AND "circle back to a topic from earlier in the session."
+    for (const askedId of this.askedQuestionIds) {
+      const askedQ = QUESTION_BANK.find((q) => q.id === askedId);
+      if (!askedQ?.topicKeywords) continue;
+      for (const kw of askedQ.topicKeywords) {
+        if (fuLower.includes(kw.toLowerCase())) return false;
+      }
     }
 
     return true;
