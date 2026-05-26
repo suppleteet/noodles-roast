@@ -2884,21 +2884,34 @@ export class ComedianBrain {
   }
 
   /** Full ledger summary for throwback references — all facts learned so far. */
+  /**
+   * Maximum personal facts (excluding city) included in `knownFacts` per joke
+   * generation call. Without this cap the prompt accumulates the entire
+   * dossier ("name, age, job, hobby, kids...") and the LLM starts reciting
+   * the list instead of riffing on what just happened. 2 = current topic +
+   * one prior anchor — usually enough for a callback without forcing one.
+   */
+  private static readonly MAX_KNOWN_FACTS = 2;
+
   private _getThrowbackContext(): string[] {
-    // Extract all tagged facts (name, job, city, etc.) from the full ledger
+    // Extract all tagged facts from the full ledger, dedupe preserving order.
     const facts: string[] = [];
     for (const entry of this.ledger) {
       if (entry.tags.length > 0) {
         facts.push(...entry.tags);
       }
     }
-    // Add ambient context city as a known fact if available
+    const deduped = [...new Set(facts)];
+    // Cap to the most recent N — bias toward what just happened.
+    const capped = deduped.slice(-ComedianBrain.MAX_KNOWN_FACTS);
+
+    // City is always included if known. It's geo-derived flavor, not a fact
+    // they told us, so it doesn't count against the cap.
     const ambient = this.deps.getAmbientContext();
     if (ambient?.city && ambient.city !== "unknown") {
-      facts.push(`city:${ambient.city}`);
-      // Don't include region/county — just city name
+      capped.push(`city:${ambient.city}`);
     }
-    return [...new Set(facts)]; // dedupe
+    return capped;
   }
 
   /**
