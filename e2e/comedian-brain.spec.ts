@@ -105,29 +105,6 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
     await driver.waitForStateVisited("generating", 5000);
   });
 
-  test("follow-up question used when API returns followUp", async ({ page }) => {
-    const driver = new ComedianBrainDriver(page);
-    await driver.setup();
-    await startRoasting(page, driver);
-
-    await driver.waitForBrainState("wait_answer", 10000);
-
-    driver.mockJokeResponse({
-      relevant: true,
-      jokes: [{ text: "A dentist! You inflict pain for a living!", motion: "laugh", intensity: 0.9, score: 8 }],
-      followUp: "Do your patients know you look like that?",
-    });
-
-    await driver.startStateTracking();
-    await driver.simulateAnswer("I am a dentist");
-    // delivering and ask_question are both transient — wait for ask_question (stable)
-    await driver.waitForBrainState("ask_question", 8000);
-
-    // Check that the follow-up question was queued to TTS
-    const ttsReqs = driver.getTtsRequests();
-    const hasFollowUp = ttsReqs.some((r) => r.text.includes("patients") || r.text.includes("look like"));
-    expect(hasFollowUp).toBe(true);
-  });
 });
 
 // ─── Silence handling ─────────────────────────────────────────────────────────

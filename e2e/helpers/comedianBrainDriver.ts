@@ -106,7 +106,6 @@ export class ComedianBrainDriver extends LiveSessionMock {
         }
       }
       const meta: Record<string, unknown> = { type: "meta", relevant: full.relevant ?? true };
-      if (full.followUp) meta.followUp = full.followUp;
       if (full.redirect) meta.redirect = full.redirect;
       if (full.tags) meta.tags = full.tags;
       if (full.callback) meta.callback = full.callback;

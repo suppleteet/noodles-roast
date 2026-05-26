@@ -126,7 +126,6 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
   "jokes": [
     { "motion": "<motion_state>", "intensity": <0.0-1.0>, "text": "spoken words only", "score": <1-10> }
   ],
-  "followUp": "optional follow-up question string or omit",
   "redirect": "optional witty redirect if relevant=false or omit",
   "callback": { "motion": "...", "intensity": 0.7, "text": "..." } or omit,
   "tags": ["name:Mike", "job:dentist"] or omit
@@ -156,7 +155,7 @@ BACKGROUND RULE:
   place — office, bedroom, café, bus, gym, etc. Joke about the concept of being there, not the objects.
 - Focus your observations on THE PERSON — their face, clothes, expression, posture, vibe.
 
-Set "relevant": true. No "followUp". No "redirect".
+Set "relevant": true. No "redirect".
 Generate exactly 1 joke. Keep it quick.`,
 
     vision_opening: `## Task: First Vision Joke
@@ -168,7 +167,7 @@ BACKGROUND RULE:
 - NEVER joke about specific background objects (a ceiling beam, a bookshelf, a poster, a lamp, furniture, etc.)
 - Focus on THE PERSON — their face, clothes, expression, posture, vibe.
 
-Set "relevant": true. No "followUp" needed.
+Set "relevant": true.
 Generate exactly 1 joke.`,
 
     answer_roast: `## Task: Roast Response to User's Answer
@@ -219,16 +218,10 @@ BACKGROUND RULE:
 Relevance check: If the user's answer is clearly off-topic, set "relevant": false and
 provide a witty redirect in "redirect" that acknowledges what they said but steers back.
 
-Follow-up: Only include a "followUp" when the answer genuinely deserves one. Default is to OMIT.
-FOLLOW-UP RULES (must satisfy ALL — when in doubt, omit):
-- The user's answer was SPECIFIC (proper noun, named place, real detail) — not a generic / one-word / yes-no.
-- There is a juicy roast angle in their answer that your jokes did NOT already cover.
-- The follow-up is ONE open question any normal person can answer in a sentence.
-- The follow-up unlocks a NEW dimension — not just "so what kind of [same topic]?".
-- NEVER use A/B / either-or format ("Is it more X or Y?", "Would you rather X or Y?").
-- NEVER use multiple-choice or closed yes-no.
-- Must be a real question — not rhetorical. (Rhetorical questions belong INSIDE jokes, not in "followUp".)
-- Keep it to one follow-up per topic. The host will change topics if you omit followUp — that's good.
+Next-question handling: Do NOT include any follow-up question field in your
+JSON response. The host (a separate component) always picks the next question
+from its own bank. Your job is jokes only — relevant, redirect (if needed),
+callback, and tags. Nothing else.
 
 Throwback references: If KNOWN FACTS are provided, you MAY reference 1 prior fact per joke — but ONLY
 when it makes the punchline hit harder. NEVER open with a list of facts ("Name, from City, doing Job...").
@@ -266,7 +259,7 @@ BACKGROUND RULE:
 - NEVER joke about specific background objects (a ceiling beam, a bookshelf, a poster, furniture, etc.)
 - Only react to changes involving THE PERSON or something dramatically different about the scene.
 
-Set "relevant": true. No "followUp" needed.
+Set "relevant": true.
 Generate 1 joke.`,
 
     wrapup: `## Task: Closing Sign-Off — Say Goodbye in a Clever Way
@@ -287,7 +280,7 @@ VULGAR MODE — close with one last GENERAL gut-punch insult as part of the good
   · "I'm out. Tyler, you absolute waste of skin — goodnight."
 The goodbye must still tie to specifics they revealed, but the farewell itself can be a blunt, profane sign-off rather than a polished mic-drop.` : ""}
 
-Set "relevant": true. No "followUp". No "redirect".
+Set "relevant": true. No "redirect".
 Generate exactly 1 joke.`,
 
     hopper: `## Task: Background Joke Generation
@@ -363,7 +356,6 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
   "jokes": [
     { "text": "spoken words only", "motion": "<motion_state>", "intensity": <0.0-1.0>, "score": <1-10> }
   ],
-  "followUp": "optional follow-up question string or omit",
   "redirect": "optional witty redirect if relevant=false or omit",
   "callback": { "text": "...", "motion": "...", "intensity": 0.7 } or omit,
   "tags": ["name:Mike", "job:dentist"] or omit

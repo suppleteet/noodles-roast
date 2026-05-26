@@ -27,7 +27,6 @@ export interface JokeItem {
 export interface JokeResponse {
   relevant: boolean;
   jokes: JokeItem[];
-  followUp?: string;
   redirect?: string;
   callback?: { text: string; motion: MotionState; intensity: number };
   tags?: string[];
@@ -173,7 +172,6 @@ export async function POST(req: NextRequest) {
     const response: JokeResponse = {
       relevant: parsed.relevant ?? true,
       jokes: Array.isArray(parsed.jokes) ? parsed.jokes : [],
-      followUp: parsed.followUp,
       redirect: parsed.redirect,
       callback: parsed.callback,
       tags: parsed.tags,

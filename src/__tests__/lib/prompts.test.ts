@@ -95,7 +95,13 @@ describe("getJokePrompt", () => {
       const prompt = getJokePrompt("greeting", "kvetch", 3, "clean");
       expect(prompt).toContain('"relevant"');
       expect(prompt).toContain('"jokes"');
-      expect(prompt).toContain('"followUp"');
+      expect(prompt).toContain('"redirect"');
+    });
+
+    it("does NOT instruct the LLM to produce follow-up questions", () => {
+      // The brain owns question selection from QUESTION_BANK; the LLM's job is jokes only.
+      const prompt = getJokePrompt("answer_roast", "kvetch", 3, "clean");
+      expect(prompt).not.toContain('"followUp"');
     });
 
     it("lists valid motion states", () => {

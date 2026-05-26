@@ -81,6 +81,8 @@ ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
 
 **Key rule**: Gemini Live output (outputTranscription, modelTurn) is DISCARDED. The brain controls all speech.
 
+**Question selection**: All questions come from `QUESTION_BANK` (`src/lib/questionBank.ts`). The joke LLM is told NOT to emit follow-up questions — its job is jokes + tags + redirect/callback only. Personalization happens at delivery time via `/api/rephrase-question`, which gets `knownFacts` from the ledger and is told to use the user's name once if known (e.g., "Alright — what's your name?" → "So Tyler, what's your job?"). This makes the conversation feel responsive without letting the LLM go off-script and accidentally repeat topics.
+
 **End-of-speech detection**: Silero VAD (`useVad`) is the primary detector (~200ms). The brain's `answerSilenceMs` timer (300ms) is a fallback if VAD fails to load or misses.
 
 ## Brain State Machine

@@ -24,13 +24,6 @@ export interface ComedyQuestion {
   confirmThreshold?: number;
   /** Echo-only templates (misheard repeat). {answer} = transcription; brain appends a tail filler after. */
   confirmTemplates?: string[];
-  /**
-   * Short-form topic markers. If any of these appear in a candidate follow-up
-   * or contextual question AFTER this one has already been asked this session,
-   * the candidate is rejected as a topic repeat. Keep these specific enough to
-   * not match unrelated jokes (avoid bare common words like "look" / "old").
-   */
-  topicKeywords?: string[];
 }
 
 /** Short skeptical pause beats after the confirm echo — gives the user a beat to correct, silence = roll with it. */
@@ -83,7 +76,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "I asked your name, not for a moment of silence.",
       "It's two words — well, usually. What do I call you?",
     ],
-    topicKeywords: ["your name", "what's your name", "what do they call you", "your nickname"],
     confirmThreshold: 0.8,
     confirmTemplates: [
       "{answer}?",
@@ -107,7 +99,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "You do something for money, right? Or is the vibe just... independently vibing?",
       "Job, career, hustle, grift — whatever you call it. What is it?",
     ],
-    topicKeywords: ["for a living", "your job", "your career", "your profession", "your occupation", "what do you do for work"],
     confirmThreshold: 0.5,
     confirmTemplates: [
       "{answer}?",
@@ -131,7 +122,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "A city. A state. A zip code. Anything.",
       "Where you from? It's a one-word answer for most people.",
     ],
-    topicKeywords: ["where are you from", "where you from", "your hometown", "where did you grow up", "where'd you grow up"],
     confirmThreshold: 0.6,
     confirmTemplates: [
       "{answer}?",
@@ -155,7 +145,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "I can already tell from the silence. That's an answer.",
       "Relationship status. I'm roasting you either way.",
     ],
-    topicKeywords: ["are you single", "you single", "your relationship status", "married", "your love life", "your partner", "girlfriend", "boyfriend"],
   },
   {
     id: "age",
@@ -172,7 +161,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "The number. Just the number.",
       "It's okay. I'll be gentle. Probably.",
     ],
-    topicKeywords: ["how old are you", "your age", "what's your age", "years old"],
   },
   {
     id: "look",
@@ -189,7 +177,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "The look. Give it a name before I do.",
       "I can guess, but I'd rather hear the defense statement.",
     ],
-    topicKeywords: ["your outfit", "what look were you going for", "your aesthetic", "your fashion sense", "what you're wearing"],
   },
   {
     id: "free_time",
@@ -206,7 +193,6 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "Hobby, habit, coping mechanism. Whatever you call it.",
       "What do you do for fun? And don't say 'this,' we're both suffering.",
     ],
-    topicKeywords: ["what do you do for fun", "your hobby", "your hobbies", "your free time", "your leisure"],
   },
   {
     id: "delusion",
@@ -223,6 +209,5 @@ export const QUESTION_BANK: ComedyQuestion[] = [
       "There has to be something. Confidence usually survives without evidence.",
       "What are you weirdly confident about? Besides sitting there like this.",
     ],
-    topicKeywords: ["weirdly confident", "what are you confident", "your delusion", "what are you good at"],
   },
 ];

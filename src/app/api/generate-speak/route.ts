@@ -26,7 +26,6 @@ type StreamEvent =
   | {
       type: "meta";
       relevant: boolean;
-      followUp?: string;
       redirect?: string;
       tags?: string[];
       callback?: { text: string; motion: string; intensity: number };
@@ -344,7 +343,6 @@ export async function POST(req: NextRequest) {
             safeEnqueue({
               type: "meta",
               relevant: full.relevant ?? true,
-              followUp: full.followUp,
               redirect: full.redirect,
               tags: full.tags,
               callback: full.callback,

@@ -254,15 +254,13 @@ export class ComedianBrain {
   // Q&A state
   private shuffledQuestions: ComedyQuestion[] = [];
   private questionIndex = 0;
-  private pendingFollowUp: string | null = null;
-  private followUpCount = 0; // how many follow-ups asked for current topic
   private askedQuestionIds: Set<string> = new Set();
   private currentQuestion: ComedyQuestion | null = null;
   // Single-joke pipeline state
   private pipelineAnswer: string | null = null;
   private pipelineJokesDelivered = 0;
   private pipelinePreviousJokes: string[] = []; // what was already said, so pipeline doesn't repeat
-  private pipelinePrefetch: { jokes: JokeItem[]; meta: { followUp?: string; tags?: string[] } | null; done: boolean } | null = null;
+  private pipelinePrefetch: { jokes: JokeItem[]; meta: { tags?: string[] } | null; done: boolean } | null = null;
   private pipelinePrefetchAbort: AbortController | null = null;
   /** Pre-queued question — selected during joke delivery so enterAskQuestion can advance without an LLM round-trip. */
   private preQueuedQuestion: ComedyQuestion | null = null;
@@ -376,7 +374,6 @@ export class ComedianBrain {
     this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(QUESTION_BANK);
     this.questionIndex = 0;
     this.askedQuestionIds = new Set();
-    this.followUpCount = 0;
     this.ledger = [];
     this.jokeHopper = [];
     this.transitionCount = 0;
@@ -850,48 +847,6 @@ export class ComedianBrain {
     };
   }
 
-  /**
-   * Decide whether a follow-up question is "smart" enough to ask, or whether
-   * we should drop it and change topics. The LLM prompt asks it to omit weak
-   * follow-ups, but it routinely ignores that — every gate here exists because
-   * a real session showed the LLM violating the rule.
-   *
-   * Reject when:
-   *   - The follow-up is A/B / multiple-choice / either-or
-   *   - The follow-up text matches an already-asked bank topic's keywords
-   *     (i.e., we'd be asking about the same thing twice)
-   *
-   * `answer` is kept in the signature for callers but is no longer used to
-   * gate based on answer length — short answers ("Tyler") can still produce
-   * great name-as-hook follow-ups, so the previous wc < 3 filter dropped
-   * good lines.
-   */
-  private _isSmartFollowUp(followUp: string, _answer: string): boolean {
-    const fu = followUp.trim();
-    if (!fu) return false;
-    const fuLower = fu.toLowerCase();
-
-    // A/B and either-or formats — these are bad question shapes regardless of topic.
-    if (/\bor\s+(?:not\s+)?[a-z]+[.?\s]*\?\s*$/i.test(fu)) return false;
-    if (/\bwould you rather\b/i.test(fuLower)) return false;
-    if (/\beither\b[^.?!]*\bor\b/i.test(fuLower)) return false;
-    // "Are you a morning person or a night owl?" — flag any "or" sandwiched between commas/words ending in ?
-    if (/[a-z]\s+or\s+[a-z][^?]*\?/i.test(fuLower)) return false;
-
-    // Topic-repeat check: if the follow-up text contains any already-asked
-    // bank topic's keywords, reject. This covers both "rephrase the question
-    // we just asked" AND "circle back to a topic from earlier in the session."
-    for (const askedId of this.askedQuestionIds) {
-      const askedQ = QUESTION_BANK.find((q) => q.id === askedId);
-      if (!askedQ?.topicKeywords) continue;
-      for (const kw of askedQ.topicKeywords) {
-        if (fuLower.includes(kw.toLowerCase())) return false;
-      }
-    }
-
-    return true;
-  }
-
   /** Normalize for substring match between STT and recent puppet lines. */
   private static _normalizeForEchoMatch(text: string): string {
     return text
@@ -1194,12 +1149,6 @@ export class ComedianBrain {
       this.enterWrapup();
       return;
     }
-    // Snapshot the previous answer BEFORE clearing the buffer — the smart
-    // follow-up gate needs it to judge whether the user gave us enough to
-    // dig into.
-    const previousAnswer =
-      this.answerBuffer.trim() ||
-      (this.ledger.filter((e) => e.type === "answer").at(-1)?.text ?? "");
     this._transition("ask_question");
     this.answerBuffer = "";
     this.earlyListenActivated = false;
@@ -1213,41 +1162,7 @@ export class ComedianBrain {
     let spokenQuestionText: string | null = null;
     let questionWillBeQueuedAsync = false;
 
-    // Follow-ups are gated by _isSmartFollowUp — see helper for criteria.
-    // The LLM is told to omit follow-ups by default; this is the second line
-    // of defense for cases where it ignores the prompt and emits an A/B or
-    // a thin "tell me more" filler. When the gate rejects, drop the follow-up
-    // on the floor so it doesn't haunt the next ask_question.
-    let useFollowUp = false;
-    if (this.pendingFollowUp && !sameQuestion && this.followUpCount < 1) {
-      if (this._isSmartFollowUp(this.pendingFollowUp, previousAnswer)) {
-        useFollowUp = true;
-      } else {
-        this.deps.logTiming(
-          `brain: dropped follow-up (failed smart-gate) — "${this.pendingFollowUp.slice(0, 40)}"`,
-        );
-        this.pendingFollowUp = null;
-      }
-    }
-    if (useFollowUp && this.pendingFollowUp) {
-      // Ask generated follow-up (max 1 per topic, then move on)
-      const followUpText = this.pendingFollowUp;
-      this.pendingFollowUp = null;
-      this.followUpCount++;
-      this._clearPreQueue(); // follow-up overrides any pre-queue
-      this.currentQuestion = {
-        id: "follow_up",
-        question: followUpText,
-        jokeContext: "Answer-driven follow-up question.",
-        prodLines: [
-          "I'm waiting. The audience is waiting.",
-          "Hello? Anyone home?",
-        ],
-      };
-      this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
-      this.deps.queueSpeak(followUpText, this.lastJokeMotion, this.lastJokeIntensity);
-      spokenQuestionText = followUpText;
-    } else if (sameQuestion && this.currentQuestion) {
+    if (sameQuestion && this.currentQuestion) {
       // Re-ask same question (after redirect)
       this._clearPreQueue();
       this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
@@ -1262,8 +1177,6 @@ export class ComedianBrain {
       return;
     } else if (this.preQueuedQuestion) {
       // Pre-queued during joke delivery — consume it, no extra LLM round-trip
-      this.pendingFollowUp = null;
-      this.followUpCount = 0;
       question = this.preQueuedQuestion;
       const rephrased = this.preQueuedRephrasedText;
       this.preQueuedQuestion = null; // clear so stale rephrase callbacks bail out
@@ -1288,10 +1201,6 @@ export class ComedianBrain {
         this.deps.logTiming("brain: pre-queue rephrase not ready — using original");
       }
     } else {
-      // Clear follow-up state — new topic
-      this.pendingFollowUp = null;
-      this.followUpCount = 0;
-
       // Interleave bank questions with contextual/vision questions.
       // After every bank question, generate a contextual one (what do you do in that office?).
       // This keeps the show feeling reactive rather than like a questionnaire.
@@ -1954,12 +1863,12 @@ export class ComedianBrain {
         this.lastJokeIntensity = deliveredJoke.intensity;
         jokesQueued++;
       },
-      // onMeta — fires after all jokes stream, with follow-up/redirect/tags/callback
+      // onMeta — fires after all jokes stream, with redirect/tags/callback/relevance
       (meta) => {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         metaHandled = true;
-        this.deps.logTiming(`brain: api meta — relevant=${meta.relevant} jokes=${jokesQueued} followUp=${!!meta.followUp} redirect=${!!meta.redirect}`);
+        this.deps.logTiming(`brain: api meta — relevant=${meta.relevant} jokes=${jokesQueued} redirect=${!!meta.redirect}`);
 
         if (!meta.relevant && meta.redirect) {
           if (jokesQueued > 0) {
@@ -1985,7 +1894,6 @@ export class ComedianBrain {
           this.deps.setMotion("energetic", 0.8);
         }
 
-        if (meta.followUp) this.pendingFollowUp = meta.followUp;
         if (meta.tags?.length) this._addLedger("answer", answer, meta.tags);
 
         if (meta.callback) {
@@ -2066,11 +1974,6 @@ export class ComedianBrain {
       return;
     }
 
-    // Store follow-up for next cycle
-    if (response.followUp) {
-      this.pendingFollowUp = response.followUp;
-    }
-
     // Log tags to ledger
     if (response.tags?.length) {
       this._addLedger("answer", answer, response.tags);
@@ -2125,7 +2028,7 @@ export class ComedianBrain {
   private _onDeliveringDrained(): void {
     this.transitionCount++;
 
-    // Wrapup pending — abort pipeline/follow-up and route straight to closing line
+    // Wrapup pending — abort pipeline and route straight to closing line
     if (this.pendingWrapup) {
       this.pipelineAnswer = null;
       this._cancelPipelinePrefetch();
@@ -2145,12 +2048,6 @@ export class ComedianBrain {
       // Done with this answer's pipeline
       this.pipelineAnswer = null;
       this._cancelPipelinePrefetch();
-    }
-
-    // Follow-up takes priority over next question
-    if (this.pendingFollowUp) {
-      this.enterAskQuestion();
-      return;
     }
 
     this.enterCheckVision();
@@ -2179,7 +2076,6 @@ export class ComedianBrain {
           this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
           this.lastJokeIntensity = joke.intensity;
         }
-        if (prefetch.meta?.followUp) this.pendingFollowUp = prefetch.meta.followUp;
         if (prefetch.meta?.tags?.length) this._addLedger("answer", answer, prefetch.meta.tags);
         return;
       } else {
@@ -2239,7 +2135,6 @@ export class ComedianBrain {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
-        if (meta.followUp) this.pendingFollowUp = meta.followUp;
         if (meta.tags?.length) this._addLedger("answer", answer, meta.tags);
       },
       () => {
@@ -2421,31 +2316,6 @@ export class ComedianBrain {
     if (this.visionOnlyMode) return;
     if (this.preQueuedQuestion) return;
 
-    // Follow-up wins — but only if it passes the smart-gate (see _isSmartFollowUp).
-    // Otherwise drop it on the floor and let the bank/contextual path take over.
-    if (this.pendingFollowUp) {
-      const followUpText = this.pendingFollowUp;
-      this.pendingFollowUp = null;
-      const lastAnswer = this.ledger.filter((e) => e.type === "answer").at(-1)?.text ?? "";
-      if (this._isSmartFollowUp(followUpText, lastAnswer)) {
-        this.followUpCount++;
-        this.preQueuedQuestion = {
-          id: "follow_up",
-          question: followUpText,
-          jokeContext: "Answer-driven follow-up question.",
-          prodLines: [
-            "I'm waiting. The audience is waiting.",
-            "Hello? Anyone home?",
-          ],
-        };
-        this.preQueuedRephrasedText = null;
-        this._fetchRephraseForPreQueue(followUpText);
-        this.deps.logTiming(`brain: pre-queue follow-up — "${followUpText.slice(0, 40)}"`);
-        return;
-      }
-      this.deps.logTiming(`brain: dropped follow-up (failed smart-gate) — "${followUpText.slice(0, 40)}"`);
-    }
-
     const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
@@ -2579,7 +2449,7 @@ export class ComedianBrain {
     ).then((response) => {
       if (abort.signal.aborted || !response) return;
       prefetch.jokes = response.jokes;
-      prefetch.meta = { followUp: response.followUp, tags: response.tags };
+      prefetch.meta = { tags: response.tags };
       prefetch.done = true;
       this.deps.logTiming(`brain: pipeline prefetch ready (${response.jokes.length} jokes)`);
 
@@ -2594,7 +2464,6 @@ export class ComedianBrain {
           this.lastJokeMotion = joke.motion as import("@/lib/motionStates").MotionState;
           this.lastJokeIntensity = joke.intensity;
         }
-        if (prefetch.meta?.followUp) this.pendingFollowUp = prefetch.meta.followUp;
         if (prefetch.meta?.tags?.length) this._addLedger("answer", answer, prefetch.meta.tags);
         // Mark as consumed so _pipelineNextJoke skips straight to _onDeliveringDrained
         prefetch.jokes = [];
@@ -2618,11 +2487,11 @@ export class ComedianBrain {
     }
     this._transition("check_vision");
 
-    // If we already have the next question lined up (follow-up or pre-queued),
-    // skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
+    // If we already have the next question lined up (pre-queued during
+    // delivery), skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
     // the answer's roast and the next question. Vision interrupt still fires
     // when there's nothing queued — see refresh of previousObservations below.
-    const hasQueuedNext = !!this.pendingFollowUp || !!this.preQueuedQuestion;
+    const hasQueuedNext = !!this.preQueuedQuestion;
     if (hasQueuedNext) {
       // Refresh observation baseline so the next genuine vision_react isn't
       // triggered by changes we deliberately skipped.
@@ -2690,7 +2559,6 @@ export class ComedianBrain {
     this._cancelRephrase();
     this.preQueuedQuestion = null;
     this.preQueuedRephrasedText = null;
-    this.pendingFollowUp = null;
     this.pipelinePrefetch = null;
     this._transition("wrapup");
     this.deps.setMotion("smug", 0.8);
@@ -3134,7 +3002,6 @@ export class ComedianBrain {
     onJoke: (joke: JokeItem) => void,
     onMeta: (meta: {
       relevant: boolean;
-      followUp?: string;
       redirect?: string;
       tags?: string[];
       callback?: { text: string; motion: string; intensity: number };
@@ -3244,7 +3111,6 @@ export class ComedianBrain {
             onMeta(
               event as unknown as {
                 relevant: boolean;
-                followUp?: string;
                 redirect?: string;
                 tags?: string[];
                 callback?: { text: string; motion: string; intensity: number };

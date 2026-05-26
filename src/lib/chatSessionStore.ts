@@ -400,7 +400,7 @@ export function getContextInstructions(
 Keep it tight: quick opener + ONE comprehensive roast line that combines multiple observed traits
 (appearance + vibe + inferred setting) into one coherent burn.
 Use at least 3 concrete observations when available.
-Set "relevant": true. No "followUp". Generate exactly 1 joke.`,
+Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.
 Max 20 words, punchline at the end. Set "relevant": true. Generate exactly 1 joke.`,
@@ -411,14 +411,9 @@ If FILLER_ALREADY_SAID is provided, that exact line was just spoken aloud — do
 If FILLER_ALREADY_SAID ends in a question mark (e.g. "Tyler?", "So — Seattle?", "a dentist, huh?"), it already echoed the user's answer back as a question. Do NOT open your joke by re-asking or re-stating the answer ("Tyler? Really?", "So a dentist?") — go straight into the punchline.
 If off-topic, set "relevant": false with a witty "redirect".
 
-FOLLOW-UP RULE (be strict — the default is to OMIT followUp):
-Only emit "followUp" when ALL of these are true:
-  1. The user gave a SPECIFIC answer (proper noun, named place, real detail) — not a generic / one-word / yes-no.
-  2. There is an obviously juicy roast angle in their answer that the jokes you wrote did NOT already cover.
-  3. The follow-up is ONE open question that any normal person can answer in a sentence.
-  4. The follow-up is NOT "A or B" / "X or Y" / multiple-choice / closed yes-no.
-  5. The follow-up unlocks a new dimension to roast — it does NOT just rephrase the same topic ("so what kind of teacher?", "so what hobby?").
-When in doubt: omit followUp. The host will change topics — that's a feature, not a bug.
+NEXT-QUESTION HANDLING: Do NOT emit any follow-up question field. The host (a
+separate component) always picks the next question from its own bank. Your job
+is jokes only.
 
 PIPELINE RULE: If JOKES ALREADY DELIVERED THIS CYCLE is provided, those jokes have ALREADY played aloud.
 Do NOT re-introduce the answer, echo the user's words, or open as if hearing the answer for the first time.
@@ -437,7 +432,7 @@ Score each honestly (8+ = "would interrupt the show"). Generate 2-3 jokes.`,
     wrapup: `TASK: CLOSING SIGN-OFF — clever goodbye wrapped in one last roast. The show is ending and you're leaving the stage.
 Use KNOWN FACTS (name + a couple specifics they revealed) so the farewell is personal.
 The line MUST include a goodbye delivered IN CHARACTER — never break the fourth wall with "thanks for watching" or meta references to "the show."
-Max 30 words, punchline at the end. No question, no follow-up.${wrapupVulgarSuffix}
+Max 30 words, punchline at the end. No question.${wrapupVulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
   };
 

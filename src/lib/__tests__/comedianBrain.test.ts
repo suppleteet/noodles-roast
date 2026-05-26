@@ -322,29 +322,6 @@ describe("ComedianBrain — no mic mode", () => {
   });
 });
 
-// ─── Follow-up questions ──────────────────────────────────────────────────────
-
-describe("ComedianBrain — follow-up questions", () => {
-  it("stores pendingFollowUp from API response and uses it next question", async () => {
-    const followUpResponse: JokeResponse = {
-      relevant: true,
-      jokes: [{ text: "A plumber named Mike!", motion: "laugh", intensity: 0.9, score: 8 }],
-      followUp: "How long have you been doing that?",
-    };
-    vi.useFakeTimers();
-    vi.stubGlobal("fetch", mockFetchResponse(followUpResponse));
-    const deps = makeDeps();
-    const brain = new ComedianBrain(deps);
-    await driveToWaitAnswer(brain);
-    brain.onInputTranscription("I am a plumber");
-    vi.advanceTimersByTime(600);
-    await vi.runAllTimersAsync();
-
-    const states = getStates(deps);
-    expect(states).toContain("generating");
-  });
-});
-
 // ─── Vision react ─────────────────────────────────────────────────────────────
 
 describe("ComedianBrain — vision react", () => {
