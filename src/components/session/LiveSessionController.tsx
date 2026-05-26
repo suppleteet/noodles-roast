@@ -443,6 +443,7 @@ export default function LiveSessionController({
         // at you" before he opens his mouth.
         if (!queuedAny && !firstSpeechRecordedRef.current) {
           useSessionStore.getState().setPuppetRevealed(true);
+          startVideoRecordingIfNeeded();
           await new Promise<void>((resolve) =>
             setTimeout(resolve, COMEDIAN_CONFIG.firstSpeechBeatMs),
           );
@@ -465,7 +466,23 @@ export default function LiveSessionController({
     if (ttsGenerationRef.current !== gen) playback.flush();
   }
 
-  /** Record time-to-first-speech metric (recording already started at kickoff). */
+  /**
+   * Start the MP4 recorder lazily — at the moment the puppet is revealed (when
+   * the black overlay starts fading). Recording at session kickoff added
+   * several seconds of dead time (greeting LLM + TTS prefetch) to the front of
+   * every clip. Called from scheduleFromPrefetch's first-chunk branch.
+   */
+  function startVideoRecordingIfNeeded(): void {
+    if (mockMode) return;
+    if (!videoRecorderRef.current || !compositorStream || !isRunningRef.current) return;
+    if (videoRecorderRef.current.isRecording()) return;
+    videoRecorderRef.current.start(compositorStream, playback.getDestinationStream());
+    useSessionStore.getState().logTiming(
+      `live: recording start requested (${compositorStream.getVideoTracks().length}v/${playback.getDestinationStream()?.getAudioTracks().length ?? 0}a)`,
+    );
+  }
+
+  /** Record time-to-first-speech metric. */
   function recordTtfs(): void {
     if (!firstSpeechRecordedRef.current && kickoffTimeRef.current !== null) {
       firstSpeechRecordedRef.current = true;
@@ -1190,16 +1207,9 @@ export default function LiveSessionController({
       const frame = webcamRef.current?.captureFrame();
       if (!frame) brainRef.current.setCameraAvailable(false);
 
-      // Start recording with TTS-audio destination only — mic is added when ready.
-      // playback.getDestinationStream() returns the shared destination; later
-      // addInputToRecording() routes mic into the same node, so the recording
-      // captures it without re-starting.
-      if (!mockMode && videoRecorderRef.current && compositorStream && isRunningRef.current) {
-        videoRecorderRef.current.start(compositorStream, playback.getDestinationStream());
-        useSessionStore.getState().logTiming(
-          `live: recording start requested (${compositorStream.getVideoTracks().length}v/${playback.getDestinationStream()?.getAudioTracks().length ?? 0}a)`,
-        );
-      }
+      // Recording is started lazily by startVideoRecordingIfNeeded() at the
+      // moment the puppet is revealed — see scheduleFromPrefetch. This keeps
+      // greeting LLM/TTS prefetch latency out of the front of the MP4.
 
       // Start the comedy show NOW — don't wait for mic to finish initializing.
       // Greeting + first question are TTS-only; mic isn't needed until wait_answer
