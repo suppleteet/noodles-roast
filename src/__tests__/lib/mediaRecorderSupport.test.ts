@@ -41,7 +41,7 @@ describe("mediaRecorderSupport", () => {
   });
 
   it("keeps recommended bitrate inside practical bounds", () => {
-    expect(recommendedVideoBitsPerSecond(720, 720, 30)).toBeGreaterThanOrEqual(2_500_000);
-    expect(recommendedVideoBitsPerSecond(3840, 2160, 60)).toBeLessThanOrEqual(8_000_000);
+    expect(recommendedVideoBitsPerSecond(720, 720, 30)).toBeGreaterThanOrEqual(2_000_000);
+    expect(recommendedVideoBitsPerSecond(3840, 2160, 60)).toBeLessThanOrEqual(5_500_000);
   });
 });

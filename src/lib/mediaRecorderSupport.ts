@@ -82,6 +82,10 @@ export function recommendedVideoBitsPerSecond(
   fps = 30,
 ): number {
   const pixelsPerSecond = Math.max(1, width) * Math.max(1, height) * Math.max(1, fps);
-  // 0.28 bits/pixel/frame is enough for the stylized puppet + PiP without wasting CPU/bandwidth.
-  return Math.round(Math.min(8_000_000, Math.max(2_500_000, pixelsPerSecond * 0.28)));
+  // 0.18 bits/pixel/frame: enough headroom for the stylized puppet + PiP so the
+  // server-side CRF re-encode (save-video/route.ts) has clean material to work
+  // from, but ~35% smaller upload than the previous 0.28. The CRF pass is what
+  // produces the final shareable file; this just caps how big the browser blob
+  // is before that re-encode.
+  return Math.round(Math.min(5_500_000, Math.max(2_000_000, pixelsPerSecond * 0.18)));
 }
