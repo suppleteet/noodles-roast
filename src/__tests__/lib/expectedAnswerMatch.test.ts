@@ -27,6 +27,12 @@ describe("matchExpectedAnswer", () => {
     it("matches 'yeah I am' to yes (prefix expansion)", () => {
       expect(matchExpectedAnswer("yeah I am", YES_NO)).toBe("yes");
     });
+    it("matches 'yep totally' to yes (prefix expansion)", () => {
+      expect(matchExpectedAnswer("yep totally", YES_NO)).toBe("yes");
+    });
+    it("matches 'yup definitely' to yes (prefix expansion)", () => {
+      expect(matchExpectedAnswer("yup definitely", YES_NO)).toBe("yes");
+    });
     it("matches 'no' exactly", () => {
       expect(matchExpectedAnswer("no", YES_NO)).toBe("no");
     });

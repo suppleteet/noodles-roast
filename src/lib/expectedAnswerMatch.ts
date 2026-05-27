@@ -101,11 +101,22 @@ export function matchExpectedAnswer(
 
   // Yes/no fast path — checked before scoring because "yeah I am" should map
   // to "yes" even though the literal word "yes" doesn't appear.
-  if (YES_VARIANTS.has(sttNorm) || sttNorm.startsWith("yes ") || sttNorm.startsWith("yeah ")) {
+  if (
+    YES_VARIANTS.has(sttNorm) ||
+    sttNorm.startsWith("yes ") ||
+    sttNorm.startsWith("yeah ") ||
+    sttNorm.startsWith("yep ") ||
+    sttNorm.startsWith("yup ")
+  ) {
     const yesKey = findKeyMatching(expectedAnswers, "yes");
     if (yesKey) return yesKey;
   }
-  if (NO_VARIANTS.has(sttNorm) || sttNorm.startsWith("no ") || sttNorm.startsWith("nope ") || sttNorm.startsWith("nah ")) {
+  if (
+    NO_VARIANTS.has(sttNorm) ||
+    sttNorm.startsWith("no ") ||
+    sttNorm.startsWith("nope ") ||
+    sttNorm.startsWith("nah ")
+  ) {
     const noKey = findKeyMatching(expectedAnswers, "no");
     if (noKey) return noKey;
   }

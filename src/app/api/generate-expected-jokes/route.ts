@@ -81,8 +81,15 @@ export async function POST(req: NextRequest) {
   const personaId: PersonaId = PERSONA_IDS.includes(body.persona) ? body.persona : DEFAULT_PERSONA;
   const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
   const model = body.model ?? ROAST_MODEL;
+  // Clamp burnIntensity to 1-5; default to 3 if missing or invalid so the
+  // prompt builder doesn't index INTENSITY_FLAVOR with undefined.
+  const burnIntensity: BurnIntensity = (
+    typeof body.burnIntensity === "number" && body.burnIntensity >= 1 && body.burnIntensity <= 5
+      ? body.burnIntensity
+      : 3
+  ) as BurnIntensity;
 
-  const systemPrompt = getExpectedJokesSystemPrompt(personaId, body.burnIntensity, contentMode);
+  const systemPrompt = getExpectedJokesSystemPrompt(personaId, burnIntensity, contentMode);
 
   const userLines: string[] = [
     `QUESTION ABOUT TO BE ASKED: "${body.question}"`,

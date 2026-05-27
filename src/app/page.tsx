@@ -698,8 +698,22 @@ function MainApp() {
  */
 function BuildTimeStamp() {
   const tapsRef = useRef<number[]>([]);
+  const toastTimerRef = useRef<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
+
+  // Clear pending toast timeout on unmount so React doesn't warn about
+  // setState on an unmounted component if the user navigates away during
+  // the 2s display window.
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, []);
+
   if (!buildTime) return null;
 
   function handleTap() {
@@ -712,7 +726,13 @@ function BuildTimeStamp() {
       tapsRef.current = [];
       const nowUnlocked = toggleDevUnlock();
       setToast(nowUnlocked ? "Dev mode unlocked" : "Dev mode locked");
-      window.setTimeout(() => setToast(null), 2000);
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null);
+        toastTimerRef.current = null;
+      }, 2000);
     }
   }
 

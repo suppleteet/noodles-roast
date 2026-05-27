@@ -2783,11 +2783,12 @@ export class ComedianBrain {
     this._cancelExpectedJokesGen();
 
     const abort = new AbortController();
-    const ready = fetch("/api/generate-expected-jokes", {
-      method: "POST",
-      signal: abort.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Build the request body defensively. JSON.stringify can throw for
+    // circular refs / BigInts — none expected here, but the brain's
+    // never-throws contract means we belt-and-suspender it.
+    let bodyJson: string;
+    try {
+      bodyJson = JSON.stringify({
         question: question.question,
         expectedAnswers: question.expectedAnswers,
         persona: this.deps.getPersona(),
@@ -2795,7 +2796,16 @@ export class ComedianBrain {
         contentMode: this.deps.getContentMode(),
         model: this.deps.getRoastModel(),
         knownFacts: this._getThrowbackContext(),
-      }),
+      });
+    } catch (err) {
+      this.deps.logTiming(`brain: expected-jokes serialize failed q=${question.id}: ${String(err).slice(0, 80)}`);
+      return;
+    }
+    const ready = fetch("/api/generate-expected-jokes", {
+      method: "POST",
+      signal: abort.signal,
+      headers: { "Content-Type": "application/json" },
+      body: bodyJson,
     })
       .then((r) => r.json() as Promise<ExpectedJokesResponse>)
       .then((data) => {
