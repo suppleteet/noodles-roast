@@ -64,7 +64,7 @@ Keep it compact. Return ONLY the JSON object.` },
             ],
           },
         ],
-        config: { maxOutputTokens: 500 },
+        config: { thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 500 },
       });
       const text = response.text ?? "{}";
       recordGeminiUsage({
@@ -99,6 +99,7 @@ Keep it compact. Return ONLY the JSON object.` },
       ],
       config: {
         systemInstruction: systemPrompt,
+        thinkingConfig: { thinkingBudget: 0 },
         maxOutputTokens: 1200,
       },
     });
