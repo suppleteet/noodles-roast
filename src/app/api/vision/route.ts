@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
       ],
       config: {
         systemInstruction: VISION_SYSTEM_PROMPT,
+        // gemini-3.x defaults to internal reasoning before output. With small
+        // token budgets the thinking eats the entire budget and the response
+        // truncates to broken JSON. Disable for low-latency direct generation.
+        thinkingConfig: { thinkingBudget: 0 },
         maxOutputTokens: 512,
       },
     });

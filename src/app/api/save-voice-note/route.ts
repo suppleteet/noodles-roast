@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
             ],
           },
         ],
-        config: { maxOutputTokens: 2000 },
+        config: { thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 2000 },
       });
       transcript = (response.text ?? "").trim();
       recordGeminiUsage({
