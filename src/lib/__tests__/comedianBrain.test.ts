@@ -238,6 +238,25 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
+  it("watchdog rescues a hung generation — delivers fallback instead of dead air", async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+    // generate-speak hangs forever (simulates Gemini / server stall — the exact
+    // failure seen in the 2026-06-01 session: 6 fillers then permanent silence).
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    brain.onInputTranscription("My name is Mike Johnson plumber");
+    vi.advanceTimersByTime(1600); // commit answer → generating
+    expect(getStates(deps)).toContain("generating");
+    (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
+    // Watchdog fires at generationTimeoutMs (13s) — aborts the hang, delivers a
+    // canned roast, and leaves "generating" so the show advances.
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(getStates(deps)).toContain("delivering");
+    expect(deps.queueSpeak).toHaveBeenCalled(); // a fallback roast line was spoken
+  });
+
   it("does not immediately commit an unfinalized sentence starter", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));

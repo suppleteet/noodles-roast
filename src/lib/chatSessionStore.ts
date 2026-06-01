@@ -19,7 +19,7 @@ import { getBaseJokePrompt } from "@/lib/prompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
-import { generateText, generateTextStream, type UserPart } from "@/lib/llmClient";
+import { generateText, generateTextStream, toModelUnavailableError, type UserPart } from "@/lib/llmClient";
 import {
   estimateTokenCount,
   estimateUserPartsTokens,
@@ -182,7 +182,14 @@ export async function sendMessage(
   const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
 
   if (session.geminiChat) {
-    const result = await session.geminiChat.sendMessage({ message: userParts });
+    let result;
+    try {
+      result = await session.geminiChat.sendMessage({ message: userParts });
+    } catch (err) {
+      const unavailable = toModelUnavailableError(session.model, err);
+      if (unavailable) throw unavailable;
+      throw err;
+    }
     const text = result.text ?? "";
     const usage = result.usageMetadata;
     recordLlmUsage({
@@ -237,7 +244,14 @@ export async function* sendMessageStream(
   const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
 
   if (session.geminiChat) {
-    const stream = await session.geminiChat.sendMessageStream({ message: userParts });
+    let stream;
+    try {
+      stream = await session.geminiChat.sendMessageStream({ message: userParts });
+    } catch (err) {
+      const unavailable = toModelUnavailableError(session.model, err);
+      if (unavailable) throw unavailable;
+      throw err;
+    }
     let accumulated = "";
     let promptTokenCount: number | undefined;
     let candidatesTokenCount: number | undefined;
@@ -400,6 +414,12 @@ export function getContextInstructions(
 Keep it tight: quick opener + ONE comprehensive roast line that combines multiple observed traits
 (appearance + vibe + inferred setting) into one coherent burn.
 Use at least 3 concrete observations when available.
+Set "relevant": true. Generate exactly 1 joke.`,
+
+    rapid_fire_greeting: `TASK: Rapid Fire opening — ONE friendly banter line to kick off a fast Q&A game.
+Tone: warm, playful, slightly cheeky — NOT a roast burn. Think host energy.
+Drop a quick light observation from the camera or the ambient context (time of day, weather, location vibe),
+then pivot into the game with energy. Max 18 words. End on energy, not a punchline.
 Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.

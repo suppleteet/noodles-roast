@@ -65,6 +65,13 @@ const defaults = {
   // filler gap, and the joke after the last filler shouldn't have a long pause either.
   // Hard cap as a safety net if the LLM hangs — ~6 covers >12s of stack at avg filler length.
   fillerMaxStack: 6,
+
+  // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
+  // within this window, abort it and deliver a canned fallback roast so the puppet never
+  // strands the user in dead silence. Sized to fire just as the filler stack (~12.5s for 6
+  // fillers) exhausts, so the fallback lands with minimal dead air. A healthy generation
+  // delivers its first joke in 1-4s, well inside this window — so it never false-fires.
+  generationTimeoutMs: 13_000,
 };
 
 const windowOverride =

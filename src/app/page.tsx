@@ -80,6 +80,9 @@ function MainApp() {
   const puppetRevealed = useSessionStore((s) => s.puppetRevealed);
   const isEnding = useSessionStore((s) => s.isEnding);
   const brainState = useSessionStore((s) => s.brainState);
+  const modelUnavailable = useSessionStore((s) => s.modelUnavailable);
+  const setModelUnavailable = useSessionStore((s) => s.setModelUnavailable);
+  const acceptModelFallback = useSessionStore((s) => s.acceptModelFallback);
   const IS_DEV = useDevUnlock();
   const [debugMode, setDebugMode] = useState(false);
   // Auto-enable debug overlays the first time IS_DEV becomes true (dev build
@@ -94,6 +97,9 @@ function MainApp() {
   const ambientRequestInFlightRef = useRef(false);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
+  // set when user accepts the model-fallback modal — bounce roasting → stopped → idle
+  // so LiveSessionController's stop runs before the user is dropped back to landing.
+  const pendingModelFallbackRestartRef = useRef(false);
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
 
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
@@ -168,6 +174,8 @@ function MainApp() {
         activePersona: s.activePersona,
         burnIntensity: s.burnIntensity,
         contentMode: s.contentMode,
+        flowMode: s.flowMode,
+        visionModel: s.visionModel,
       });
     })().catch(() => null);
 
@@ -507,6 +515,12 @@ function MainApp() {
       pendingMockRestartRef.current = false;
       setPhase("requesting-permissions", "SESSION_RESTART");
     }
+    if (phase === "stopped" && pendingModelFallbackRestartRef.current) {
+      pendingModelFallbackRestartRef.current = false;
+      warmupGreetingPromiseRef.current = null;
+      warmupGreetingAudioRef.current = null;
+      setPhase("idle", "SESSION_RESTART");
+    }
   }, [phase]);
 
   return (
@@ -685,7 +699,73 @@ function MainApp() {
       {process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_BUILD_TIME && (
         <BuildTimeStamp />
       )}
+
+      {modelUnavailable && (
+        <ModelFallbackPrompt
+          failedModel={modelUnavailable.failedModel}
+          suggestedFallback={modelUnavailable.suggestedFallback}
+          onAccept={() => {
+            acceptModelFallback();
+            warmupGreetingPromiseRef.current = null;
+            warmupGreetingAudioRef.current = null;
+            if (phase === "roasting") {
+              // Bounce roasting → stopped (LiveSessionController teardown) →
+              // idle (effect above lands on Landing once stop completes).
+              pendingModelFallbackRestartRef.current = true;
+              setPhase("stopped", "STOP_CLICKED");
+            } else if (phase === "stopped") {
+              setPhase("idle", "SESSION_RESTART");
+            }
+            // If we're already on idle/landing the model swap is enough —
+            // user just clicks Start again to get the new model.
+          }}
+          onCancel={() => {
+            setModelUnavailable(null);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function ModelFallbackPrompt({
+  failedModel,
+  suggestedFallback,
+  onAccept,
+  onCancel,
+}: {
+  failedModel: string;
+  suggestedFallback: string;
+  onAccept: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-orange-300/30 bg-gray-950 p-6 shadow-2xl">
+        <h2 className="mb-3 text-lg font-bold text-orange-200">Model unavailable</h2>
+        <p className="mb-5 text-sm text-white/80">
+          <span className="font-mono text-orange-200">{failedModel}</span> is currently overloaded
+          on Google&apos;s side. Switch to{" "}
+          <span className="font-mono text-orange-200">{suggestedFallback}</span> and restart?
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onAccept}
+            className="flex-1 rounded-xl bg-orange-500 px-4 py-2 font-bold text-black transition-colors hover:bg-orange-400"
+          >
+            Switch &amp; Restart
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 font-medium text-white/80 transition-colors hover:bg-white/10"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -746,6 +826,7 @@ function BuildTimeStamp() {
       <button
         type="button"
         onClick={handleTap}
+        suppressHydrationWarning
         className="select-none text-[10px] text-white/40 transition-colors hover:text-white/70 sm:text-xs"
       >
         {new Date(buildTime).toLocaleString()}

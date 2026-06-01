@@ -1,8 +1,8 @@
-import type { JokeResponse } from "@/app/api/generate-joke/route";
+import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
 import { VISION_MODEL } from "@/lib/constants";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
-import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
+import type { ContentMode, FlowMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
@@ -12,6 +12,9 @@ export interface GreetingPrefetchSnapshot {
   activePersona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
+  flowMode?: FlowMode;
+  /** Override the default VISION_MODEL — set when fallback was applied. */
+  visionModel?: string;
 }
 
 interface VisionData {
@@ -35,6 +38,28 @@ async function postJsonWithRetry<T>(
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (resp.ok) return (await resp.json()) as T;
+      // 503 with model_unavailable body — surface the fallback prompt now so the
+      // user doesn't watch the greeting fail through several retry tiers before
+      // the brain catches it. Idempotent: store already gates setModelUnavailable
+      // on null.
+      if (resp.status === 503) {
+        try {
+          const body = await resp.clone().json() as {
+            error?: string; failedModel?: string; suggestedFallback?: string;
+          };
+          if (body.error === "model_unavailable" && body.failedModel && body.suggestedFallback) {
+            const store = useSessionStore.getState();
+            if (!store.modelUnavailable) {
+              store.setModelUnavailable({
+                failedModel: body.failedModel,
+                suggestedFallback: body.suggestedFallback,
+              });
+              store.logTiming(`prefetch: model unavailable — ${body.failedModel}`);
+            }
+            return null; // don't retry — the user will pick the fallback
+          }
+        } catch { /* not the structured body we expected — fall through */ }
+      }
       if (attempt < retries && (resp.status === 429 || resp.status >= 500)) {
         await new Promise<void>((resolve) => setTimeout(resolve, 200 * Math.pow(2, attempt)));
         continue;
@@ -74,6 +99,10 @@ function rememberVisionData(visionData: VisionData | null): string[] {
   return observations;
 }
 
+function greetingContext(snapshot: GreetingPrefetchSnapshot): JokeContext {
+  return snapshot.flowMode === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
+}
+
 async function generateGreetingFromObservations(
   observations: string[],
   snapshot: GreetingPrefetchSnapshot,
@@ -81,8 +110,8 @@ async function generateGreetingFromObservations(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: "greeting",
-      model: VISION_MODEL,
+      context: greetingContext(snapshot),
+      model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,
@@ -100,8 +129,8 @@ async function generateDirectImageGreeting(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: "greeting",
-      model: VISION_MODEL,
+      context: greetingContext(snapshot),
+      model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,

@@ -33,11 +33,11 @@ export const RAPID_FIRE_OPENER_IDS = ["single", "pets", "kids", "live_alone"] as
 export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "name",
-    question: "Alright — what's your name?",
+    question: "Who am I talking to?",
     vulgarQuestions: [
-      "What's your goddamn name?",
-      "Name, please. Don't bullshit me.",
+      "What's your name?",
       "Who the hell are you?",
+      "Name.",
     ],
     // No expectedAnswers — names are open-ended; brain falls back to standard gen.
     jokeContext: "React to the name with a sharp one-liner — pun, association, or what the name implies.",
@@ -48,10 +48,10 @@ export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   },
   {
     id: "single",
-    question: "Are you single?",
+    question: "Single?",
     vulgarQuestions: [
       "You single? Or did someone actually agree to this?",
-      "Got a partner, or are you flying solo through the disaster?",
+      "Got a partner, or are you flying solo?",
     ],
     expectedAnswers: ["yes", "no", "it's complicated"],
     jokeContext: "Single = roast the solitude. Taken = roast their partner's poor judgment. Complicated = roast the chaos.",
@@ -90,10 +90,10 @@ export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   },
   {
     id: "live_alone",
-    question: "Do you live alone?",
+    question: "Live alone?",
     vulgarQuestions: [
-      "You live alone, or is someone actually putting up with you?",
-      "Anyone share that disaster zone with you, or just you?",
+      "You live alone, or is someone putting up with you?",
+      "Anyone share that disaster zone with you?",
     ],
     expectedAnswers: ["yes", "no", "with parents", "with roommates"],
     jokeContext: "Alone = roast the silence. With others = roast their tolerance. Parents = roast the regression.",
@@ -120,7 +120,7 @@ export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
     id: "morning_night",
     question: "Morning person or night owl?",
     vulgarQuestions: [
-      "Morning person or insomniac dressed as a night owl?",
+      "Morning person or insomniac?",
       "Up at dawn or up till dawn?",
     ],
     expectedAnswers: ["morning", "night"],
@@ -146,10 +146,10 @@ export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   },
   {
     id: "gym_couch",
-    question: "Gym person or couch person?",
+    question: "Gym or couch?",
     vulgarQuestions: [
-      "Gym rat, couch potato, or 'I keep meaning to'?",
-      "Honest answer — gym or couch?",
+      "Gym rat or couch potato?",
+      "Honest — gym or couch?",
     ],
     expectedAnswers: ["gym", "couch", "in between"],
     jokeContext: "Gym = annoyingly disciplined. Couch = honest at least. In-between = aspirational liar.",

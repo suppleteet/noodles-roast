@@ -1083,6 +1083,7 @@ export default function LiveSessionController({
         activePersona: greetingStore.activePersona,
         burnIntensity: greetingStore.burnIntensity,
         contentMode: greetingStore.contentMode,
+        flowMode: greetingStore.flowMode,
       }).catch(() => null);
       useSessionStore.getState().logTiming("live: greeting prefetch fired (parallel vision + joke)");
     }
@@ -1113,6 +1114,17 @@ export default function LiveSessionController({
       setUserAnswer: (a) => useSessionStore.getState().setUserAnswer(a),
       logTiming: (e) => useSessionStore.getState().logTiming(e),
       setError: (e) => useSessionStore.getState().setError(e),
+      onModelUnavailable: (failedModel, suggestedFallback) => {
+        const store = useSessionStore.getState();
+        // Already showing the prompt? Don't reset it (caller may have stale info).
+        if (store.modelUnavailable) return;
+        store.setModelUnavailable({ failedModel, suggestedFallback });
+        store.logTiming(`live: model unavailable — prompting fallback to ${suggestedFallback}`);
+        // Don't tear down the session here — page-level modal owns the restart.
+        // The brain's modelUnavailableFired flag prevents further LLM calls
+        // from triggering duplicate prompts, so it's safe to leave running
+        // until the user decides.
+      },
       revealSession: () => useSessionStore.getState().setHasSpokenThisSession(true),
       prefetchedGreeting: greetingPrefetch,
       prefetchedGreetingAudio: warmupGreetingAudio ?? undefined,

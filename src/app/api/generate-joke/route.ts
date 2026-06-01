@@ -5,12 +5,13 @@ import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { MotionState } from "@/lib/motionStates";
 import { getSession, getContextInstructions, sendMessage, compactStableContext } from "@/lib/chatSessionStore";
-import { QuotaError } from "@/lib/llmClient";
+import { QuotaError, ModelUnavailableError } from "@/lib/llmClient";
 import { generateText, type UserPart } from "@/lib/llmClient";
 import { trimObservations } from "@/lib/visionDiff";
 
 export type JokeContext =
   | "greeting"
+  | "rapid_fire_greeting"
   | "vision_opening"
   | "answer_roast"
   | "vision_react"
@@ -184,6 +185,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "quota_exceeded", provider: err.provider, detail: err.message },
         { status: 402 }
+      );
+    }
+    if (err instanceof ModelUnavailableError) {
+      console.error("[generate-joke] MODEL_UNAVAILABLE:", err.failedModel, "→", err.suggestedFallback);
+      return NextResponse.json(
+        {
+          error: "model_unavailable",
+          failedModel: err.failedModel,
+          suggestedFallback: err.suggestedFallback,
+        },
+        { status: 503 }
       );
     }
     const message = err instanceof Error ? err.message : String(err);

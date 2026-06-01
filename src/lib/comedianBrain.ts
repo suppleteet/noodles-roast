@@ -115,6 +115,10 @@ export interface ComedianBrainDeps {
   logTiming: (entry: string) => void;
   /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
   setError?: (error: string) => void;
+  /** Called when a Gemini call returns 503 UNAVAILABLE. Controller surfaces a
+   *  fallback prompt to the user; on accept the session restarts with the
+   *  suggested model. Brain stops issuing further calls after this fires. */
+  onModelUnavailable?: (failedModel: string, suggestedFallback: string) => void;
   /** Called when session should reveal the puppet (fade in). */
   revealSession?: () => void;
   /** Fire-and-forget: save an in-session critique to feedback storage. */
@@ -338,6 +342,13 @@ export class ComedianBrain {
   private fillerMotion: MotionState = "thinking";
   private fillerIntensity = 0.6;
 
+  /** Watchdog: fires if joke generation produces no joke within generationTimeoutMs.
+   *  Aborts the hung request and delivers a canned fallback so the puppet never sits
+   *  silent in "generating" forever (e.g. when generate-speak / Gemini hangs). */
+  private generationWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /** Abort controller for the in-flight generate-speak fetch — let the watchdog cancel it. */
+  private generationAbort: AbortController | null = null;
+
   // Availability flags
   private micAvailable = true;
   private cameraAvailable = true;
@@ -359,6 +370,10 @@ export class ComedianBrain {
   private greetingSpeechQueued = false; // true once greeting generation resolves and speech is queued
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
+
+  // Model availability — flipped once a 503 has fired the onModelUnavailable
+  // callback, so we don't spam the user with the same prompt for every retry.
+  private modelUnavailableFired = false;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -409,6 +424,7 @@ export class ComedianBrain {
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
+    this.modelUnavailableFired = false;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -1057,13 +1073,14 @@ export class ComedianBrain {
     } else {
       const observations = this.deps.getObservations();
       const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
+      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
       this.visionJokePrefetch = this._generateJoke({
-        context: "greeting",
+        context: greetingContext,
         model: VISION_MODEL, // greeting always uses Gemini — fastest + best at vision
         observations,
         imageBase64: frame,
       });
-      this.deps.logTiming("brain: greeting generation fired (no prefetch)");
+      this.deps.logTiming(`brain: greeting generation fired (no prefetch, context=${greetingContext})`);
     }
 
     const queueGreeting = (
@@ -1121,8 +1138,9 @@ export class ComedianBrain {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
       const observations = this.deps.getObservations();
+      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
       this._generateJoke({
-        context: "greeting",
+        context: greetingContext,
         model: VISION_MODEL,
         observations,
       }).then((response) => queueGreeting(response, null));
@@ -1229,9 +1247,12 @@ export class ComedianBrain {
     } else {
       // Interleave bank questions with contextual/vision questions.
       // After every bank question, generate a contextual one (what do you do in that office?).
-      // This keeps the show feeling reactive rather than like a questionnaire.
+      // Rapid Fire skips contextual entirely — bank questions only, no LLM detour mid-game.
       const bankAvailable = this._nextValidQuestion();
-      const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+      const shouldUseContextual =
+        this.deps.getFlowMode() !== "rapid_fire" &&
+        this.bankQuestionsInARow >= 1 &&
+        this.cameraAvailable;
 
       if (bankAvailable && !shouldUseContextual) {
         // Use bank question
@@ -1703,6 +1724,41 @@ export class ComedianBrain {
   }
 
   /**
+   * Arm the generation watchdog for a fresh joke-generation request. Creates a new
+   * AbortController (passed to the generate-speak fetch) and a timer that, if it fires
+   * while we're still stuck in "generating" (no joke ever streamed), aborts the hung
+   * request and delivers a canned fallback roast so the show never dead-airs.
+   */
+  private _armGenerationWatchdog(answer: string): void {
+    this._clearGenerationWatchdog();
+    this.generationAbort = new AbortController();
+    this.generationWatchdog = setTimeout(() => {
+      this.generationWatchdog = null;
+      // If a joke arrived we've already left "generating" — nothing to rescue.
+      if (this.state !== "generating") return;
+      this.deps.logTiming(
+        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — aborting + fallback`,
+      );
+      // Cancel the hung fetch so a late response can't double-fire on top of the fallback.
+      try { this.generationAbort?.abort(); } catch { /* best-effort */ }
+      this.generationAbort = null;
+      // Invalidate any in-flight stream callbacks (they check deliveryGeneration).
+      this.deliveryGeneration++;
+      this._stopFillerPump();
+      // Deliver a canned roast and advance — enterDelivering with no jokes picks the fallback.
+      this.enterDelivering(answer, { relevant: true, jokes: [] }, undefined);
+    }, COMEDIAN_CONFIG.generationTimeoutMs);
+  }
+
+  /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */
+  private _clearGenerationWatchdog(): void {
+    if (this.generationWatchdog) {
+      clearTimeout(this.generationWatchdog);
+      this.generationWatchdog = null;
+    }
+  }
+
+  /**
    * Queue the next filler in the pump. Called directly — no setTimeout. The 250ms pre- and
    * post-breath is baked into the filler text via "..." padding, so ElevenLabs handles all
    * pacing. Bails if the pump was stopped, we're no longer generating, or we've hit the cap.
@@ -1775,6 +1831,10 @@ export class ComedianBrain {
       this.enterDelivering(answer, { relevant: true, jokes: cachedJokes }, undefined);
       return;
     }
+
+    // Arm the generation watchdog — fresh request, fresh abort controller. Cancelled the
+    // moment the first joke arrives (we leave "generating"); fires the fallback if not.
+    this._armGenerationWatchdog(answer);
 
     // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
     // pause. First filler queues immediately; each filler is wrapped "... <text> ..." so
@@ -2004,6 +2064,7 @@ export class ComedianBrain {
           this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
         });
       },
+      this.generationAbort?.signal,
     );
   }
 
@@ -2224,6 +2285,16 @@ export class ComedianBrain {
     questionText = questionText || this.currentQuestion?.question || "What's your name?";
     this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
 
+    // Rapid Fire: skip rephrase entirely — questions are already short and punchy;
+    // rephrase only adds latency and makes them longer.
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      this.deps.queueSpeak(questionText, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(questionText);
+      this._addLedger("question", questionText, []);
+      this.deps.logTiming("brain: rapid fire — skipping rephrase");
+      return;
+    }
+
     // Get the last joke text for rephrase context
     const lastJoke = this.ledger
       .filter((e) => e.type === "joke")
@@ -2361,7 +2432,8 @@ export class ComedianBrain {
     if (this.visionOnlyMode) return;
     if (this.preQueuedQuestion) return;
 
-    const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
+    const shouldUseContextual = !isRapidFire && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
       this._preFetchContextualQuestion();
@@ -2370,13 +2442,20 @@ export class ComedianBrain {
 
     const nextQ = this._nextValidQuestion();
     if (!nextQ) {
-      this._preFetchContextualQuestion();
+      if (!isRapidFire) this._preFetchContextualQuestion();
       return;
     }
     this.bankQuestionsInARow++;
     this.preQueuedQuestion = nextQ;
     this.preQueuedRephrasedText = null;
-    this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
+    if (isRapidFire) {
+      // Skip rephrase — questions are already short; set text directly so enterAskQuestion
+      // picks it up from the pre-queue as-is without an extra LLM round-trip.
+      this.preQueuedRephrasedText = this._pickQuestionText(nextQ);
+      this.deps.logTiming(`brain: rapid fire pre-queue — "${nextQ.id}" (no rephrase)`);
+    } else {
+      this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
+    }
     // Rapid Fire: fire speculative joke pre-gen now so it's ready by the
     // time the user finishes answering. No-op in Original flow or when the
     // question has no expectedAnswers (e.g., "name").
@@ -3136,6 +3215,11 @@ export class ComedianBrain {
   // ─── Helpers ──────────────────────────────────────────────────────────────────
 
   private _transition(next: BrainState): void {
+    // Leaving "generating" — a joke streamed in (or we're being redirected/aborted).
+    // Either way the watchdog's job is done; cancel it so it can't fire a spurious fallback.
+    if (this.state === "generating" && next !== "generating") {
+      this._clearGenerationWatchdog();
+    }
     const config = STATE_CONFIG[next];
     this.state = next;
     this.micMode = config.micMode;
@@ -3149,6 +3233,7 @@ export class ComedianBrain {
     if (this.devNoteTimer) { clearTimeout(this.devNoteTimer); this.devNoteTimer = null; }
     if (this.greetingVisionTimeout) { clearTimeout(this.greetingVisionTimeout); this.greetingVisionTimeout = null; }
     this._clearConfirmTimer();
+    this._clearGenerationWatchdog();
     // Pump cancellation — _clearTimers fires on stop / cancellation / wait_answer entry, all
     // paths where leaving "generating" without delivering a joke is possible. No timer to
     // cancel (pump runs purely off drain events), just flip the flag.
@@ -3188,6 +3273,7 @@ export class ComedianBrain {
       callback?: { text: string; motion: string; intensity: number };
     }) => void,
     onError: () => void,
+    signal?: AbortSignal,
   ): void {
     const streamingTtsEnabled = !!this.deps.openJokeStream;
     const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
@@ -3200,6 +3286,10 @@ export class ComedianBrain {
     fetch("/api/generate-speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Watchdog-owned signal — lets the generation watchdog abort a hung request so the
+      // brain can fall back instead of stranding the user in silence. Undefined on the
+      // pipeline path, which is fine (short-lived, has its own drain handling).
+      signal,
       body: JSON.stringify({
         ...params,
         model: this.deps.getRoastModel(),
@@ -3357,7 +3447,7 @@ export class ComedianBrain {
 
   private async _generateJoke(
     params: {
-      context: "greeting" | "vision_opening" | "answer_roast" | "vision_react" | "hopper" | "wrapup";
+      context: "greeting" | "rapid_fire_greeting" | "vision_opening" | "answer_roast" | "vision_react" | "hopper" | "wrapup";
       /** Override the roast model for this request (e.g. Gemini Flash for vision-reactive jokes). */
       model?: string;
       question?: string;
@@ -3397,6 +3487,21 @@ export class ComedianBrain {
           const provider = (body as { provider?: string }).provider ?? "unknown";
           this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
           this.deps.logTiming(`brain: QUOTA ERROR from ${provider}`);
+        } else if (resp.status === 503) {
+          const body = await resp.json().catch(() => ({}));
+          const b = body as { error?: string; failedModel?: string; suggestedFallback?: string };
+          if (
+            b.error === "model_unavailable" &&
+            b.failedModel &&
+            b.suggestedFallback &&
+            !this.modelUnavailableFired
+          ) {
+            this.modelUnavailableFired = true;
+            this.deps.logTiming(
+              `brain: MODEL_UNAVAILABLE ${b.failedModel} → suggest ${b.suggestedFallback}`,
+            );
+            this.deps.onModelUnavailable?.(b.failedModel, b.suggestedFallback);
+          }
         }
         return null;
       }

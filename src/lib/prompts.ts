@@ -158,6 +158,21 @@ BACKGROUND RULE:
 Set "relevant": true. No "redirect".
 Generate exactly 1 joke. Keep it quick.`,
 
+    rapid_fire_greeting: `## Task: Rapid Fire Opening — Light Banter One-Liner
+You're kicking off a fast-paced Q&A game, not a roast set. Keep the energy friendly and quick.
+
+ONE line max. Tone: warm, playful, slightly cheeky — NOT a burn. Think host energy, not roast energy.
+Toss in a quick observation from the camera (what they look like, where they are, the weather/time vibe
+from AMBIENT context) as a light throwaway, then pivot straight into the game.
+
+Examples of the right vibe (don't copy, just calibrate):
+- "Looking cozy in there — let's see how fast you really are."
+- "Nice Wednesday afternoon energy — alright, quick questions, real answers, let's go."
+- "You've got that 'ready for anything' look. Perfect, because we're about to find out."
+
+HARD LENGTH CAP: 18 words total. One sentence. End on energy, not a punchline.
+Set "relevant": true. No "redirect". Generate exactly 1 joke.`,
+
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
 Based on CURRENT OBSERVATIONS provided. Be specific — reference what you actually see.
