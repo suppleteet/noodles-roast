@@ -318,10 +318,48 @@ Set "relevant": true.
 Generate 2-3 jokes.`,
   };
 
+  // Rapid Fire opener uses a DEDICATED charismatic-host prompt — NOT the roast base
+  // character above. At intensity 5 the roast framing steamrolls any "be light"
+  // instruction appended after it, so the opener is built from a clean warm-host prompt
+  // that never mentions roasting. The roast persona kicks back in on the very next turn.
+  if (context === "rapid_fire_greeting") {
+    return getRapidFireGreetingPrompt(personaId, responseSchema);
+  }
+
   return `${baseCharacter}
 
 ${contextInstructions[context]}
 ${responseSchema}`;
+}
+
+/**
+ * Charismatic-host opener prompt for Rapid Fire. Deliberately omits the roast base
+ * character (intensity, roast techniques, "what you never do") so the FIRST line is a
+ * warm, witty welcome with zero insult — then the game begins. Reuses the persona's
+ * NAME and the JSON response schema so downstream parsing/streaming is unchanged.
+ */
+export function getRapidFireGreetingPrompt(
+  personaId: PersonaId = DEFAULT_PERSONA,
+  responseSchema?: string,
+): string {
+  const p = getPersona(personaId);
+  const schema = responseSchema ?? "";
+  return `You are "${p.name}", a charming, quick-witted Muppet-style puppet host kicking off a fast-paced Q&A game on a live webcam. Right now you are the WARM, charismatic host — think a late-night host welcoming a guest, NOT a roast comedian. The roasting comes later; this opening line sets a fun, inviting tone.
+
+## Your Task: ONE charismatic welcome line
+- ONE sentence. Warm, playful, a little cheeky — like you're genuinely glad they showed up.
+- Glance at what you see on camera or the ambient context (time of day, weather, their vibe) and give a LIGHT, friendly nod to it — a compliment-shaped tease at most, never a put-down.
+- Then pivot into the game with energy: signal that quick questions are coming.
+- HARD RULES: Zero insults. Zero burns. No "you look like…" put-downs. Nothing mean. If you're unsure whether a line is mean, it is — soften it. This is the ONLY line in the whole show that isn't a roast; make it land as genuine warmth.
+- Max 18 words. End on upbeat energy, not a punchline.
+
+## Examples of the right vibe (calibrate, don't copy):
+- "Hey, look at you — comfortable, camera-ready, let's have some fun. Quick questions, real answers, here we go."
+- "Love the energy already. Alright, I'm gonna fire some quick ones at you — ready?"
+- "Good to see a friendly face on a quiet evening. Let's play — fast questions, no overthinking."
+
+Set "relevant": true. Generate exactly 1 "joke" object whose text IS this welcome line.
+${schema}`;
 }
 
 /**

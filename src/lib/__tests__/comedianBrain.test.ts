@@ -271,6 +271,50 @@ describe("ComedianBrain — Q&A cycle", () => {
   });
 });
 
+// ─── Rapid Fire burst cadence ──────────────────────────────────────────────────
+
+describe("ComedianBrain — Rapid Fire burst", () => {
+  /** Commit one answer, then drain the ack + next-question TTS so we land back in wait_answer. */
+  async function rapidAnswer(brain: ComedianBrain, text: string): Promise<void> {
+    brain.onInputTranscription(text);
+    await vi.advanceTimersByTimeAsync(1600); // silence commits the answer
+    brain.onTtsQueueDrained();               // ack + next question drained → wait_answer
+  }
+
+  it("acks and advances instead of joking until the burst is full", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+
+    // First two answers (burst size is 3) → quick ack + next question, NO joke generation.
+    await rapidAnswer(brain, "My name is Tyler");
+    await rapidAnswer(brain, "Nope I am single");
+
+    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
+    // Should have looped back through ask_question for the next burst question.
+    expect(getStates(deps)).toContain("ask_question");
+  });
+
+  it("fires a joke burst once rapidFireBurstSize answers are collected", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+
+    await rapidAnswer(brain, "My name is Tyler");
+    await rapidAnswer(brain, "Nope I am single");
+    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
+
+    // Third answer fills the burst → one combined joke burst generates.
+    brain.onInputTranscription("Two dogs actually");
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(getStates(deps)).toContain("generating");
+  });
+});
+
 // ─── Silence handling ─────────────────────────────────────────────────────────
 
 describe("ComedianBrain — silence handling", () => {
@@ -634,7 +678,7 @@ describe("ComedianBrain — filler echo gating", () => {
     // Word-anchored fillers with leading-only "..." — ElevenLabs renders the ellipsis as a
     // ~250ms breath beat before each filler. Trailing ellipsis was dropped because it
     // doubled the gap between stacked fillers (250ms trail + 250ms lead = 500ms dead beat).
-    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Gotcha\.)$/);
+    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Ah, gotcha\.)$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

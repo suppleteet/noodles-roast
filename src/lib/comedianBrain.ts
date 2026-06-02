@@ -342,6 +342,16 @@ export class ComedianBrain {
   private fillerMotion: MotionState = "thinking";
   private fillerIntensity = 0.6;
 
+  /** Rapid Fire burst accumulator: {question, answer} pairs collected with only quick acks
+   *  until the burst is full (rapidFireBurstSize) — then one joke burst ties them together. */
+  private rapidFireBurst: Array<{ question: string; answer: string }> = [];
+
+  /** Quick one-word acks spoken between burst questions — keeps the rapid tick-tock going
+   *  without spending a full joke on each answer. */
+  private static readonly RAPID_FIRE_ACKS = [
+    "Got it.", "Okay.", "Nice.", "Mm-hm.", "Right.", "Sure.", "Noted.", "Alright.", "Love it.",
+  ];
+
   /** Watchdog: fires if joke generation produces no joke within generationTimeoutMs.
    *  Aborts the hung request and delivers a canned fallback so the puppet never sits
    *  silent in "generating" forever (e.g. when generate-speak / Gemini hangs). */
@@ -403,9 +413,9 @@ export class ComedianBrain {
 
     // Always lead with name so the puppet has something personal to work with.
     // Everything else shuffles freely — avoids the show feeling like a questionnaire.
-    // Flow mode determines which bank we pull from. Rapid Fire uses short-answer
-    // questions with expectedAnswers populated for speculative pre-gen (future
-    // commit); Original uses the open-ended bank with rephrase-personalization.
+    // Flow mode determines which bank we pull from. Rapid Fire uses short-answer questions
+    // and the burst cadence (collect a few answers behind quick acks, then one combined
+    // joke burst); Original uses the open-ended bank with rephrase-personalization.
     const flowMode = this.deps.getFlowMode();
     const bank = flowMode === "rapid_fire" ? RAPID_FIRE_QUESTION_BANK : QUESTION_BANK;
     this.deps.logTiming(`brain: flow=${flowMode} bank=${bank.length}q`);
@@ -416,6 +426,7 @@ export class ComedianBrain {
     this.askedQuestionIds = new Set();
     this.ledger = [];
     this.jokeHopper = [];
+    this.rapidFireBurst = [];
     this.transitionCount = 0;
     this.consecutiveSilentQuestions = 0;
     this.visionOnlyMode = false;
@@ -1262,11 +1273,9 @@ export class ComedianBrain {
         this.bankQuestionsInARow++;
         questionWillBeQueuedAsync = true;
         this._queueQuestionWithBridge(this._pickQuestionText(this.currentQuestion));
-        // Rapid Fire: fire speculative joke pre-gen for this question. The
-        // pre-queue path also fires this from _preQueueNextQuestion; this
-        // covers the first-question case (no preceding delivery to pre-queue
-        // during) plus any non-pre-queued bank ask.
-        this._fireExpectedJokesGen(question);
+        // NOTE: per-answer speculative pre-gen (_fireExpectedJokesGen) is superseded by the
+        // Rapid Fire burst cadence — answers are now roasted together in one burst, so a
+        // per-question speculative joke would never be consumed. Left out intentionally.
       } else {
         // Generate a contextual question based on what we see + know
         this.bankQuestionsInARow = 0;
@@ -1426,9 +1435,15 @@ export class ComedianBrain {
       return;
     }
 
-    // Confidence gate — reject garbage, confirm dubious, pass clean answers through
-    // Skip when scripted lines are disabled (no canned confirm/reject templates)
-    if (COMEDIAN_CONFIG.confirmationEnabled && !COMEDIAN_CONFIG.skipScriptedLines) {
+    // Confidence gate — reject garbage, confirm dubious, pass clean answers through.
+    // Skip when scripted lines are disabled (no canned confirm/reject templates), and skip
+    // entirely in Rapid Fire — confirmation prompts kill the quick tick-tock cadence; a
+    // slightly-misheard answer just becomes a slightly-off burst joke, which is fine.
+    if (
+      COMEDIAN_CONFIG.confirmationEnabled &&
+      !COMEDIAN_CONFIG.skipScriptedLines &&
+      this.deps.getFlowMode() !== "rapid_fire"
+    ) {
       const qId = this.currentQuestion?.id ?? "";
       // Name confirmations are useful for short transcripts ("Mike"/"Mark"),
       // but long multi-word replies are usually intentional bits, not STT errors.
@@ -1617,6 +1632,10 @@ export class ComedianBrain {
   // IMPORTANT: must contain at least one real word. Isolated "Mmm." / "Hm." render as harsh nasal hums
   // in ElevenLabs because there's no dictionary-word context to anchor prosody. Pair every hum with a
   // word so vocal continuity from the previous line carries through naturally.
+  // Every entry must lead with a soft/voiced sound (vowel, m/n hum, "Ah/Oh/Yeah").
+  // Lone hard-consonant words after the "..." pause make EL spike the attack —
+  // "Gotcha." came out as a loud percussive "G!" Reworked as "Ah, gotcha." so
+  // the soft "Ah" absorbs the post-pause attack and "gotcha" lands at normal level.
   private static readonly NONWORD_FILLERS = [
     "Mm, okay.",
     "Hm, alright.",
@@ -1625,7 +1644,7 @@ export class ComedianBrain {
     "I see.",
     "Okay then.",
     "Yeah, alright.",
-    "Gotcha.",
+    "Ah, gotcha.",
   ];
 
   // Echo fillers — repeat the complete answer once, then bridge into the joke.
@@ -1813,6 +1832,15 @@ export class ComedianBrain {
   }
 
   private enterGenerating(answer: string): void {
+    // Rapid Fire: don't joke on every answer. Accumulate answers across a few quick
+    // questions (each gets only a one-word ack), then fire ONE joke burst tying them
+    // together. _handleRapidFireAnswer either ack's + advances (returns), or — when the
+    // burst is full — calls _enterRapidFireBurst() to generate the combined roast.
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      this._handleRapidFireAnswer(answer);
+      return;
+    }
+
     this._transition("generating");
     this.deliveryGeneration++;
     this.deps.setMotion("thinking", 0.7);
@@ -1887,6 +1915,99 @@ export class ComedianBrain {
       this._cancelSpeculative();
       this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
     }
+  }
+
+  /**
+   * Rapid Fire answer handler. Pushes the answer onto the burst accumulator, then either:
+   *   - acks quickly and advances to the NEXT question (burst not full, questions remain), or
+   *   - fires the combined joke burst (burst full, or no more bank questions).
+   * This is what gives Rapid Fire its distinct "quick questions → burst" cadence.
+   */
+  private _handleRapidFireAnswer(answer: string): void {
+    const question = this.currentQuestion?.question ?? "";
+    this.rapidFireBurst.push({ question, answer });
+    this._addLedger("answer", answer, []);
+
+    const burstSize = COMEDIAN_CONFIG.rapidFireBurstSize;
+    const burstFull = this.rapidFireBurst.length >= burstSize;
+    const burstReady = burstFull || !this._hasMoreBankQuestions() || this.pendingWrapup;
+
+    if (!burstReady) {
+      // Quick ack, then straight to the next question — the rapid tick-tock.
+      const ack = ComedianBrain.RAPID_FIRE_ACKS[
+        Math.floor(Math.random() * ComedianBrain.RAPID_FIRE_ACKS.length)
+      ];
+      this.deps.setMotion("energetic", 0.5);
+      this.deps.queueSpeak(ack, "energetic", 0.5);
+      this.deps.logTiming(
+        `brain: rapid fire ack "${ack}" — burst ${this.rapidFireBurst.length}/${burstSize}, next Q`,
+      );
+      // enterAskQuestion queues the next question right behind the ack on the TTS chain;
+      // both drain together → wait_answer.
+      this.enterAskQuestion();
+      return;
+    }
+
+    this._enterRapidFireBurst();
+  }
+
+  /**
+   * Generate ONE joke burst that ties together every answer in the current Rapid Fire
+   * accumulator, then clear it for the next burst. Reuses the standard generation
+   * machinery (filler pump, watchdog, streaming TTS) via _generateAndDeliver — it just
+   * feeds a combined recap as the "answer" so the LLM roasts the whole set at once.
+   */
+  private _enterRapidFireBurst(): void {
+    const burst = this.rapidFireBurst;
+    this.rapidFireBurst = []; // reset for the next burst (captured in `burst`)
+
+    this._transition("generating");
+    this.deliveryGeneration++;
+    this.deps.setMotion("thinking", 0.7);
+
+    // Combined recap, e.g. "Who am I talking to: Tyler; Single: Nope; Cats or dogs: Dogs".
+    // Passed as USER'S ANSWER so the answer_roast prompt roasts the whole combination.
+    const combinedAnswer = burst
+      .map((b) => `${b.question.replace(/[?]+$/, "")}: ${b.answer}`)
+      .join("; ");
+
+    this._armGenerationWatchdog(combinedAnswer);
+
+    // Filler while the burst generates — same mechanism as the normal path.
+    let fillerAlreadySaid: string | undefined;
+    if (!COMEDIAN_CONFIG.skipFiller) {
+      this.fillerFiredForAnswer = true;
+      this.fillerAnswerForPump = combinedAnswer;
+      this.fillerLineCount = 0;
+      this.fillerLastText = null;
+      this.fillerFirstText = null;
+      this.fillerPumpActive = true;
+      [this.fillerMotion, this.fillerIntensity] = inferFillerMotionFromAnswer(
+        burst.at(-1)?.answer ?? combinedAnswer,
+      );
+      fillerAlreadySaid = "filler sound";
+      this._queueNextPumpFiller();
+    }
+
+    this.deps.logTiming(`brain: rapid fire burst (${burst.length} answers) — generating`);
+    // q = null: no single "QUESTION ASKED" — the combined recap carries all the context.
+    this._generateAndDeliver(combinedAnswer, null, this._getLedgerContext(), fillerAlreadySaid);
+  }
+
+  /** Non-mutating check: are there bank questions left to ask? Mirrors _nextValidQuestion's
+   *  skip rules (already-asked, location-known, excluded) WITHOUT advancing questionIndex. */
+  private _hasMoreBankQuestions(): boolean {
+    const ambientCity = this.deps.getAmbientContext()?.city;
+    const hasLocation = !!ambientCity && ambientCity !== "unknown";
+    const excluded = this.shuffledQuestions
+      .filter((prev) => this.askedQuestionIds.has(prev.id) && prev.excludes)
+      .flatMap((prev) => prev.excludes!);
+    return this.shuffledQuestions.some(
+      (q) =>
+        !this.askedQuestionIds.has(q.id) &&
+        !(hasLocation && ComedianBrain.LOCATION_QUESTION_IDS.has(q.id)) &&
+        !excluded.includes(q.id),
+    );
   }
 
   // Workaround: TypeScript doesn't allow assigning to private field via underscore alias
@@ -2456,10 +2577,8 @@ export class ComedianBrain {
     } else {
       this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
     }
-    // Rapid Fire: fire speculative joke pre-gen now so it's ready by the
-    // time the user finishes answering. No-op in Original flow or when the
-    // question has no expectedAnswers (e.g., "name").
-    this._fireExpectedJokesGen(nextQ);
+    // (Per-answer speculative pre-gen removed — superseded by the Rapid Fire burst cadence,
+    // which roasts collected answers together rather than one joke per answer.)
     this.deps.logTiming(`brain: pre-queue bank question — "${nextQ.id}"`);
   }
 

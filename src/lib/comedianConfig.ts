@@ -66,6 +66,11 @@ const defaults = {
   // Hard cap as a safety net if the LLM hangs — ~6 covers >12s of stack at avg filler length.
   fillerMaxStack: 6,
 
+  // Rapid Fire burst — ask this many short questions back-to-back (each with only a quick
+  // one-word ack), THEN drop one joke burst that ties all the answers together. This is what
+  // makes Rapid Fire feel distinct from the original question→joke→question cadence.
+  rapidFireBurstSize: 3,
+
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
   // within this window, abort it and deliver a canned fallback roast so the puppet never
   // strands the user in dead silence. Sized to fire just as the filler stack (~12.5s for 6
