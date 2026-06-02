@@ -13,7 +13,7 @@
  * Conversation shape:
  *   name → quick_opener → BURST → next_question → BURST → next_question → ...
  *
- * The "name" question goes first; one of the openers (single/pets/kids/
+ * The "name" question goes first; one of the openers (single/kids/
  * live_alone) is Q2; the rest of the bank shuffles into the rotation.
  *
  * Note: this uses the same ComedyQuestion type as the Original bank — the
@@ -28,7 +28,7 @@ import type { ComedyQuestion } from "@/lib/questionBank";
  * Brain picks one of these for the Q2 slot; the rest of the bank rotates
  * in afterwards.
  */
-export const RAPID_FIRE_OPENER_IDS = ["single", "pets", "kids", "live_alone"] as const;
+export const RAPID_FIRE_OPENER_IDS = ["single", "kids", "live_alone"] as const;
 
 export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   {
@@ -58,20 +58,6 @@ export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
     prodLines: [
       "Yes or no. It's one of two answers.",
       "Single. Taken. Complicated. Pick one.",
-    ],
-  },
-  {
-    id: "pets",
-    question: "Cats, dogs, or no pets?",
-    vulgarQuestions: [
-      "Cats, dogs, or do you even have the patience for that?",
-      "What kind of fur-shedding tax do you pay — cats, dogs, or none?",
-    ],
-    expectedAnswers: ["cats", "dogs", "none"],
-    jokeContext: "Cats = lonely-and-judgmental energy. Dogs = needy-but-loyal energy. None = too-tired-for-living-things energy.",
-    prodLines: [
-      "Cats. Dogs. None. Pick one.",
-      "It's a three-option question.",
     ],
   },
   {

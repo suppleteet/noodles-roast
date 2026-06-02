@@ -69,7 +69,8 @@ const defaults = {
   // Rapid Fire burst — ask this many short questions back-to-back (each with only a quick
   // one-word ack), THEN drop one joke burst that ties all the answers together. This is what
   // makes Rapid Fire feel distinct from the original question→joke→question cadence.
-  rapidFireBurstSize: 3,
+  // 2 = a joke after every couple questions (snappy); raise it for longer question runs.
+  rapidFireBurstSize: 2,
 
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
   // within this window, abort it and deliver a canned fallback roast so the puppet never

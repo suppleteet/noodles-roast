@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
+import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
@@ -281,6 +282,15 @@ describe("ComedianBrain — Rapid Fire burst", () => {
     brain.onTtsQueueDrained();               // ack + next question drained → wait_answer
   }
 
+  // Distinct multi-word answers so each commits cleanly (avoids confirm/echo paths).
+  const BURST_ANSWERS = [
+    "My name is Tyler",
+    "Nope I am single",
+    "I live in Seattle",
+    "I am a plumber",
+    "About forty years old",
+  ];
+
   it("acks and advances instead of joking until the burst is full", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
@@ -288,9 +298,11 @@ describe("ComedianBrain — Rapid Fire burst", () => {
     const brain = new ComedianBrain(deps);
     await driveToWaitAnswer(brain);
 
-    // First two answers (burst size is 3) → quick ack + next question, NO joke generation.
-    await rapidAnswer(brain, "My name is Tyler");
-    await rapidAnswer(brain, "Nope I am single");
+    // Every answer EXCEPT the burst-filling one → quick ack + next question, NO generation.
+    const acksBeforeBurst = COMEDIAN_CONFIG.rapidFireBurstSize - 1;
+    for (let i = 0; i < acksBeforeBurst; i++) {
+      await rapidAnswer(brain, BURST_ANSWERS[i]);
+    }
 
     expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
     // Should have looped back through ask_question for the next burst question.
@@ -304,12 +316,15 @@ describe("ComedianBrain — Rapid Fire burst", () => {
     const brain = new ComedianBrain(deps);
     await driveToWaitAnswer(brain);
 
-    await rapidAnswer(brain, "My name is Tyler");
-    await rapidAnswer(brain, "Nope I am single");
+    const burstSize = COMEDIAN_CONFIG.rapidFireBurstSize;
+    // Answers up to (but not including) the last one just ack.
+    for (let i = 0; i < burstSize - 1; i++) {
+      await rapidAnswer(brain, BURST_ANSWERS[i]);
+    }
     expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
 
-    // Third answer fills the burst → one combined joke burst generates.
-    brain.onInputTranscription("Two dogs actually");
+    // The answer that fills the burst → one combined joke burst generates.
+    brain.onInputTranscription(BURST_ANSWERS[burstSize - 1]);
     await vi.advanceTimersByTimeAsync(1600);
     expect(getStates(deps)).toContain("generating");
   });

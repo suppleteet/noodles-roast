@@ -30,6 +30,23 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
+import {
+  NONWORD_FILLERS,
+  ECHO_FILLER_TEMPLATES,
+  ECHO_FILLER_PROBABILITY,
+  RAPID_FIRE_ACKS,
+  QUESTION_BRIDGES,
+  CONFIRM_DENIED_LINE,
+  ANSWER_FALLBACK_ROASTS,
+  GREETING_FALLBACK,
+  WRAPUP_FALLBACK,
+  WRAPUP_BRIDGES,
+  CONTEXTUAL_QUESTION_PRODS,
+  CONTEXTUAL_FALLBACK_QUESTION,
+  CONTEXTUAL_FALLBACK_PRODS,
+  RHETORICAL_QUESTIONS,
+  DEFAULT_GREETING,
+} from "@/lib/scriptLines";
 import { matchExpectedAnswer } from "@/lib/expectedAnswerMatch";
 import type { ExpectedJokesResponse } from "@/app/api/generate-expected-jokes/route";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
@@ -345,12 +362,6 @@ export class ComedianBrain {
   /** Rapid Fire burst accumulator: {question, answer} pairs collected with only quick acks
    *  until the burst is full (rapidFireBurstSize) — then one joke burst ties them together. */
   private rapidFireBurst: Array<{ question: string; answer: string }> = [];
-
-  /** Quick one-word acks spoken between burst questions — keeps the rapid tick-tock going
-   *  without spending a full joke on each answer. */
-  private static readonly RAPID_FIRE_ACKS = [
-    "Got it.", "Okay.", "Nice.", "Mm-hm.", "Right.", "Sure.", "Noted.", "Alright.", "Love it.",
-  ];
 
   /** Watchdog: fires if joke generation produces no joke within generationTimeoutMs.
    *  Aborts the hung request and delivers a canned fallback so the puppet never sits
@@ -884,17 +895,8 @@ export class ComedianBrain {
     motion: string;
     intensity: number;
   } {
-    const templates = [
-      "Stunning. Real edge-of-my-seat material there.",
-      "Yeah. The roast practically writes itself.",
-      "Riveting. Honestly, give me a second to recover.",
-      "Cool. Cool cool cool. Anyway.",
-      "Mhm. Just stunning material to work with.",
-      "Wow. The depth on display here is staggering.",
-      "Sure. Let's just keep moving.",
-    ];
     return {
-      text: templates[Math.floor(Math.random() * templates.length)],
+      text: ANSWER_FALLBACK_ROASTS[Math.floor(Math.random() * ANSWER_FALLBACK_ROASTS.length)],
       motion: "smug",
       intensity: 0.6,
     };
@@ -1104,7 +1106,7 @@ export class ComedianBrain {
         this.greetingVisionTimeout = null;
       }
       if (!response || response.jokes.length === 0) {
-        const fallback = "The camera took one look and requested hazard pay.";
+        const fallback = GREETING_FALLBACK;
         this.deps.logTiming("brain: greeting failed — using short fallback");
         this.deps.queueSpeak(fallback, "energetic", 0.8);
         this._addLedger("joke", fallback, []);
@@ -1608,7 +1610,7 @@ export class ComedianBrain {
     this.confirmAttempts = 0;
     this.answerBuffer = "";
     this.deps.setUserAnswer("");
-    this.deps.queueSpeak("One more time?", "conspiratorial", 0.5);
+    this.deps.queueSpeak(CONFIRM_DENIED_LINE, "conspiratorial", 0.5);
     // Use ask_question so onTtsQueueDrained → enterWaitAnswer() starts prod timers
     this._transition("ask_question");
     this.deps.logTiming("brain: confirm denied — back to ask_question (will enter wait_answer on TTS drain)");
@@ -1628,36 +1630,8 @@ export class ComedianBrain {
     return "restate";
   }
 
-  // Short conversational filler reactions — play immediately when generating starts so there's no dead air.
-  // IMPORTANT: must contain at least one real word. Isolated "Mmm." / "Hm." render as harsh nasal hums
-  // in ElevenLabs because there's no dictionary-word context to anchor prosody. Pair every hum with a
-  // word so vocal continuity from the previous line carries through naturally.
-  // Every entry must lead with a soft/voiced sound (vowel, m/n hum, "Ah/Oh/Yeah").
-  // Lone hard-consonant words after the "..." pause make EL spike the attack —
-  // "Gotcha." came out as a loud percussive "G!" Reworked as "Ah, gotcha." so
-  // the soft "Ah" absorbs the post-pause attack and "gotcha" lands at normal level.
-  private static readonly NONWORD_FILLERS = [
-    "Mm, okay.",
-    "Hm, alright.",
-    "Uh-huh, sure.",
-    "Right, right.",
-    "I see.",
-    "Okay then.",
-    "Yeah, alright.",
-    "Ah, gotcha.",
-  ];
-
-  // Echo fillers — repeat the complete answer once, then bridge into the joke.
-  // Keep these declarative, not question-shaped, so they sound like active listening
-  // instead of another prompt.
-  private static readonly ECHO_FILLER_TEMPLATES = [
-    "{answer}, huh.",
-    "{answer}, you say.",
-    "{answer}. Hm.",
-  ];
-
-  /** Probability of picking an echo filler when the answer is echo-eligible. */
-  private static readonly ECHO_FILLER_PROBABILITY = 0.35;
+  // Filler reaction lines (NONWORD_FILLERS / ECHO_FILLER_TEMPLATES / ECHO_FILLER_PROBABILITY)
+  // live in src/lib/scriptLines.ts — edit them there.
 
   // Meta-complaints about the comedian's own behavior — never echo these.
   // Echoing "You keep asking about the posters." back as "...you say." reads as broken/glitchy.
@@ -1708,30 +1682,26 @@ export class ComedianBrain {
   }
 
   private _pickFiller(answer: string): string {
-    if (this._isFillerEchoable(answer) && Math.random() < ComedianBrain.ECHO_FILLER_PROBABILITY) {
+    if (this._isFillerEchoable(answer) && Math.random() < ECHO_FILLER_PROBABILITY) {
       const cleaned = ComedianBrain._stripLeadingHesitation(
         answer.trim().replace(/[.?!,]+$/, "").trim(),
       );
       // If stripping left us with too little to echo, fall back to non-word filler.
       if (wordCount(cleaned) < 1) {
-        return ComedianBrain.NONWORD_FILLERS[
-          Math.floor(Math.random() * ComedianBrain.NONWORD_FILLERS.length)
-        ];
+        return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
       }
-      const tpl = ComedianBrain.ECHO_FILLER_TEMPLATES[
-        Math.floor(Math.random() * ComedianBrain.ECHO_FILLER_TEMPLATES.length)
+      const tpl = ECHO_FILLER_TEMPLATES[
+        Math.floor(Math.random() * ECHO_FILLER_TEMPLATES.length)
       ];
       return tpl.replaceAll("{answer}", cleaned);
     }
-    return ComedianBrain.NONWORD_FILLERS[
-      Math.floor(Math.random() * ComedianBrain.NONWORD_FILLERS.length)
-    ];
+    return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
   }
 
   /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
   private _pickNonWordFiller(avoid: string | null): string {
-    const opts = ComedianBrain.NONWORD_FILLERS.filter((f) => f !== avoid);
-    const pool = opts.length > 0 ? opts : ComedianBrain.NONWORD_FILLERS;
+    const opts = NONWORD_FILLERS.filter((f) => f !== avoid);
+    const pool = opts.length > 0 ? opts : NONWORD_FILLERS;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -1934,8 +1904,8 @@ export class ComedianBrain {
 
     if (!burstReady) {
       // Quick ack, then straight to the next question — the rapid tick-tock.
-      const ack = ComedianBrain.RAPID_FIRE_ACKS[
-        Math.floor(Math.random() * ComedianBrain.RAPID_FIRE_ACKS.length)
+      const ack = RAPID_FIRE_ACKS[
+        Math.floor(Math.random() * RAPID_FIRE_ACKS.length)
       ];
       this.deps.setMotion("energetic", 0.5);
       this.deps.queueSpeak(ack, "energetic", 0.5);
@@ -2374,21 +2344,16 @@ export class ComedianBrain {
     );
   }
 
-  // Short bridge phrases that connect a joke to the next question — keeps the energy flowing.
-  // Spoken as a separate TTS call so ElevenLabs previous_text carries the joke's vocal tone.
-  private static readonly QUESTION_BRIDGES = [
-    "Okay.", "Alright.", "Anyway.", "Moving on.", "But seriously.",
-    "So.", "Now.", "Let me ask you this.", "Okay okay.",
-  ];
+  // Bridge phrases (QUESTION_BRIDGES) live in src/lib/scriptLines.ts.
 
   private static _questionWithBridge(questionText: string): string {
     const normalizedQuestion = questionText.replace(/^[\s"'“”]+/, "").toLowerCase();
-    const questionAlreadyHasBridge = ComedianBrain.QUESTION_BRIDGES.some((bridge) => {
+    const questionAlreadyHasBridge = QUESTION_BRIDGES.some((bridge) => {
       const bridgeLead = bridge.replace(/[.!?]+$/, "").toLowerCase();
       return normalizedQuestion.startsWith(bridgeLead);
     });
     if (questionAlreadyHasBridge) return questionText;
-    const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
+    const bridge = QUESTION_BRIDGES[Math.floor(Math.random() * QUESTION_BRIDGES.length)];
     return `${bridge} ${questionText}`;
   }
 
@@ -2506,10 +2471,7 @@ export class ComedianBrain {
           id: `generated_${Date.now()}`,
           question: questionText,
           jokeContext: data.jokeContext,
-          prodLines: [
-            "Come on, I'm waiting.",
-            "I asked you a question.",
-          ],
+          prodLines: CONTEXTUAL_QUESTION_PRODS,
         };
         this._queueQuestionWithBridge(questionText);
         this.deps.logTiming(`brain: contextual question — "${questionText}"`);
@@ -2517,12 +2479,12 @@ export class ComedianBrain {
       .catch(() => {
         if (this.state !== "ask_question") return;
         // Fallback — ask where they are
-        const fallback = "So where are you right now? What am I looking at back there?";
+        const fallback = CONTEXTUAL_FALLBACK_QUESTION;
         this.currentQuestion = {
           id: "generated_fallback",
           question: fallback,
           jokeContext: "Location and environment roast.",
-          prodLines: ["Hello? Where are you?", "I'm talking to you."],
+          prodLines: CONTEXTUAL_FALLBACK_PRODS,
         };
         this._queueQuestionWithBridge(fallback);
       });
@@ -2784,18 +2746,8 @@ export class ComedianBrain {
     this.enterAskQuestion();
   }
 
-  private static readonly WRAPUP_FALLBACK = "And on that note, we're done here. Goodnight.";
   private static readonly WRAPUP_GENERATION_TIMEOUT_MS = 6000;
-
-  /** Spoken synchronously when entering wrapup so the user hears something while the
-   *  closing line generates (~2-3s on Sonnet). Without a bridge there's a long dead pause. */
-  private static readonly WRAPUP_BRIDGES = [
-    "Alright, alright, before I go —",
-    "Welllll, on that note —",
-    "Anyway, one last thing —",
-    "Okay, last word and I'm out —",
-    "Right, before I peace out —",
-  ];
+  // Closing lines (WRAPUP_FALLBACK / WRAPUP_BRIDGES) live in src/lib/scriptLines.ts.
 
   private enterWrapup(): void {
     this.pendingWrapup = false;
@@ -2816,9 +2768,7 @@ export class ComedianBrain {
     // so its TTS fetch happens in parallel with the closing-line generation.
     if (!COMEDIAN_CONFIG.skipScriptedLines) {
       const bridge =
-        ComedianBrain.WRAPUP_BRIDGES[
-          Math.floor(Math.random() * ComedianBrain.WRAPUP_BRIDGES.length)
-        ];
+        WRAPUP_BRIDGES[Math.floor(Math.random() * WRAPUP_BRIDGES.length)];
       this.deps.queueSpeak(bridge, "smug", 0.7);
       this.deps.logTiming(`brain: wrapup bridge — "${bridge}"`);
     }
@@ -2845,7 +2795,7 @@ export class ComedianBrain {
     const timeout = setTimeout(() => {
       if (resolved) return;
       this.deps.logTiming("brain: wrapup generation timeout — using fallback");
-      queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+      queueClosing(WRAPUP_FALLBACK);
     }, ComedianBrain.WRAPUP_GENERATION_TIMEOUT_MS);
 
     this._generateJoke({
@@ -2863,12 +2813,12 @@ export class ComedianBrain {
         queueClosing(closing.text, closing.motion, closing.intensity);
       } else {
         this.deps.logTiming("brain: wrapup generation empty — using fallback");
-        queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+        queueClosing(WRAPUP_FALLBACK);
       }
     }).catch(() => {
       clearTimeout(timeout);
       this.deps.logTiming("brain: wrapup generation error — using fallback");
-      queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+      queueClosing(WRAPUP_FALLBACK);
     });
   }
 
@@ -3360,16 +3310,11 @@ export class ComedianBrain {
   }
 
   private _getPersonaGreetings(): string[] {
-    return PERSONAS[this.deps.getPersona()]?.greetings ?? ["Hey there!"];
+    return PERSONAS[this.deps.getPersona()]?.greetings ?? [DEFAULT_GREETING];
   }
 
   private _rhetoricalVersion(question: string): string {
-    const rhetoricals: Record<string, string> = {
-      "What's your name?": "I'd ask your name but you can't even talk to me. Let me just look at you instead.",
-      "Where are you from?": "I'd ask where you're from but you're the strong silent type. We'll make do.",
-      "What do you do for a living?": "I'd ask what you do but you're not exactly forthcoming. I'll use my imagination.",
-    };
-    return rhetoricals[question] ?? `I'd ask you ${question.toLowerCase()} but I'll just have to guess.`;
+    return RHETORICAL_QUESTIONS[question] ?? `I'd ask you ${question.toLowerCase()} but I'll just have to guess.`;
   }
 
   private _generateJokeStream(
