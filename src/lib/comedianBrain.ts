@@ -2030,8 +2030,10 @@ export class ComedianBrain {
     if (!s) return null;
     const first = s.split(/\s+/)[0];
     const name = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
-    // Reject garbage / non-name tokens.
+    // Must start with a letter, only letters + a stray apostrophe/hyphen, 2-20 chars...
     if (!/^[A-Za-z][A-Za-z'’-]{1,19}$/.test(name)) return null;
+    // ...and contain at least 2 actual letters (rejects "O'" / "A-" / punctuation runs).
+    if (name.replace(/[^A-Za-z]/g, "").length < 2) return null;
     return name;
   }
 
@@ -2040,7 +2042,7 @@ export class ComedianBrain {
   private _maybeInjectName(text: string): string {
     const name = this.knownName;
     if (!name) return text;
-    if (Math.random() > 0.45) return text;
+    if (Math.random() > COMEDIAN_CONFIG.rapidFireNameInjectionChance) return text;
     if (text.toLowerCase().includes(name.toLowerCase())) return text;
     if (/\?\s*$/.test(text)) return text.replace(/\s*\?+\s*$/, `, ${name}?`);
     if (/[.!]\s*$/.test(text)) return text.replace(/\s*[.!]+\s*$/, `, ${name}.`);
