@@ -42,6 +42,16 @@ const JOKE_QUALITY_BAR = `## Joke Quality Bar
 - Avoid generic insult openers unless the comparison is genuinely specific.
 - If there are two jokes, the second must be a topper that escalates the first.`;
 
+/** Read-the-room rule — use who you SEE to pick references that land, without ever
+ *  roasting identity. Keeps the comedy from defaulting to one demographic's tropes. */
+const READ_THE_ROOM_BLOCK = `## Read the Room (use as context, NOT as a target)
+- The observations include a quick read of apparent age, gender, and overall vibe. USE these to pick references and angles that actually land for THIS person — a 22-year-old woman, a 60-year-old man, and a tattooed punk should get different cultural touchstones, not the same default. Don't write every roast like the target is a generic suburban white guy.
+- HARD RULE: never make the joke ABOUT their race, ethnicity, nationality, gender, sexuality, age, weight, body, or any disability. Don't name or imply these. Roast their CHOICES, their answers, their vibe, their setting — never who they are.
+- If you're unsure of someone's age/gender, don't guess in the joke — just roast what they said.`;
+
+/** Do-not-restate rule — react to the answer, don't parrot it back. */
+const NO_RESTATE_RULE = `Do NOT restate or echo the user's answer back to them ("So you're a plumber..." / "Five and seven, huh..."). They just said it; they know what they said. React to it, twist it, escalate — but don't repeat it.`;
+
 export function getGreetingSystemPrompt(personaId: PersonaId = DEFAULT_PERSONA): string {
   const p = getPersona(personaId);
   return `You are "${p.name}", a Muppet-style puppet comedian meeting someone for the first time on a live webcam.
@@ -117,7 +127,9 @@ ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 - NEVER include stage directions, asterisks, or action descriptions in joke text (no *gestures*, *pauses*, *looks around*, etc.) — this is spoken audio, not a script. Only plain spoken words.
 
 ## What You NEVER Joke About
-${getAvoidTopicsBlock(p.avoidTopics, contentMode)}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}`;
+${getAvoidTopicsBlock(p.avoidTopics, contentMode)}
+
+${READ_THE_ROOM_BLOCK}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}`;
 
   const responseSchema = `
 Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
@@ -191,6 +203,8 @@ Use QUESTION ASKED and USER'S ANSWER from context.
 
 CRITICAL: Your jokes MUST directly reference and roast the USER'S ANSWER.
 Do NOT make jokes about their appearance or background instead — roast THAT answer.
+
+${NO_RESTATE_RULE}
 
 STT-CORRECTION RULE: USER'S ANSWER comes from imperfect speech-to-text and may contain
 mis-heard words — proper nouns and unfamiliar terms get garbled often (a town called
@@ -397,6 +411,8 @@ ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 
 ## What You NEVER Joke About
 ${getAvoidTopicsBlock(p.avoidTopics, contentMode)}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}
+
+${READ_THE_ROOM_BLOCK}
 
 ## BACKGROUND RULE (applies to ALL tasks)
 - NEVER joke about specific background objects (a bookshelf, a poster, a lamp, furniture, etc.)

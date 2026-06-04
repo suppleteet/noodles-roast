@@ -1,175 +1,169 @@
 /**
  * Question bank for Rapid Fire flow mode.
  *
- * Different from QUESTION_BANK in src/lib/questionBank.ts:
- * - Questions take BINARY or VERY-SHORT-ANSWER responses (yes/no, single
- *   word, or A/B choice). This is what makes speculative pre-generation work
- *   — the brain can ask the LLM to produce a joke per likely answer BEFORE
- *   the user answers, and pick the right one when STT lands.
- * - Each entry (except "name") carries `expectedAnswers` — the keys the
- *   speculative pre-gen produces jokes for. Fuzzy-matched against the actual
- *   STT.
+ * VOICE: blunt, simple, like a grumpy old person firing off quick questions —
+ * NOT clever or wordy. "And how old are you?" / "You got any kids?" — plain.
+ * Keep them short; the burst joke does the comedy, the questions just gather facts.
  *
- * Conversation shape:
- *   name → quick_opener → BURST → next_question → BURST → next_question → ...
+ * Flow: an instant canned opener (see RAPID_FIRE_OPENERS in scriptLines.ts) both
+ * greets AND asks the name, so the first answer is the name. After that the brain
+ * collects a couple answers behind quick acks, then drops a combined joke burst —
+ * see comedianBrain.ts. The "name" entry below still exists because the opener is
+ * tracked as the name question.
  *
- * The "name" question goes first; one of the openers (single/kids/
- * live_alone) is Q2; the rest of the bank shuffles into the rotation.
+ * `excludes`: if a question is asked, the listed ids are dropped from the session —
+ * keeps the puppet from asking "you single?" right after they mention a spouse.
  *
- * Note: this uses the same ComedyQuestion type as the Original bank — the
- * brain treats both uniformly. The flow difference is in the brain's
- * delivery cadence, not in the question shape.
+ * Same ComedyQuestion type as the Original bank.
  */
 
 import type { ComedyQuestion } from "@/lib/questionBank";
-
-/**
- * Questions that work as Q2 (right after name). Lower stakes, sets tone.
- * Brain picks one of these for the Q2 slot; the rest of the bank rotates
- * in afterwards.
- */
-export const RAPID_FIRE_OPENER_IDS = ["single", "kids", "live_alone"] as const;
 
 export const RAPID_FIRE_QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "name",
     question: "Who am I talking to?",
     vulgarQuestions: [
-      "What's your name?",
       "Who the hell are you?",
-      "Name.",
+      "What's your name?",
+      "Who's this, then?",
     ],
-    // No expectedAnswers — names are open-ended; brain falls back to standard gen.
-    jokeContext: "React to the name with a sharp one-liner — pun, association, or what the name implies.",
+    jokeContext: "React to the name — pun, association, or what the name implies.",
     prodLines: [
-      "It's your name. Two seconds max.",
+      "It's your name. Come on.",
       "Hello? Name?",
     ],
   },
   {
-    id: "single",
-    question: "Single?",
+    id: "age",
+    question: "And how old are you?",
     vulgarQuestions: [
-      "You single? Or did someone actually agree to this?",
-      "Got a partner, or are you flying solo?",
+      "How old are you, anyway?",
+      "What are you, age-wise?",
     ],
-    expectedAnswers: ["yes", "no", "it's complicated"],
-    jokeContext: "Single = roast the solitude. Taken = roast their partner's poor judgment. Complicated = roast the chaos.",
+    jokeContext: "Roast the age — too old to be doing this, too young to know better, whatever fits.",
     prodLines: [
-      "Yes or no. It's one of two answers.",
-      "Single. Taken. Complicated. Pick one.",
+      "A number. Any number.",
+      "How old? Don't lie, I can tell.",
+    ],
+  },
+  {
+    id: "job",
+    question: "What do you do for work?",
+    vulgarQuestions: [
+      "What the hell do you do for money?",
+      "What's the job, then?",
+    ],
+    jokeContext: "Roast the profession — what the job says about them.",
+    prodLines: [
+      "Your job. What is it?",
+      "You do something, right?",
+    ],
+  },
+  {
+    id: "where_from",
+    question: "Where do you live?",
+    vulgarQuestions: [
+      "Where the hell do you live?",
+      "Where you out of?",
+    ],
+    jokeContext: "Roast the place — stereotypes, what living there says about them.",
+    prodLines: [
+      "A town. A city. Anything.",
+      "Where do you live? One word.",
+    ],
+  },
+  {
+    id: "single",
+    question: "You married, or single?",
+    vulgarQuestions: [
+      "You got a husband or wife, or nobody?",
+      "Married? Single? What's the story?",
+    ],
+    excludes: ["live_alone"],
+    jokeContext: "Single = roast the solitude. Married/taken = roast the partner's judgment.",
+    prodLines: [
+      "Married or single. Pick one.",
+      "Anyone in the picture?",
     ],
   },
   {
     id: "kids",
-    question: "Got kids?",
+    question: "You got any kids?",
     vulgarQuestions: [
-      "You got kids running around, or did you dodge that bullet?",
-      "Tell me you don't have kids. Tell me.",
+      "You got kids, or no?",
+      "Any kids running around?",
     ],
-    expectedAnswers: ["yes", "no"],
-    jokeContext: "Yes = roast the parental exhaustion / poor life choices. No = roast the freedom they're squandering on this.",
+    jokeContext: "Yes = roast the parental exhaustion. No = roast the freedom they're wasting on this.",
     prodLines: [
-      "Yes or no. Surely you'd remember.",
-      "It's a binary. Pick one.",
+      "Yes or no.",
+      "Kids? Yes or no?",
     ],
   },
   {
     id: "live_alone",
-    question: "Live alone?",
+    question: "You live by yourself?",
     vulgarQuestions: [
-      "You live alone, or is someone putting up with you?",
-      "Anyone share that disaster zone with you?",
+      "You live alone, or with somebody?",
+      "Anybody live with you?",
     ],
-    expectedAnswers: ["yes", "no", "with parents", "with roommates"],
-    jokeContext: "Alone = roast the silence. With others = roast their tolerance. Parents = roast the regression.",
+    excludes: ["single"],
+    jokeContext: "Alone = roast the silence. With others = roast their tolerance.",
     prodLines: [
-      "Yes, no, or 'with someone.' Pick one.",
-      "Who's stuck living with you?",
+      "Alone, or with someone?",
+      "Who's at home with you?",
     ],
   },
   {
     id: "coffee_tea",
     question: "Coffee or tea?",
     vulgarQuestions: [
-      "Coffee or tea? Don't say neither, you weirdo.",
-      "What gets you through the day — coffee, tea, or denial?",
+      "Coffee or tea? Don't say neither.",
+      "Coffee, tea — which is it?",
     ],
-    expectedAnswers: ["coffee", "tea", "neither"],
-    jokeContext: "Coffee = caffeinated-disaster energy. Tea = trying-to-seem-sophisticated. Neither = humblebrag.",
+    jokeContext: "Coffee = wired disaster. Tea = trying to seem fancy. Neither = humblebrag.",
     prodLines: [
-      "It's two options. Three if you're being difficult.",
       "Coffee. Tea. Pick.",
+      "One or the other.",
     ],
   },
   {
     id: "morning_night",
-    question: "Morning person or night owl?",
+    question: "You a morning person?",
     vulgarQuestions: [
-      "Morning person or insomniac?",
-      "Up at dawn or up till dawn?",
+      "Morning person, or up all night?",
+      "Early bird, or no?",
     ],
-    expectedAnswers: ["morning", "night"],
-    jokeContext: "Morning = annoyingly chipper. Night owl = lifestyle = falling apart but romantically.",
+    jokeContext: "Morning = annoyingly chipper. Night = falling apart but romantically.",
     prodLines: [
-      "Morning. Night. Easy.",
-      "Pick a side.",
-    ],
-  },
-  {
-    id: "mountains_beach",
-    question: "Mountains or beach?",
-    vulgarQuestions: [
-      "Mountains, beach, or 'just the couch'?",
-      "Outdoors-disaster — mountains or beach?",
-    ],
-    expectedAnswers: ["mountains", "beach", "city"],
-    jokeContext: "Mountains = trying-too-hard-to-seem-rugged. Beach = trying-too-hard-to-seem-relaxed. City = honest at least.",
-    prodLines: [
-      "Mountains. Beach. Pick.",
-      "Either one. I'm roasting both.",
+      "Yes or no.",
+      "Morning person or not?",
     ],
   },
   {
     id: "gym_couch",
-    question: "Gym or couch?",
+    question: "You go to the gym, or no?",
     vulgarQuestions: [
-      "Gym rat or couch potato?",
-      "Honest — gym or couch?",
+      "Gym, or the couch?",
+      "You work out, or who're we kidding?",
     ],
-    expectedAnswers: ["gym", "couch", "in between"],
-    jokeContext: "Gym = annoyingly disciplined. Couch = honest at least. In-between = aspirational liar.",
+    jokeContext: "Gym = annoyingly disciplined. Couch = honest at least.",
     prodLines: [
-      "Gym, couch — easy.",
-      "Lying to me doesn't make it real.",
-    ],
-  },
-  {
-    id: "text_call",
-    question: "Text or call?",
-    vulgarQuestions: [
-      "Text or call? Don't say it depends, that's not an answer.",
-      "Text or actually pick up the goddamn phone?",
-    ],
-    expectedAnswers: ["text", "call"],
-    jokeContext: "Text = avoidant. Call = chaotic-extrovert. Both reveal character.",
-    prodLines: [
-      "Text or call. One word.",
-      "It's binary.",
+      "Gym or couch. Easy.",
+      "Lying won't make it true.",
     ],
   },
   {
     id: "cook_takeout",
-    question: "Cook at home or takeout?",
+    question: "You cook, or order in?",
     vulgarQuestions: [
-      "Cook or just call DoorDash like the rest of us?",
-      "Home-cooked or 'I don't even know where my oven is'?",
+      "You cook, or just call DoorDash?",
+      "Home-cooked, or you can't find the oven?",
     ],
-    expectedAnswers: ["cook", "takeout", "both"],
     jokeContext: "Cook = trying. Takeout = honest. Both = liar.",
     prodLines: [
       "Cook or takeout. Pick.",
-      "It's one or the other.",
+      "One or the other.",
     ],
   },
 ];

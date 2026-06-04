@@ -8,40 +8,47 @@ import {
 } from "@/lib/mediaRecorderSupport";
 
 describe("mediaRecorderSupport", () => {
-  it("prefers the first supported format", () => {
-    const format = chooseRecorderFormat((mime) => mime === "video/webm;codecs=vp8,opus");
-    expect(format.mimeType).toBe("video/webm;codecs=vp8,opus");
-    expect(format.extension).toBe("webm");
+  it("picks the first supported MP4 candidate", () => {
+    const format = chooseRecorderFormat((mime) => mime === "video/mp4");
+    expect(format?.mimeType).toBe("video/mp4");
+    expect(format?.extension).toBe("mp4");
   });
 
-  it("falls back to basic webm when support probing fails", () => {
-    const format = chooseRecorderFormat(() => {
-      throw new Error("probe failed");
-    });
-    expect(format.mimeType).toBe("video/webm");
+  it("returns null when no MP4 candidate is supported", () => {
+    expect(chooseRecorderFormat(() => false)).toBeNull();
   });
 
-  it("derives extension from mime type", () => {
+  it("returns null when support probing throws", () => {
+    expect(
+      chooseRecorderFormat(() => {
+        throw new Error("probe failed");
+      }),
+    ).toBeNull();
+  });
+
+  it("always returns mp4 as the extension (mp4-only flow)", () => {
     expect(extensionForMimeType("video/mp4;codecs=h264,aac")).toBe("mp4");
-    expect(extensionForMimeType("video/webm;codecs=vp9,opus")).toBe("webm");
-    expect(extensionForMimeType(null)).toBe("webm");
+    expect(extensionForMimeType("video/webm;codecs=vp9,opus")).toBe("mp4");
+    expect(extensionForMimeType(null)).toBe("mp4");
   });
 
-  it("derives response content type from filename", () => {
+  it("always returns video/mp4 as the response content type", () => {
     expect(contentTypeForVideoFilename("clip.mp4")).toBe("video/mp4");
-    expect(contentTypeForVideoFilename("clip.webm")).toBe("video/webm");
+    expect(contentTypeForVideoFilename("clip.webm")).toBe("video/mp4");
   });
 
-  it("rejects unsafe video filenames", () => {
+  it("rejects non-mp4 and unsafe video filenames", () => {
     expect(isSafeVideoFilename("roast.mp4")).toBe(true);
-    expect(isSafeVideoFilename("roast.webm")).toBe(true);
+    expect(isSafeVideoFilename("roast.webm")).toBe(false);
     expect(isSafeVideoFilename("../roast.mp4")).toBe(false);
     expect(isSafeVideoFilename("nested/roast.mp4")).toBe(false);
     expect(isSafeVideoFilename("notes.txt")).toBe(false);
   });
 
-  it("keeps recommended bitrate inside practical bounds", () => {
-    expect(recommendedVideoBitsPerSecond(720, 720, 30)).toBeGreaterThanOrEqual(2_000_000);
-    expect(recommendedVideoBitsPerSecond(3840, 2160, 60)).toBeLessThanOrEqual(5_500_000);
+  it("recommended bitrate targets ~10 MB per ~3-min session", () => {
+    expect(recommendedVideoBitsPerSecond(720, 720, 30)).toBeGreaterThanOrEqual(350_000);
+    expect(recommendedVideoBitsPerSecond(720, 720, 30)).toBeLessThanOrEqual(700_000);
+    expect(recommendedVideoBitsPerSecond(3840, 2160, 60)).toBeLessThanOrEqual(700_000);
+    expect(recommendedVideoBitsPerSecond(160, 160, 15)).toBeGreaterThanOrEqual(350_000);
   });
 });

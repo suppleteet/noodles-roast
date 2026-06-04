@@ -35,6 +35,8 @@ import {
   ECHO_FILLER_TEMPLATES,
   ECHO_FILLER_PROBABILITY,
   RAPID_FIRE_ACKS,
+  RAPID_FIRE_OPENERS,
+  RAPID_FIRE_OPENERS_VULGAR,
   QUESTION_BRIDGES,
   CONFIRM_DENIED_LINE,
   ANSWER_FALLBACK_ROASTS,
@@ -363,6 +365,17 @@ export class ComedianBrain {
    *  until the burst is full (rapidFireBurstSize) — then one joke burst ties them together. */
   private rapidFireBurst: Array<{ question: string; answer: string }> = [];
 
+  /** Rapid Fire: the user's name once captured (from the opener answer), used to occasionally
+   *  personalize later questions ("Are you single, Tyler?"). Null until they say it. */
+  private knownName: string | null = null;
+
+  /** Rapid Fire: the instant opener doubles as the name question, so greeting advances
+   *  straight to wait_answer instead of asking a separate name question. */
+  private rapidFireOpenerIsNameAsk = false;
+
+  /** Rapid Fire: toggles each burst so vision jokes alternate with question bursts. */
+  private rapidFireVisionJokeTurn = false;
+
   /** Watchdog: fires if joke generation produces no joke within generationTimeoutMs.
    *  Aborts the hung request and delivers a canned fallback so the puppet never sits
    *  silent in "generating" forever (e.g. when generate-speak / Gemini hangs). */
@@ -438,6 +451,9 @@ export class ComedianBrain {
     this.ledger = [];
     this.jokeHopper = [];
     this.rapidFireBurst = [];
+    this.knownName = null;
+    this.rapidFireOpenerIsNameAsk = false;
+    this.rapidFireVisionJokeTurn = false;
     this.transitionCount = 0;
     this.consecutiveSilentQuestions = 0;
     this.visionOnlyMode = false;
@@ -1078,6 +1094,30 @@ export class ComedianBrain {
 
     this.deps.setMotion("thinking", 0.6);
 
+    // Rapid Fire: skip the vision-dependent greeting joke entirely. Speak an INSTANT canned
+    // opener that doubles as the name question — no LLM, no waiting on the camera — so TTFS is
+    // just the TTS round-trip (~1s instead of ~10s). Vision analysis keeps running in the
+    // background and feeds the interleaved vision jokes that come later.
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      const vulgar = this.deps.getContentMode() === "vulgar";
+      const openers = vulgar ? RAPID_FIRE_OPENERS_VULGAR : RAPID_FIRE_OPENERS;
+      const opener = openers[Math.floor(Math.random() * openers.length)];
+      const nameQ = this.shuffledQuestions.find((q) => q.id === "name") ?? this.shuffledQuestions[0];
+      if (nameQ) {
+        this.currentQuestion = nameQ;
+        this.askedQuestionIds.add(nameQ.id);
+      }
+      this.deps.queueSpeak(opener, "energetic", 0.8);
+      this.deps.setCurrentQuestion(opener);
+      this._addLedger("question", opener, []);
+      this.deps.setMotion("energetic", 0.8);
+      this.greetingSpeechQueued = true;
+      this.rapidFireOpenerIsNameAsk = true; // opener already asked the name → go to wait_answer
+      this.deps.logTiming("brain: rapid fire instant opener (no vision wait)");
+      this._maybeAdvanceFromGreeting();
+      return;
+    }
+
     // Use prefetched greeting if available (fired during Gemini Live connect to save time),
     // otherwise generate fresh.
     if (this.deps.prefetchedGreeting) {
@@ -1164,6 +1204,13 @@ export class ComedianBrain {
     // Need both: generation resolved + TTS played through
     if (this.greetingSpeechQueued && this.greetingTtsDrained) {
       this.visionJokePrefetch = null;
+      if (this.rapidFireOpenerIsNameAsk) {
+        // The instant opener already asked the name — listen for it directly instead of
+        // asking a separate name question.
+        this.rapidFireOpenerIsNameAsk = false;
+        this.enterWaitAnswer();
+        return;
+      }
       this.enterAskQuestion();
     }
   }
@@ -1895,6 +1942,14 @@ export class ComedianBrain {
    */
   private _handleRapidFireAnswer(answer: string): void {
     const question = this.currentQuestion?.question ?? "";
+    // Capture the name from the opener answer so later questions can use it.
+    if (this.currentQuestion?.id === "name" && !this.knownName) {
+      const name = ComedianBrain._extractName(answer);
+      if (name) {
+        this.knownName = name;
+        this.deps.logTiming(`brain: rapid fire captured name "${name}"`);
+      }
+    }
     this.rapidFireBurst.push({ question, answer });
     this._addLedger("answer", answer, []);
 
@@ -1962,6 +2017,34 @@ export class ComedianBrain {
     this.deps.logTiming(`brain: rapid fire burst (${burst.length} answers) — generating`);
     // q = null: no single "QUESTION ASKED" — the combined recap carries all the context.
     this._generateAndDeliver(combinedAnswer, null, this._getLedgerContext(), fillerAlreadySaid);
+  }
+
+  /** Pull a usable first name out of a freeform answer ("My name's Tyler" → "Tyler").
+   *  Returns null if nothing name-shaped is found. */
+  private static _extractName(answer: string): string | null {
+    let s = answer.trim().replace(/[.?!,]+$/g, "").trim();
+    s = s.replace(
+      /^(my name'?s?\s+is\s+|my name'?s\s+|i'?m\s+|i am\s+|it'?s\s+|this is\s+|name'?s\s+|the name'?s\s+|call me\s+)/i,
+      "",
+    ).trim();
+    if (!s) return null;
+    const first = s.split(/\s+/)[0];
+    const name = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+    // Reject garbage / non-name tokens.
+    if (!/^[A-Za-z][A-Za-z'’-]{1,19}$/.test(name)) return null;
+    return name;
+  }
+
+  /** Rapid Fire: occasionally personalize a question with the user's name
+   *  ("Are you single?" → "Are you single, Tyler?"). No-op until the name is known. */
+  private _maybeInjectName(text: string): string {
+    const name = this.knownName;
+    if (!name) return text;
+    if (Math.random() > 0.45) return text;
+    if (text.toLowerCase().includes(name.toLowerCase())) return text;
+    if (/\?\s*$/.test(text)) return text.replace(/\s*\?+\s*$/, `, ${name}?`);
+    if (/[.!]\s*$/.test(text)) return text.replace(/\s*[.!]+\s*$/, `, ${name}.`);
+    return `${text}, ${name}`;
   }
 
   /** Non-mutating check: are there bank questions left to ask? Mirrors _nextValidQuestion's
@@ -2372,11 +2455,13 @@ export class ComedianBrain {
     this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
 
     // Rapid Fire: skip rephrase entirely — questions are already short and punchy;
-    // rephrase only adds latency and makes them longer.
+    // rephrase only adds latency and makes them longer. Occasionally drop the user's
+    // name in ("Are you single, Tyler?").
     if (this.deps.getFlowMode() === "rapid_fire") {
-      this.deps.queueSpeak(questionText, "emphasis", 0.6);
-      this.deps.setCurrentQuestion(questionText);
-      this._addLedger("question", questionText, []);
+      const spoken = this._maybeInjectName(questionText);
+      this.deps.queueSpeak(spoken, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(spoken);
+      this._addLedger("question", spoken, []);
       this.deps.logTiming("brain: rapid fire — skipping rephrase");
       return;
     }
@@ -2533,8 +2618,8 @@ export class ComedianBrain {
     this.preQueuedRephrasedText = null;
     if (isRapidFire) {
       // Skip rephrase — questions are already short; set text directly so enterAskQuestion
-      // picks it up from the pre-queue as-is without an extra LLM round-trip.
-      this.preQueuedRephrasedText = this._pickQuestionText(nextQ);
+      // picks it up from the pre-queue as-is. Occasionally personalize with the name.
+      this.preQueuedRephrasedText = this._maybeInjectName(this._pickQuestionText(nextQ));
       this.deps.logTiming(`brain: rapid fire pre-queue — "${nextQ.id}" (no rephrase)`);
     } else {
       this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
@@ -2700,11 +2785,26 @@ export class ComedianBrain {
     // delivery), skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
     // the answer's roast and the next question. Vision interrupt still fires
     // when there's nothing queued — see refresh of previousObservations below.
+    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
     const hasQueuedNext = !!this.preQueuedQuestion;
     if (hasQueuedNext) {
+      const current = this.deps.getObservations();
+      // Rapid Fire: alternate a vision joke between question bursts. On the "vision turn"
+      // we deliver a vision joke now and KEEP the pre-queued question — when the vision
+      // joke drains, vision_react → enterAskQuestion asks it. Gives a vision/Q&A mix
+      // instead of pure Q&A.
+      if (isRapidFire && this.rapidFireVisionJokeTurn && this.cameraAvailable && current.length > 0) {
+        this.rapidFireVisionJokeTurn = false;
+        const old = [...this.previousObservations];
+        this.previousObservations = [...current];
+        this.pendingVisionInterrupt = null;
+        this.deps.logTiming("brain: rapid fire — vision joke between bursts");
+        this.enterVisionReact(current, current, old);
+        return;
+      }
+      if (isRapidFire) this.rapidFireVisionJokeTurn = true; // next burst gets a vision joke
       // Refresh observation baseline so the next genuine vision_react isn't
       // triggered by changes we deliberately skipped.
-      const current = this.deps.getObservations();
       if (this.cameraAvailable && current.length > 0) {
         this.previousObservations = [...current];
       }

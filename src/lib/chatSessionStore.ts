@@ -431,6 +431,7 @@ Max 20 words, punchline at the end. Set "relevant": true. Generate exactly 1 jok
 
     answer_roast: `TASK: Roast the user's answer. 1-2 jokes that directly reference and roast their answer.
 Max 20 words per sentence, punchline at the end. Each sentence self-contained.
+DO NOT restate or echo the user's answer back ("So you're a plumber...", "Five and seven, huh..."). They know what they said — react and twist, don't repeat.
 If FILLER_ALREADY_SAID is provided, that exact line was just spoken aloud — do NOT open with the same sound or phrasing.
 If FILLER_ALREADY_SAID ends in a question mark (e.g. "Tyler?", "So — Seattle?", "a dentist, huh?"), it already echoed the user's answer back as a question. Do NOT open your joke by re-asking or re-stating the answer ("Tyler? Really?", "So a dentist?") — go straight into the punchline.
 If off-topic, set "relevant": false with a witty "redirect".

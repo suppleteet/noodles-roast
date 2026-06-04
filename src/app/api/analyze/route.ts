@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
             parts: [
               { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
               { text: `Return a JSON object with two fields:
-- "person": array of 3-5 short observations (2-5 words each) about the person — expression, mood, posture, actions, hand gestures, accessories.
+- "person": array of 4-7 short observations (2-5 words each) about the person. ALWAYS include, near the front, a quick read of: apparent age range (e.g. "looks early 20s", "40s-ish", "older, maybe 60s"), apparent gender presentation (e.g. "man", "woman"), and overall build/style/vibe (e.g. "heavyset", "gym-build", "preppy", "punk", "corporate", "crunchy/granola"). Then expression, mood, posture, actions, accessories. These reads are for the comedian to tailor references to the right person — describe plainly, do not editorialize.
 - "setting": a short confident guess about where they are based on the background (e.g. "home office", "bedroom", "kitchen", "car", "coffee shop"). If the background is too blurry or generic to tell, use null.
-Example: {"person":["smirking","leaning back","wearing headphones"],"setting":"home office"}
+Example: {"person":["man, 30s","gym build","wearing a backwards cap","smirking","leaning back"],"setting":"home office"}
 Keep it compact. Return ONLY the JSON object.` },
             ],
           },

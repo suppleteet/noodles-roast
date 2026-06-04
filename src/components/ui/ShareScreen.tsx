@@ -4,11 +4,6 @@ import { useSessionStore } from "@/store/useSessionStore";
 import FeedbackBox from "@/components/ui/FeedbackBox";
 import { useDevUnlock } from "@/lib/devUnlock";
 
-// Tyler's public Drive folder for roast collection. Must be shared as
-// "Anyone with the link → Editor" so visitors can upload.
-const TYLER_DRIVE_FOLDER_URL =
-  "https://drive.google.com/drive/folders/1W5-3ciAzFXeLJ1GEF3jz6it3lvD52LUP";
-
 interface SaveVideoResponse {
   folder?: string;
   filename?: string;
@@ -18,9 +13,14 @@ interface SaveVideoResponse {
   error?: string;
 }
 
-function preferredFilename(filename: string | null, blob: Blob | null): string {
-  if (filename) return filename;
-  return blob?.type === "video/mp4" ? "roastie.mp4" : "roastie.webm";
+type UploadState =
+  | { status: "idle" }
+  | { status: "uploading"; uploadedBytes: number; totalBytes: number }
+  | { status: "complete"; webViewLink: string }
+  | { status: "error"; message: string };
+
+function preferredFilename(filename: string | null, _blob: Blob | null): string {
+  return filename ?? "roastie.mp4";
 }
 
 /** Build the last-N lines of the conversation as role-prefixed text for /api/name-video. */
@@ -47,6 +47,8 @@ export default function ShareScreen() {
   const [savedFolder, setSavedFolder] = useState<string | null>(null);
   const [savedFilename, setSavedFilename] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" });
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const savedBlobRef = useRef<Blob | null>(null);
 
@@ -85,10 +87,15 @@ export default function ShareScreen() {
         const transcript = buildTranscriptForNaming(useSessionStore.getState().transcriptHistory);
         let suggestedName: string | null = null;
         try {
+          // Pass the user's selected roast model so name-video honors the
+          // model fallback. Without this, the route falls back to ROAST_MODEL
+          // (gemini-3.5-flash) which 503s when 3.5 is overloaded, and the
+          // share UI ends up with the timestamp fallback name.
+          const roastModel = useSessionStore.getState().roastModel;
           const nameResp = await fetch("/api/name-video", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transcript }),
+            body: JSON.stringify({ transcript, model: roastModel }),
           });
           if (nameResp.ok) {
             const data = (await nameResp.json().catch(() => ({}))) as { filename?: string };
@@ -103,7 +110,7 @@ export default function ShareScreen() {
           : "/api/save-video";
         const saveResp = await fetch(saveUrl, {
           method: "POST",
-          headers: { "Content-Type": recordedBlob.type || "video/webm" },
+          headers: { "Content-Type": "video/mp4" },
           body: recordedBlob,
         });
         const data = (await saveResp.json().catch(() => ({}))) as SaveVideoResponse;
@@ -171,6 +178,20 @@ export default function ShareScreen() {
   }
 
   function handleDownload() {
+    // Server-served URL with Content-Disposition: attachment is the only
+    // reliable way to control the saved filename on mobile — Safari iOS and
+    // Android Chrome both ignore <a download="..."> with a blob: URL and fall
+    // back to "blob" or some default. Fall back to the blob path only if the
+    // server save hasn't completed yet (rare — only if the user clicks while
+    // the auto-save is still in flight).
+    if (savedFilename) {
+      const url = `/api/serve-video?filename=${encodeURIComponent(savedFilename)}&download=1`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = savedFilename;
+      a.click();
+      return;
+    }
     if (!shareBlob) return;
     const url = URL.createObjectURL(shareBlob);
     const a = document.createElement("a");
@@ -180,18 +201,70 @@ export default function ShareScreen() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function handleSendToTyler() {
-    if (!shareBlob) return;
-    // Kick off the download first so the file is in the user's Downloads
-    // folder by the time the Drive tab steals focus. Then open Tyler's
-    // shared folder so they can upload the just-downloaded file.
-    const url = URL.createObjectURL(shareBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = shareFilename;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-    window.open(TYLER_DRIVE_FOLDER_URL, "_blank", "noopener,noreferrer");
+  async function handleSendToTyler() {
+    if (!savedFilename) return;
+    if (uploadAbortRef.current) uploadAbortRef.current.abort();
+    const abort = new AbortController();
+    uploadAbortRef.current = abort;
+    setUploadState({ status: "uploading", uploadedBytes: 0, totalBytes: 0 });
+
+    try {
+      const resp = await fetch("/api/upload-to-drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: savedFilename }),
+        signal: abort.signal,
+      });
+      if (!resp.ok || !resp.body) {
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? `upload failed (${resp.status})`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuf += decoder.decode(value, { stream: true });
+        const lines = sseBuf.split("\n");
+        sseBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let event: { type: string; uploadedBytes?: number; totalBytes?: number; webViewLink?: string; message?: string };
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (event.type === "progress") {
+            setUploadState({
+              status: "uploading",
+              uploadedBytes: event.uploadedBytes ?? 0,
+              totalBytes: event.totalBytes ?? 0,
+            });
+          } else if (event.type === "complete" && event.webViewLink) {
+            setUploadState({ status: "complete", webViewLink: event.webViewLink });
+          } else if (event.type === "error") {
+            setUploadState({ status: "error", message: event.message ?? "Upload failed" });
+          }
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      console.warn("[share] upload failed:", e);
+      setUploadState({
+        status: "error",
+        message: e instanceof Error ? e.message : "Upload failed",
+      });
+    }
+  }
+
+  function closeUploadModal() {
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    setUploadState({ status: "idle" });
   }
 
   function handleOpenFolder() {
@@ -261,8 +334,8 @@ export default function ShareScreen() {
         </button>
         <button
           onClick={handleSendToTyler}
-          disabled={buttonsDisabled}
-          title="Downloads the video + opens Tyler's Drive folder so you can drop it in"
+          disabled={buttonsDisabled || !savedFilename || uploadState.status === "uploading"}
+          title="Upload this video to Tyler's Drive folder"
           className="rounded-xl bg-purple-600 px-6 py-3 font-black transition-all hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-purple-600"
         >
           Send to Tyler
@@ -313,6 +386,97 @@ export default function ShareScreen() {
           </div>
         </div>
       )}
+
+      {uploadState.status !== "idle" && (
+        <UploadProgressModal state={uploadState} onClose={closeUploadModal} />
+      )}
     </div>
   );
+}
+
+function UploadProgressModal({
+  state,
+  onClose,
+}: {
+  state: Exclude<UploadState, { status: "idle" }>;
+  onClose: () => void;
+}) {
+  const percent = (() => {
+    if (state.status === "complete") return 100;
+    if (state.status === "error") return 0;
+    if (state.totalBytes === 0) return 0;
+    return Math.min(100, Math.round((state.uploadedBytes / state.totalBytes) * 100));
+  })();
+  const sizeLabel = state.status === "uploading"
+    ? `${formatBytes(state.uploadedBytes)} / ${formatBytes(state.totalBytes)}`
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-gray-950 p-6 text-left shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold">
+            {state.status === "uploading" && "Sending to Tyler…"}
+            {state.status === "complete" && "Upload complete"}
+            {state.status === "error" && "Upload failed"}
+          </h2>
+          {state.status !== "uploading" && (
+            <button
+              onClick={onClose}
+              className="text-xl leading-none text-white/40 hover:text-white"
+              aria-label="Close"
+            >
+              x
+            </button>
+          )}
+        </div>
+
+        <div className="mb-3 h-3 w-full overflow-hidden rounded-full bg-white/10">
+          <div
+            className={`h-full transition-all duration-200 ${
+              state.status === "error" ? "bg-red-500" : "bg-purple-500"
+            }`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+
+        <div className="mb-5 flex items-baseline justify-between text-xs text-white/60">
+          <span>
+            {state.status === "uploading" && sizeLabel}
+            {state.status === "complete" && "Saved to Tyler's Drive folder."}
+            {state.status === "error" && state.message}
+          </span>
+          <span className="font-mono text-white/40">{percent}%</span>
+        </div>
+
+        {state.status === "complete" && (
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-orange-600 px-6 py-3 font-black transition-all hover:bg-orange-500"
+          >
+            Close
+          </button>
+        )}
+        {state.status === "error" && (
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-white/10 px-6 py-3 font-black transition-all hover:bg-white/20"
+          >
+            Close
+          </button>
+        )}
+        {state.status === "uploading" && (
+          <p className="text-center text-xs text-white/40">
+            Don&apos;t close this window — hang tight.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

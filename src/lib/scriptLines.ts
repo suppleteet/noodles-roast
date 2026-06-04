@@ -55,6 +55,27 @@ export const RAPID_FIRE_ACKS = [
   "Got it.", "Okay.", "Nice.", "Mm-hm.", "Right.", "Sure.", "Noted.", "Alright.", "Love it.",
 ];
 
+// ─── Rapid Fire instant opener (doubles as the "name" question) ─────────────
+// Spoken the INSTANT the session starts — no LLM, no waiting on the camera — so
+// there's basically no dead air at the top. It both greets AND asks who they are,
+// so the first answer is treated as their name. Vision analysis runs in the
+// background meanwhile, feeding the vision jokes that come later.
+export const RAPID_FIRE_OPENERS = [
+  "Well, hello there. Who am I talking to over here?",
+  "Oh, look who it is. So who are you, then?",
+  "Alright, alright. Who is this?",
+  "Hello, hello. And who do we have here?",
+  "There you are. So who am I dealing with?",
+];
+
+export const RAPID_FIRE_OPENERS_VULGAR = [
+  "Well hello there. Who the hell is this I'm talking to?",
+  "Oh good. So who the hell are you, then?",
+  "Alright, who the hell am I talking to over there?",
+  "Well, look at this. Who the hell is this?",
+  "There you are. So who the hell are you?",
+];
+
 // ─── Bridges into the next question ─────────────────────────────────────────
 // A short lead-in spoken before a question so it doesn't feel abrupt.
 export const QUESTION_BRIDGES = [
@@ -120,13 +141,15 @@ export const GREETING_FALLBACK = "The camera took one look and requested hazard 
 /** Spoken if the LLM closing line fails to generate. */
 export const WRAPUP_FALLBACK = "And on that note, we're done here. Goodnight.";
 
-/** Spoken immediately on entering wrap-up, to cover the ~2-3s the closing line takes. */
+/** Spoken immediately on entering wrap-up, to cover the ~2-3s the closing line takes.
+ *  Kept NEUTRAL (not a goodbye) on purpose — the closing line itself is the sign-off,
+ *  so a "before I go..." bridge here would double up the goodbye. Just a short beat. */
 export const WRAPUP_BRIDGES = [
-  "Alright, alright, before I go —",
-  "Welllll, on that note —",
-  "Anyway, one last thing —",
-  "Okay, last word and I'm out —",
-  "Right, before I peace out —",
+  "Okay.",
+  "So.",
+  "Right then.",
+  "Anyway.",
+  "Welp.",
 ];
 
 // ─── Contextual question fallbacks (Original flow, vision-based Q gen) ───────

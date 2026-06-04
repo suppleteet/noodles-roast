@@ -4,6 +4,7 @@ import { COMPOSITOR_SIZE } from "@/lib/constants";
 import {
   chooseRecorderFormat,
   recommendedVideoBitsPerSecond,
+  RECOMMENDED_AUDIO_BITS_PER_SECOND,
 } from "@/lib/mediaRecorderSupport";
 
 export interface VideoRecorderHandle {
@@ -15,7 +16,7 @@ export interface VideoRecorderHandle {
 const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_props, ref) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const mimeTypeRef = useRef("video/webm");
+  const mimeTypeRef = useRef("video/mp4");
 
   useImperativeHandle(ref, () => ({
     start(compositorStream: MediaStream, audioStream: MediaStream | null) {
@@ -33,6 +34,16 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
       }
       const combined = new MediaStream(tracks);
       const format = chooseRecorderFormat();
+      if (!format) {
+        // No MP4 candidate supported — surface a clear console error and bail
+        // rather than silently fall back to WebM (Vercel Hobby can't convert).
+        // isMp4RecordingSupported() should have gated the session before we
+        // ever got here.
+        console.error(
+          "[recorder] browser MediaRecorder does not support MP4 — recording aborted",
+        );
+        return;
+      }
       const videoBitsPerSecond = recommendedVideoBitsPerSecond(COMPOSITOR_SIZE, COMPOSITOR_SIZE);
 
       let recorder: MediaRecorder;
@@ -40,16 +51,12 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
         recorder = new MediaRecorder(combined, {
           mimeType: format.mimeType,
           videoBitsPerSecond,
-          audioBitsPerSecond: 128_000,
+          audioBitsPerSecond: RECOMMENDED_AUDIO_BITS_PER_SECOND,
         });
       } catch {
-        try {
-          recorder = new MediaRecorder(combined, { mimeType: format.mimeType });
-        } catch {
-          recorder = new MediaRecorder(combined, { mimeType: "video/webm" });
-        }
+        recorder = new MediaRecorder(combined, { mimeType: format.mimeType });
       }
-      mimeTypeRef.current = recorder.mimeType || format.mimeType || "video/webm";
+      mimeTypeRef.current = recorder.mimeType || format.mimeType;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
@@ -57,7 +64,7 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
       recorder.start(1000);
       recorderRef.current = recorder;
       console.info(
-        `[recorder] started mime=${mimeTypeRef.current} video=${videoTracks.length} audio=${audioTracks.length}`,
+        `[recorder] started mime=${mimeTypeRef.current} video=${videoTracks.length} audio=${audioTracks.length} vbps=${videoBitsPerSecond} abps=${RECOMMENDED_AUDIO_BITS_PER_SECOND}`,
       );
     },
 
@@ -73,7 +80,9 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
           if (settled) return;
           settled = true;
           recorderRef.current = null;
-          const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+          // Always tag the blob as video/mp4 — the recorder produces MP4 only
+          // and some browsers report an empty mimeType after stop().
+          const blob = new Blob(chunksRef.current, { type: "video/mp4" });
           console.info(`[recorder] stopped chunks=${chunksRef.current.length} size=${blob.size}`);
           resolve(blob);
         };

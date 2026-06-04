@@ -47,14 +47,24 @@ export async function GET(req: NextRequest) {
     void file.close().catch(() => {});
   });
 
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    "Content-Length": String(contentLength),
+    "Accept-Ranges": "bytes",
+  };
+  if (range) {
+    headers["Content-Range"] = `bytes ${start}-${end}/${fileSize}`;
+  }
+  // `?download=1` forces the browser to save as the cleverly-named filename
+  // instead of "blob"/"download.mp4". Mobile browsers (esp. Safari iOS) ignore
+  // the <a download="..."> attribute when the href is a blob: URL — using
+  // Content-Disposition is the only way to control the saved filename on
+  // those platforms.
+  if (req.nextUrl.searchParams.get("download") === "1") {
+    headers["Content-Disposition"] =
+      `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  }
+
   const body = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
-  return new NextResponse(body, {
-    status: range ? 206 : 200,
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(contentLength),
-      "Accept-Ranges": "bytes",
-      ...(range ? { "Content-Range": `bytes ${start}-${end}/${fileSize}` } : {}),
-    },
-  });
+  return new NextResponse(body, { status: range ? 206 : 200, headers });
 }

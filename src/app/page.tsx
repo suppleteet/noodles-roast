@@ -19,6 +19,7 @@ import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import { prefetchParallelVisionAndGreeting, prefetchGreetingAudio } from "@/lib/greetingPrefetch";
 import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
+import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
@@ -192,6 +193,16 @@ function MainApp() {
   }
 
   const handleStartSession = async () => {
+    // MP4-only flow — block the session if MediaRecorder can't produce MP4.
+    // No fallback to WebM since the server can't convert it (Vercel Hobby tier
+    // has no ffmpeg). Surface a clear message so the user knows to switch
+    // browsers rather than seeing the session fail silently after the roast.
+    if (!isMp4RecordingSupported()) {
+      setError(
+        "This browser can't record MP4. Please open Roastie in Chrome, Safari, or Edge.",
+      );
+      return;
+    }
     if (process.env.NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED === "true") {
       const resp = await fetch("/api/monetization/redeem", { method: "POST" });
       if (!resp.ok) {

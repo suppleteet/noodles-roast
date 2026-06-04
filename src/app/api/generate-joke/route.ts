@@ -92,7 +92,7 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
     contextLines.push(`KNOWN FACTS: ${body.knownFacts.join(", ")}`);
   if (body.townFlavor?.trim()) {
     contextLines.push(
-      `LOCAL PLACE VIBE (optional roast texture — at most one brief nod per joke; not every line): ${body.townFlavor.trim()}`,
+      `LOCAL PLACE VIBE (background texture only — do NOT lean on this): ${body.townFlavor.trim()}\nUSE IT SPARINGLY: name the town/location in AT MOST one joke, and NOT in back-to-back jokes. Most jokes should roast the person and their answers, not the location.`,
     );
   }
   if (body.ambientAntiRepeatNote) {
