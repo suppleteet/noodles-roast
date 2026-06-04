@@ -7,6 +7,7 @@ import { extractJson } from "@/lib/jsonUtils";
 import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import { recordGeminiUsage } from "@/lib/usageTracker";
+import { toModelUnavailableError } from "@/lib/llmClient";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 const ANALYZE_RETRY_DELAYS_MS = [250, 700];
@@ -57,9 +58,9 @@ export async function POST(req: NextRequest) {
             parts: [
               { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
               { text: `Return a JSON object with two fields:
-- "person": array of 3-5 short observations (2-5 words each) about the person — expression, mood, posture, actions, hand gestures, accessories.
+- "person": array of 4-7 short observations (2-5 words each) about the person. ALWAYS include, near the front, a quick read of: apparent age range (e.g. "looks early 20s", "40s-ish", "older, maybe 60s"), apparent gender presentation (e.g. "man", "woman"), and overall build/style/vibe (e.g. "heavyset", "gym-build", "preppy", "punk", "corporate", "crunchy/granola"). Then expression, mood, posture, actions, accessories. These reads are for the comedian to tailor references to the right person — describe plainly, do not editorialize.
 - "setting": a short confident guess about where they are based on the background (e.g. "home office", "bedroom", "kitchen", "car", "coffee shop"). If the background is too blurry or generic to tell, use null.
-Example: {"person":["smirking","leaning back","wearing headphones"],"setting":"home office"}
+Example: {"person":["man, 30s","gym build","wearing a backwards cap","smirking","leaning back"],"setting":"home office"}
 Keep it compact. Return ONLY the JSON object.` },
             ],
           },
@@ -127,6 +128,18 @@ Keep it compact. Return ONLY the JSON object.` },
 
     return NextResponse.json({ sentences, observations });
   } catch (err) {
+    const unavailable = toModelUnavailableError(VISION_MODEL, err);
+    if (unavailable) {
+      console.error("[analyze] MODEL_UNAVAILABLE:", unavailable.failedModel);
+      return NextResponse.json(
+        {
+          error: "model_unavailable",
+          failedModel: unavailable.failedModel,
+          suggestedFallback: unavailable.suggestedFallback,
+        },
+        { status: 503 },
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[analyze]", message);
     return NextResponse.json({ error: "Analyze API failed", detail: message }, { status: 500 });

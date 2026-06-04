@@ -24,41 +24,27 @@ export interface ComedyQuestion {
   confirmThreshold?: number;
   /** Echo-only templates (misheard repeat). {answer} = transcription; brain appends a tail filler after. */
   confirmTemplates?: string[];
+  /**
+   * (Rapid Fire flow only.) The most likely STT outcomes for this question
+   * (lowercase, no punctuation). The brain pre-generates a joke per expected
+   * answer in parallel with the question being spoken, then fuzzy-matches the
+   * real answer to pick which pre-generated joke to deliver. Leave undefined
+   * for open-ended questions (e.g. "name") — brain falls back to standard
+   * answer-then-generate.
+   */
+  expectedAnswers?: string[];
 }
 
-/** Short skeptical pause beats after the confirm echo — gives the user a beat to correct, silence = roll with it. */
-export const CONFIRM_TAIL_FILLERS = [
-  "Hmm.",
-  "Mmkay.",
-  "Right?",
-  "Got it.",
-];
-
-/** Default echo lines only — puppet repeats STT; tail filler queues next (see CONFIRM_TAIL_FILLERS). */
-export const DEFAULT_CONFIRM_ECHO_TEMPLATES = [
-  "{answer}?",
-  "So — {answer}.",
-  "{answer}.",
-  "{answer}, huh?",
-];
-
-/** @deprecated Use DEFAULT_CONFIRM_ECHO_TEMPLATES — alias for older imports */
-export const DEFAULT_CONFIRM_TEMPLATES = DEFAULT_CONFIRM_ECHO_TEMPLATES;
-
-/** Lines spoken when confidence is too low to even attempt confirmation. */
-export const REJECT_TEMPLATES = [
-  "I didn't catch that. Say again?",
-  "What was that?",
-  "One more time.",
-  "Sorry — say that again?",
-];
-
-/** STT often grabs the puppet's punchline — user repeats it into the mic. Re-ask; don't roast it as their answer. */
-export const ECHO_REJECTION_TEMPLATES = [
-  "That's my line — I need a real answer, not the joke echoing back.",
-  "You can't just repeat what I said — give me an actual answer.",
-  "The mic picked up my voice, not yours — try again.",
-];
+// Confirmation / rejection canned lines now live in the single editable
+// content file. Re-exported here so existing imports keep working — EDIT THEM
+// IN src/lib/scriptLines.ts, not here.
+export {
+  CONFIRM_TAIL_FILLERS,
+  DEFAULT_CONFIRM_ECHO_TEMPLATES,
+  DEFAULT_CONFIRM_TEMPLATES,
+  REJECT_TEMPLATES,
+  ECHO_REJECTION_TEMPLATES,
+} from "@/lib/scriptLines";
 
 export const QUESTION_BANK: ComedyQuestion[] = [
   {

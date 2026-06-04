@@ -48,6 +48,57 @@ export class QuotaError extends Error {
 }
 
 /**
+ * Thrown when a specific model is unavailable (503 UNAVAILABLE / "high demand").
+ * Carries the failed model id and a suggested fallback so the UI can prompt
+ * the user to swap and restart. Routes propagate this as a structured 503
+ * response so the brain can flip the UI into the fallback modal.
+ */
+export class ModelUnavailableError extends Error {
+  constructor(public failedModel: string, public suggestedFallback: string) {
+    super(`Model ${failedModel} unavailable — suggest fallback to ${suggestedFallback}`);
+    this.name = "ModelUnavailableError";
+  }
+}
+
+/**
+ * Pick a fallback model for a failing model id. Currently any Gemini failure
+ * falls back to gemini-2.5-flash (the healthy stable Flash tier). Non-Gemini
+ * models have no auto-fallback path.
+ */
+export function suggestedFallbackFor(failedModel: string): string | null {
+  if (failedModel.startsWith("gemini-") && failedModel !== "gemini-2.5-flash") {
+    return "gemini-2.5-flash";
+  }
+  return null;
+}
+
+/**
+ * Detect Google's "model unavailable" response — status 503 with a body that
+ * mentions "high demand" / "unavailable" / "overloaded". Distinct from generic
+ * transient errors: do NOT retry the same model, prompt the user to swap.
+ * Returns a ready-to-throw ModelUnavailableError, or null if the error doesn't
+ * match the pattern.
+ */
+export function toModelUnavailableError(
+  failedModel: string,
+  err: unknown,
+): ModelUnavailableError | null {
+  const status = (err as { status?: number }).status;
+  const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  // 503 alone is too broad — Cloud LBs return 503 for many reasons. Require
+  // the model-unavailable signal in the message body.
+  if (status !== 503) return null;
+  const isUnavailable =
+    message.includes("unavailable") ||
+    message.includes("high demand") ||
+    message.includes("overloaded");
+  if (!isUnavailable) return null;
+  const fallback = suggestedFallbackFor(failedModel);
+  if (!fallback) return null;
+  return new ModelUnavailableError(failedModel, fallback);
+}
+
+/**
  * Patterns that indicate billing exhaustion (not temporary rate limiting).
  * 429 alone is NOT sufficient — Gemini returns 429 for both per-minute rate
  * limits (temporary, retryable) and billing quota (billing issue). We only
@@ -240,6 +291,10 @@ export async function generateText(req: LlmRequest): Promise<string> {
     } catch (err) {
       const quota = toQuotaError(provider, err);
       if (quota) throw quota;
+      if (provider === "gemini") {
+        const unavailable = toModelUnavailableError(req.model, err);
+        if (unavailable) throw unavailable; // do not retry — Google is shedding load
+      }
       if (attempt < RETRY_DELAYS_MS.length && isTransientProviderError(err)) {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;
@@ -367,6 +422,10 @@ export async function* generateTextStream(
     } catch (err) {
       const quota = toQuotaError(provider, err);
       if (quota) throw quota;
+      if (provider === "gemini" && !yielded) {
+        const unavailable = toModelUnavailableError(req.model, err);
+        if (unavailable) throw unavailable;
+      }
       if (!yielded && attempt < RETRY_DELAYS_MS.length && isTransientProviderError(err)) {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;

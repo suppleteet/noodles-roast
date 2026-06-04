@@ -29,6 +29,28 @@ import {
   REJECT_TEMPLATES,
   type ComedyQuestion,
 } from "@/lib/questionBank";
+import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
+import {
+  NONWORD_FILLERS,
+  ECHO_FILLER_TEMPLATES,
+  ECHO_FILLER_PROBABILITY,
+  RAPID_FIRE_ACKS,
+  RAPID_FIRE_OPENERS,
+  RAPID_FIRE_OPENERS_VULGAR,
+  QUESTION_BRIDGES,
+  CONFIRM_DENIED_LINE,
+  ANSWER_FALLBACK_ROASTS,
+  GREETING_FALLBACK,
+  WRAPUP_FALLBACK,
+  WRAPUP_BRIDGES,
+  CONTEXTUAL_QUESTION_PRODS,
+  CONTEXTUAL_FALLBACK_QUESTION,
+  CONTEXTUAL_FALLBACK_PRODS,
+  RHETORICAL_QUESTIONS,
+  DEFAULT_GREETING,
+} from "@/lib/scriptLines";
+import { matchExpectedAnswer } from "@/lib/expectedAnswerMatch";
+import type { ExpectedJokesResponse } from "@/app/api/generate-expected-jokes/route";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
 import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
@@ -100,6 +122,8 @@ export interface ComedianBrainDeps {
   getTownFlavor: () => string | null;
   /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-4o"). */
   getRoastModel: () => string;
+  /** Conversation flow style. Drives which question bank the brain pulls from. */
+  getFlowMode: () => import("@/store/useSessionStore").FlowMode;
   /** Current mic input RMS (0-1) — used for background noise gating. */
   getInputAmplitude: () => number;
   /** Multi-turn chat session ID — if set, API routes reuse the session instead of sending the full persona. */
@@ -110,6 +134,10 @@ export interface ComedianBrainDeps {
   logTiming: (entry: string) => void;
   /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
   setError?: (error: string) => void;
+  /** Called when a Gemini call returns 503 UNAVAILABLE. Controller surfaces a
+   *  fallback prompt to the user; on accept the session restarts with the
+   *  suggested model. Brain stops issuing further calls after this fires. */
+  onModelUnavailable?: (failedModel: string, suggestedFallback: string) => void;
   /** Called when session should reveal the puppet (fade in). */
   revealSession?: () => void;
   /** Fire-and-forget: save an in-session critique to feedback storage. */
@@ -287,11 +315,25 @@ export class ComedianBrain {
   /** Queued vision interrupt — consumed at the next natural transition point. */
   private pendingVisionInterrupt: { changes: string[]; current: string[]; previous: string[] } | null = null;
 
-  // Speculative generation
+  // Speculative generation (Original flow — partial-answer-snapshot prefetch).
   private speculativeRequest: {
     snapshot: string;
     abort: AbortController;
     result: Promise<JokeResponse | null>;
+  } | null = null;
+
+  // Speculative pre-generation by expected answer (Rapid Fire flow).
+  // Fired when the next question is pre-queued; resolves to a map of
+  // {answerKey -> 2 jokes}. On answer arrival, the brain fuzzy-matches the
+  // STT to a key and delivers the cached pair instantly. questionId scopes
+  // the cache so a stale request for a different question doesn't fire.
+  private expectedJokesCache: {
+    questionId: string;
+    abort: AbortController;
+    /** null until the fetch resolves. */
+    jokesByAnswer: Map<string, JokeItem[]> | null;
+    /** Awaitable handle if a consumer wants to briefly wait for resolution. */
+    ready: Promise<void>;
   } | null = null;
 
   // Hopper
@@ -319,6 +361,28 @@ export class ComedianBrain {
   private fillerMotion: MotionState = "thinking";
   private fillerIntensity = 0.6;
 
+  /** Rapid Fire burst accumulator: {question, answer} pairs collected with only quick acks
+   *  until the burst is full (rapidFireBurstSize) — then one joke burst ties them together. */
+  private rapidFireBurst: Array<{ question: string; answer: string }> = [];
+
+  /** Rapid Fire: the user's name once captured (from the opener answer), used to occasionally
+   *  personalize later questions ("Are you single, Tyler?"). Null until they say it. */
+  private knownName: string | null = null;
+
+  /** Rapid Fire: the instant opener doubles as the name question, so greeting advances
+   *  straight to wait_answer instead of asking a separate name question. */
+  private rapidFireOpenerIsNameAsk = false;
+
+  /** Rapid Fire: toggles each burst so vision jokes alternate with question bursts. */
+  private rapidFireVisionJokeTurn = false;
+
+  /** Watchdog: fires if joke generation produces no joke within generationTimeoutMs.
+   *  Aborts the hung request and delivers a canned fallback so the puppet never sits
+   *  silent in "generating" forever (e.g. when generate-speak / Gemini hangs). */
+  private generationWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /** Abort controller for the in-flight generate-speak fetch — let the watchdog cancel it. */
+  private generationAbort: AbortController | null = null;
+
   // Availability flags
   private micAvailable = true;
   private cameraAvailable = true;
@@ -340,6 +404,10 @@ export class ComedianBrain {
   private greetingSpeechQueued = false; // true once greeting generation resolves and speech is queued
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
+
+  // Model availability — flipped once a 503 has fired the onModelUnavailable
+  // callback, so we don't spam the user with the same prompt for every retry.
+  private modelUnavailableFired = false;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -369,13 +437,23 @@ export class ComedianBrain {
 
     // Always lead with name so the puppet has something personal to work with.
     // Everything else shuffles freely — avoids the show feeling like a questionnaire.
-    const nameQuestion = QUESTION_BANK.find((q) => q.id === "name");
-    const rest = shuffle(QUESTION_BANK.filter((q) => q.id !== "name"));
-    this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(QUESTION_BANK);
+    // Flow mode determines which bank we pull from. Rapid Fire uses short-answer questions
+    // and the burst cadence (collect a few answers behind quick acks, then one combined
+    // joke burst); Original uses the open-ended bank with rephrase-personalization.
+    const flowMode = this.deps.getFlowMode();
+    const bank = flowMode === "rapid_fire" ? RAPID_FIRE_QUESTION_BANK : QUESTION_BANK;
+    this.deps.logTiming(`brain: flow=${flowMode} bank=${bank.length}q`);
+    const nameQuestion = bank.find((q) => q.id === "name");
+    const rest = shuffle(bank.filter((q) => q.id !== "name"));
+    this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(bank);
     this.questionIndex = 0;
     this.askedQuestionIds = new Set();
     this.ledger = [];
     this.jokeHopper = [];
+    this.rapidFireBurst = [];
+    this.knownName = null;
+    this.rapidFireOpenerIsNameAsk = false;
+    this.rapidFireVisionJokeTurn = false;
     this.transitionCount = 0;
     this.consecutiveSilentQuestions = 0;
     this.visionOnlyMode = false;
@@ -384,6 +462,7 @@ export class ComedianBrain {
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
+    this.modelUnavailableFired = false;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -398,6 +477,7 @@ export class ComedianBrain {
   stop(): void {
     this._clearTimers();
     this._cancelSpeculative();
+    this._cancelExpectedJokesGen();
     this._cancelHopper();
     this._cancelRephrase();
     this.deps.setBrainState(null);
@@ -831,17 +911,8 @@ export class ComedianBrain {
     motion: string;
     intensity: number;
   } {
-    const templates = [
-      "Stunning. Real edge-of-my-seat material there.",
-      "Yeah. The roast practically writes itself.",
-      "Riveting. Honestly, give me a second to recover.",
-      "Cool. Cool cool cool. Anyway.",
-      "Mhm. Just stunning material to work with.",
-      "Wow. The depth on display here is staggering.",
-      "Sure. Let's just keep moving.",
-    ];
     return {
-      text: templates[Math.floor(Math.random() * templates.length)],
+      text: ANSWER_FALLBACK_ROASTS[Math.floor(Math.random() * ANSWER_FALLBACK_ROASTS.length)],
       motion: "smug",
       intensity: 0.6,
     };
@@ -1023,6 +1094,30 @@ export class ComedianBrain {
 
     this.deps.setMotion("thinking", 0.6);
 
+    // Rapid Fire: skip the vision-dependent greeting joke entirely. Speak an INSTANT canned
+    // opener that doubles as the name question — no LLM, no waiting on the camera — so TTFS is
+    // just the TTS round-trip (~1s instead of ~10s). Vision analysis keeps running in the
+    // background and feeds the interleaved vision jokes that come later.
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      const vulgar = this.deps.getContentMode() === "vulgar";
+      const openers = vulgar ? RAPID_FIRE_OPENERS_VULGAR : RAPID_FIRE_OPENERS;
+      const opener = openers[Math.floor(Math.random() * openers.length)];
+      const nameQ = this.shuffledQuestions.find((q) => q.id === "name") ?? this.shuffledQuestions[0];
+      if (nameQ) {
+        this.currentQuestion = nameQ;
+        this.askedQuestionIds.add(nameQ.id);
+      }
+      this.deps.queueSpeak(opener, "energetic", 0.8);
+      this.deps.setCurrentQuestion(opener);
+      this._addLedger("question", opener, []);
+      this.deps.setMotion("energetic", 0.8);
+      this.greetingSpeechQueued = true;
+      this.rapidFireOpenerIsNameAsk = true; // opener already asked the name → go to wait_answer
+      this.deps.logTiming("brain: rapid fire instant opener (no vision wait)");
+      this._maybeAdvanceFromGreeting();
+      return;
+    }
+
     // Use prefetched greeting if available (fired during Gemini Live connect to save time),
     // otherwise generate fresh.
     if (this.deps.prefetchedGreeting) {
@@ -1031,13 +1126,14 @@ export class ComedianBrain {
     } else {
       const observations = this.deps.getObservations();
       const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
+      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
       this.visionJokePrefetch = this._generateJoke({
-        context: "greeting",
+        context: greetingContext,
         model: VISION_MODEL, // greeting always uses Gemini — fastest + best at vision
         observations,
         imageBase64: frame,
       });
-      this.deps.logTiming("brain: greeting generation fired (no prefetch)");
+      this.deps.logTiming(`brain: greeting generation fired (no prefetch, context=${greetingContext})`);
     }
 
     const queueGreeting = (
@@ -1050,7 +1146,7 @@ export class ComedianBrain {
         this.greetingVisionTimeout = null;
       }
       if (!response || response.jokes.length === 0) {
-        const fallback = "The camera took one look and requested hazard pay.";
+        const fallback = GREETING_FALLBACK;
         this.deps.logTiming("brain: greeting failed — using short fallback");
         this.deps.queueSpeak(fallback, "energetic", 0.8);
         this._addLedger("joke", fallback, []);
@@ -1095,8 +1191,9 @@ export class ComedianBrain {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
       const observations = this.deps.getObservations();
+      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
       this._generateJoke({
-        context: "greeting",
+        context: greetingContext,
         model: VISION_MODEL,
         observations,
       }).then((response) => queueGreeting(response, null));
@@ -1107,6 +1204,13 @@ export class ComedianBrain {
     // Need both: generation resolved + TTS played through
     if (this.greetingSpeechQueued && this.greetingTtsDrained) {
       this.visionJokePrefetch = null;
+      if (this.rapidFireOpenerIsNameAsk) {
+        // The instant opener already asked the name — listen for it directly instead of
+        // asking a separate name question.
+        this.rapidFireOpenerIsNameAsk = false;
+        this.enterWaitAnswer();
+        return;
+      }
       this.enterAskQuestion();
     }
   }
@@ -1203,9 +1307,12 @@ export class ComedianBrain {
     } else {
       // Interleave bank questions with contextual/vision questions.
       // After every bank question, generate a contextual one (what do you do in that office?).
-      // This keeps the show feeling reactive rather than like a questionnaire.
+      // Rapid Fire skips contextual entirely — bank questions only, no LLM detour mid-game.
       const bankAvailable = this._nextValidQuestion();
-      const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+      const shouldUseContextual =
+        this.deps.getFlowMode() !== "rapid_fire" &&
+        this.bankQuestionsInARow >= 1 &&
+        this.cameraAvailable;
 
       if (bankAvailable && !shouldUseContextual) {
         // Use bank question
@@ -1215,6 +1322,9 @@ export class ComedianBrain {
         this.bankQuestionsInARow++;
         questionWillBeQueuedAsync = true;
         this._queueQuestionWithBridge(this._pickQuestionText(this.currentQuestion));
+        // NOTE: per-answer speculative pre-gen (_fireExpectedJokesGen) is superseded by the
+        // Rapid Fire burst cadence — answers are now roasted together in one burst, so a
+        // per-question speculative joke would never be consumed. Left out intentionally.
       } else {
         // Generate a contextual question based on what we see + know
         this.bankQuestionsInARow = 0;
@@ -1374,9 +1484,15 @@ export class ComedianBrain {
       return;
     }
 
-    // Confidence gate — reject garbage, confirm dubious, pass clean answers through
-    // Skip when scripted lines are disabled (no canned confirm/reject templates)
-    if (COMEDIAN_CONFIG.confirmationEnabled && !COMEDIAN_CONFIG.skipScriptedLines) {
+    // Confidence gate — reject garbage, confirm dubious, pass clean answers through.
+    // Skip when scripted lines are disabled (no canned confirm/reject templates), and skip
+    // entirely in Rapid Fire — confirmation prompts kill the quick tick-tock cadence; a
+    // slightly-misheard answer just becomes a slightly-off burst joke, which is fine.
+    if (
+      COMEDIAN_CONFIG.confirmationEnabled &&
+      !COMEDIAN_CONFIG.skipScriptedLines &&
+      this.deps.getFlowMode() !== "rapid_fire"
+    ) {
       const qId = this.currentQuestion?.id ?? "";
       // Name confirmations are useful for short transcripts ("Mike"/"Mark"),
       // but long multi-word replies are usually intentional bits, not STT errors.
@@ -1541,7 +1657,7 @@ export class ComedianBrain {
     this.confirmAttempts = 0;
     this.answerBuffer = "";
     this.deps.setUserAnswer("");
-    this.deps.queueSpeak("One more time?", "conspiratorial", 0.5);
+    this.deps.queueSpeak(CONFIRM_DENIED_LINE, "conspiratorial", 0.5);
     // Use ask_question so onTtsQueueDrained → enterWaitAnswer() starts prod timers
     this._transition("ask_question");
     this.deps.logTiming("brain: confirm denied — back to ask_question (will enter wait_answer on TTS drain)");
@@ -1561,32 +1677,8 @@ export class ComedianBrain {
     return "restate";
   }
 
-  // Short conversational filler reactions — play immediately when generating starts so there's no dead air.
-  // IMPORTANT: must contain at least one real word. Isolated "Mmm." / "Hm." render as harsh nasal hums
-  // in ElevenLabs because there's no dictionary-word context to anchor prosody. Pair every hum with a
-  // word so vocal continuity from the previous line carries through naturally.
-  private static readonly NONWORD_FILLERS = [
-    "Mm, okay.",
-    "Hm, alright.",
-    "Uh-huh, sure.",
-    "Right, right.",
-    "I see.",
-    "Okay then.",
-    "Yeah, alright.",
-    "Gotcha.",
-  ];
-
-  // Echo fillers — repeat the complete answer once, then bridge into the joke.
-  // Keep these declarative, not question-shaped, so they sound like active listening
-  // instead of another prompt.
-  private static readonly ECHO_FILLER_TEMPLATES = [
-    "{answer}, huh.",
-    "{answer}, you say.",
-    "{answer}. Hm.",
-  ];
-
-  /** Probability of picking an echo filler when the answer is echo-eligible. */
-  private static readonly ECHO_FILLER_PROBABILITY = 0.35;
+  // Filler reaction lines (NONWORD_FILLERS / ECHO_FILLER_TEMPLATES / ECHO_FILLER_PROBABILITY)
+  // live in src/lib/scriptLines.ts — edit them there.
 
   // Meta-complaints about the comedian's own behavior — never echo these.
   // Echoing "You keep asking about the posters." back as "...you say." reads as broken/glitchy.
@@ -1637,30 +1729,26 @@ export class ComedianBrain {
   }
 
   private _pickFiller(answer: string): string {
-    if (this._isFillerEchoable(answer) && Math.random() < ComedianBrain.ECHO_FILLER_PROBABILITY) {
+    if (this._isFillerEchoable(answer) && Math.random() < ECHO_FILLER_PROBABILITY) {
       const cleaned = ComedianBrain._stripLeadingHesitation(
         answer.trim().replace(/[.?!,]+$/, "").trim(),
       );
       // If stripping left us with too little to echo, fall back to non-word filler.
       if (wordCount(cleaned) < 1) {
-        return ComedianBrain.NONWORD_FILLERS[
-          Math.floor(Math.random() * ComedianBrain.NONWORD_FILLERS.length)
-        ];
+        return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
       }
-      const tpl = ComedianBrain.ECHO_FILLER_TEMPLATES[
-        Math.floor(Math.random() * ComedianBrain.ECHO_FILLER_TEMPLATES.length)
+      const tpl = ECHO_FILLER_TEMPLATES[
+        Math.floor(Math.random() * ECHO_FILLER_TEMPLATES.length)
       ];
       return tpl.replaceAll("{answer}", cleaned);
     }
-    return ComedianBrain.NONWORD_FILLERS[
-      Math.floor(Math.random() * ComedianBrain.NONWORD_FILLERS.length)
-    ];
+    return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
   }
 
   /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
   private _pickNonWordFiller(avoid: string | null): string {
-    const opts = ComedianBrain.NONWORD_FILLERS.filter((f) => f !== avoid);
-    const pool = opts.length > 0 ? opts : ComedianBrain.NONWORD_FILLERS;
+    const opts = NONWORD_FILLERS.filter((f) => f !== avoid);
+    const pool = opts.length > 0 ? opts : NONWORD_FILLERS;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -1669,6 +1757,41 @@ export class ComedianBrain {
     const queued = this.fillerLineCount > 0;
     this.fillerPumpActive = false;
     return { fillerQueued: queued };
+  }
+
+  /**
+   * Arm the generation watchdog for a fresh joke-generation request. Creates a new
+   * AbortController (passed to the generate-speak fetch) and a timer that, if it fires
+   * while we're still stuck in "generating" (no joke ever streamed), aborts the hung
+   * request and delivers a canned fallback roast so the show never dead-airs.
+   */
+  private _armGenerationWatchdog(answer: string): void {
+    this._clearGenerationWatchdog();
+    this.generationAbort = new AbortController();
+    this.generationWatchdog = setTimeout(() => {
+      this.generationWatchdog = null;
+      // If a joke arrived we've already left "generating" — nothing to rescue.
+      if (this.state !== "generating") return;
+      this.deps.logTiming(
+        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — aborting + fallback`,
+      );
+      // Cancel the hung fetch so a late response can't double-fire on top of the fallback.
+      try { this.generationAbort?.abort(); } catch { /* best-effort */ }
+      this.generationAbort = null;
+      // Invalidate any in-flight stream callbacks (they check deliveryGeneration).
+      this.deliveryGeneration++;
+      this._stopFillerPump();
+      // Deliver a canned roast and advance — enterDelivering with no jokes picks the fallback.
+      this.enterDelivering(answer, { relevant: true, jokes: [] }, undefined);
+    }, COMEDIAN_CONFIG.generationTimeoutMs);
+  }
+
+  /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */
+  private _clearGenerationWatchdog(): void {
+    if (this.generationWatchdog) {
+      clearTimeout(this.generationWatchdog);
+      this.generationWatchdog = null;
+    }
   }
 
   /**
@@ -1726,10 +1849,37 @@ export class ComedianBrain {
   }
 
   private enterGenerating(answer: string): void {
+    // Rapid Fire: don't joke on every answer. Accumulate answers across a few quick
+    // questions (each gets only a one-word ack), then fire ONE joke burst tying them
+    // together. _handleRapidFireAnswer either ack's + advances (returns), or — when the
+    // burst is full — calls _enterRapidFireBurst() to generate the combined roast.
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      this._handleRapidFireAnswer(answer);
+      return;
+    }
+
     this._transition("generating");
     this.deliveryGeneration++;
     this.deps.setMotion("thinking", 0.7);
     this._addLedger("answer", answer, []);
+
+    // Rapid Fire fast path: if speculative pre-gen has produced jokes for
+    // this question's expected answers, fuzzy-match the user's answer and
+    // deliver the cached pair instantly. No filler, no fresh LLM round-trip.
+    // Falls through silently when:
+    //   - flow is "original" (cache is never populated)
+    //   - question has no expectedAnswers (e.g., "name")
+    //   - speculative request hasn't resolved yet
+    //   - user's answer doesn't fuzzy-match any expected key
+    const cachedJokes = this._tryConsumeExpectedJokes(answer);
+    if (cachedJokes) {
+      this.enterDelivering(answer, { relevant: true, jokes: cachedJokes }, undefined);
+      return;
+    }
+
+    // Arm the generation watchdog — fresh request, fresh abort controller. Cancelled the
+    // moment the first joke arrives (we leave "generating"); fires the fallback if not.
+    this._armGenerationWatchdog(answer);
 
     // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
     // pause. First filler queues immediately; each filler is wrapped "... <text> ..." so
@@ -1782,6 +1932,137 @@ export class ComedianBrain {
       this._cancelSpeculative();
       this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
     }
+  }
+
+  /**
+   * Rapid Fire answer handler. Pushes the answer onto the burst accumulator, then either:
+   *   - acks quickly and advances to the NEXT question (burst not full, questions remain), or
+   *   - fires the combined joke burst (burst full, or no more bank questions).
+   * This is what gives Rapid Fire its distinct "quick questions → burst" cadence.
+   */
+  private _handleRapidFireAnswer(answer: string): void {
+    const question = this.currentQuestion?.question ?? "";
+    // Capture the name from the opener answer so later questions can use it.
+    if (this.currentQuestion?.id === "name" && !this.knownName) {
+      const name = ComedianBrain._extractName(answer);
+      if (name) {
+        this.knownName = name;
+        this.deps.logTiming(`brain: rapid fire captured name "${name}"`);
+      }
+    }
+    this.rapidFireBurst.push({ question, answer });
+    this._addLedger("answer", answer, []);
+
+    const burstSize = COMEDIAN_CONFIG.rapidFireBurstSize;
+    const burstFull = this.rapidFireBurst.length >= burstSize;
+    const burstReady = burstFull || !this._hasMoreBankQuestions() || this.pendingWrapup;
+
+    if (!burstReady) {
+      // Quick ack, then straight to the next question — the rapid tick-tock.
+      const ack = RAPID_FIRE_ACKS[
+        Math.floor(Math.random() * RAPID_FIRE_ACKS.length)
+      ];
+      this.deps.setMotion("energetic", 0.5);
+      this.deps.queueSpeak(ack, "energetic", 0.5);
+      this.deps.logTiming(
+        `brain: rapid fire ack "${ack}" — burst ${this.rapidFireBurst.length}/${burstSize}, next Q`,
+      );
+      // enterAskQuestion queues the next question right behind the ack on the TTS chain;
+      // both drain together → wait_answer.
+      this.enterAskQuestion();
+      return;
+    }
+
+    this._enterRapidFireBurst();
+  }
+
+  /**
+   * Generate ONE joke burst that ties together every answer in the current Rapid Fire
+   * accumulator, then clear it for the next burst. Reuses the standard generation
+   * machinery (filler pump, watchdog, streaming TTS) via _generateAndDeliver — it just
+   * feeds a combined recap as the "answer" so the LLM roasts the whole set at once.
+   */
+  private _enterRapidFireBurst(): void {
+    const burst = this.rapidFireBurst;
+    this.rapidFireBurst = []; // reset for the next burst (captured in `burst`)
+
+    this._transition("generating");
+    this.deliveryGeneration++;
+    this.deps.setMotion("thinking", 0.7);
+
+    // Combined recap, e.g. "Who am I talking to: Tyler; Single: Nope; Cats or dogs: Dogs".
+    // Passed as USER'S ANSWER so the answer_roast prompt roasts the whole combination.
+    const combinedAnswer = burst
+      .map((b) => `${b.question.replace(/[?]+$/, "")}: ${b.answer}`)
+      .join("; ");
+
+    this._armGenerationWatchdog(combinedAnswer);
+
+    // Filler while the burst generates — same mechanism as the normal path.
+    let fillerAlreadySaid: string | undefined;
+    if (!COMEDIAN_CONFIG.skipFiller) {
+      this.fillerFiredForAnswer = true;
+      this.fillerAnswerForPump = combinedAnswer;
+      this.fillerLineCount = 0;
+      this.fillerLastText = null;
+      this.fillerFirstText = null;
+      this.fillerPumpActive = true;
+      [this.fillerMotion, this.fillerIntensity] = inferFillerMotionFromAnswer(
+        burst.at(-1)?.answer ?? combinedAnswer,
+      );
+      fillerAlreadySaid = "filler sound";
+      this._queueNextPumpFiller();
+    }
+
+    this.deps.logTiming(`brain: rapid fire burst (${burst.length} answers) — generating`);
+    // q = null: no single "QUESTION ASKED" — the combined recap carries all the context.
+    this._generateAndDeliver(combinedAnswer, null, this._getLedgerContext(), fillerAlreadySaid);
+  }
+
+  /** Pull a usable first name out of a freeform answer ("My name's Tyler" → "Tyler").
+   *  Returns null if nothing name-shaped is found. */
+  private static _extractName(answer: string): string | null {
+    let s = answer.trim().replace(/[.?!,]+$/g, "").trim();
+    s = s.replace(
+      /^(my name'?s?\s+is\s+|my name'?s\s+|i'?m\s+|i am\s+|it'?s\s+|this is\s+|name'?s\s+|the name'?s\s+|call me\s+)/i,
+      "",
+    ).trim();
+    if (!s) return null;
+    const first = s.split(/\s+/)[0];
+    const name = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+    // Must start with a letter, only letters + a stray apostrophe/hyphen, 2-20 chars...
+    if (!/^[A-Za-z][A-Za-z'’-]{1,19}$/.test(name)) return null;
+    // ...and contain at least 2 actual letters (rejects "O'" / "A-" / punctuation runs).
+    if (name.replace(/[^A-Za-z]/g, "").length < 2) return null;
+    return name;
+  }
+
+  /** Rapid Fire: occasionally personalize a question with the user's name
+   *  ("Are you single?" → "Are you single, Tyler?"). No-op until the name is known. */
+  private _maybeInjectName(text: string): string {
+    const name = this.knownName;
+    if (!name) return text;
+    if (Math.random() > COMEDIAN_CONFIG.rapidFireNameInjectionChance) return text;
+    if (text.toLowerCase().includes(name.toLowerCase())) return text;
+    if (/\?\s*$/.test(text)) return text.replace(/\s*\?+\s*$/, `, ${name}?`);
+    if (/[.!]\s*$/.test(text)) return text.replace(/\s*[.!]+\s*$/, `, ${name}.`);
+    return `${text}, ${name}`;
+  }
+
+  /** Non-mutating check: are there bank questions left to ask? Mirrors _nextValidQuestion's
+   *  skip rules (already-asked, location-known, excluded) WITHOUT advancing questionIndex. */
+  private _hasMoreBankQuestions(): boolean {
+    const ambientCity = this.deps.getAmbientContext()?.city;
+    const hasLocation = !!ambientCity && ambientCity !== "unknown";
+    const excluded = this.shuffledQuestions
+      .filter((prev) => this.askedQuestionIds.has(prev.id) && prev.excludes)
+      .flatMap((prev) => prev.excludes!);
+    return this.shuffledQuestions.some(
+      (q) =>
+        !this.askedQuestionIds.has(q.id) &&
+        !(hasLocation && ComedianBrain.LOCATION_QUESTION_IDS.has(q.id)) &&
+        !excluded.includes(q.id),
+    );
   }
 
   // Workaround: TypeScript doesn't allow assigning to private field via underscore alias
@@ -1959,6 +2240,7 @@ export class ComedianBrain {
           this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
         });
       },
+      this.generationAbort?.signal,
     );
   }
 
@@ -2147,21 +2429,16 @@ export class ComedianBrain {
     );
   }
 
-  // Short bridge phrases that connect a joke to the next question — keeps the energy flowing.
-  // Spoken as a separate TTS call so ElevenLabs previous_text carries the joke's vocal tone.
-  private static readonly QUESTION_BRIDGES = [
-    "Okay.", "Alright.", "Anyway.", "Moving on.", "But seriously.",
-    "So.", "Now.", "Let me ask you this.", "Okay okay.",
-  ];
+  // Bridge phrases (QUESTION_BRIDGES) live in src/lib/scriptLines.ts.
 
   private static _questionWithBridge(questionText: string): string {
     const normalizedQuestion = questionText.replace(/^[\s"'“”]+/, "").toLowerCase();
-    const questionAlreadyHasBridge = ComedianBrain.QUESTION_BRIDGES.some((bridge) => {
+    const questionAlreadyHasBridge = QUESTION_BRIDGES.some((bridge) => {
       const bridgeLead = bridge.replace(/[.!?]+$/, "").toLowerCase();
       return normalizedQuestion.startsWith(bridgeLead);
     });
     if (questionAlreadyHasBridge) return questionText;
-    const bridge = ComedianBrain.QUESTION_BRIDGES[Math.floor(Math.random() * ComedianBrain.QUESTION_BRIDGES.length)];
+    const bridge = QUESTION_BRIDGES[Math.floor(Math.random() * QUESTION_BRIDGES.length)];
     return `${bridge} ${questionText}`;
   }
 
@@ -2178,6 +2455,18 @@ export class ComedianBrain {
   private _queueQuestionWithBridge(questionText: string): void {
     questionText = questionText || this.currentQuestion?.question || "What's your name?";
     this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
+
+    // Rapid Fire: skip rephrase entirely — questions are already short and punchy;
+    // rephrase only adds latency and makes them longer. Occasionally drop the user's
+    // name in ("Are you single, Tyler?").
+    if (this.deps.getFlowMode() === "rapid_fire") {
+      const spoken = this._maybeInjectName(questionText);
+      this.deps.queueSpeak(spoken, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(spoken);
+      this._addLedger("question", spoken, []);
+      this.deps.logTiming("brain: rapid fire — skipping rephrase");
+      return;
+    }
 
     // Get the last joke text for rephrase context
     const lastJoke = this.ledger
@@ -2269,10 +2558,7 @@ export class ComedianBrain {
           id: `generated_${Date.now()}`,
           question: questionText,
           jokeContext: data.jokeContext,
-          prodLines: [
-            "Come on, I'm waiting.",
-            "I asked you a question.",
-          ],
+          prodLines: CONTEXTUAL_QUESTION_PRODS,
         };
         this._queueQuestionWithBridge(questionText);
         this.deps.logTiming(`brain: contextual question — "${questionText}"`);
@@ -2280,12 +2566,12 @@ export class ComedianBrain {
       .catch(() => {
         if (this.state !== "ask_question") return;
         // Fallback — ask where they are
-        const fallback = "So where are you right now? What am I looking at back there?";
+        const fallback = CONTEXTUAL_FALLBACK_QUESTION;
         this.currentQuestion = {
           id: "generated_fallback",
           question: fallback,
           jokeContext: "Location and environment roast.",
-          prodLines: ["Hello? Where are you?", "I'm talking to you."],
+          prodLines: CONTEXTUAL_FALLBACK_PRODS,
         };
         this._queueQuestionWithBridge(fallback);
       });
@@ -2316,7 +2602,8 @@ export class ComedianBrain {
     if (this.visionOnlyMode) return;
     if (this.preQueuedQuestion) return;
 
-    const shouldUseContextual = this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
+    const shouldUseContextual = !isRapidFire && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
       this._preFetchContextualQuestion();
@@ -2325,13 +2612,22 @@ export class ComedianBrain {
 
     const nextQ = this._nextValidQuestion();
     if (!nextQ) {
-      this._preFetchContextualQuestion();
+      if (!isRapidFire) this._preFetchContextualQuestion();
       return;
     }
     this.bankQuestionsInARow++;
     this.preQueuedQuestion = nextQ;
     this.preQueuedRephrasedText = null;
-    this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
+    if (isRapidFire) {
+      // Skip rephrase — questions are already short; set text directly so enterAskQuestion
+      // picks it up from the pre-queue as-is. Occasionally personalize with the name.
+      this.preQueuedRephrasedText = this._maybeInjectName(this._pickQuestionText(nextQ));
+      this.deps.logTiming(`brain: rapid fire pre-queue — "${nextQ.id}" (no rephrase)`);
+    } else {
+      this._fetchRephraseForPreQueue(this._pickQuestionText(nextQ));
+    }
+    // (Per-answer speculative pre-gen removed — superseded by the Rapid Fire burst cadence,
+    // which roasts collected answers together rather than one joke per answer.)
     this.deps.logTiming(`brain: pre-queue bank question — "${nextQ.id}"`);
   }
 
@@ -2491,11 +2787,26 @@ export class ComedianBrain {
     // delivery), skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
     // the answer's roast and the next question. Vision interrupt still fires
     // when there's nothing queued — see refresh of previousObservations below.
+    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
     const hasQueuedNext = !!this.preQueuedQuestion;
     if (hasQueuedNext) {
+      const current = this.deps.getObservations();
+      // Rapid Fire: alternate a vision joke between question bursts. On the "vision turn"
+      // we deliver a vision joke now and KEEP the pre-queued question — when the vision
+      // joke drains, vision_react → enterAskQuestion asks it. Gives a vision/Q&A mix
+      // instead of pure Q&A.
+      if (isRapidFire && this.rapidFireVisionJokeTurn && this.cameraAvailable && current.length > 0) {
+        this.rapidFireVisionJokeTurn = false;
+        const old = [...this.previousObservations];
+        this.previousObservations = [...current];
+        this.pendingVisionInterrupt = null;
+        this.deps.logTiming("brain: rapid fire — vision joke between bursts");
+        this.enterVisionReact(current, current, old);
+        return;
+      }
+      if (isRapidFire) this.rapidFireVisionJokeTurn = true; // next burst gets a vision joke
       // Refresh observation baseline so the next genuine vision_react isn't
       // triggered by changes we deliberately skipped.
-      const current = this.deps.getObservations();
       if (this.cameraAvailable && current.length > 0) {
         this.previousObservations = [...current];
       }
@@ -2537,23 +2848,14 @@ export class ComedianBrain {
     this.enterAskQuestion();
   }
 
-  private static readonly WRAPUP_FALLBACK = "And on that note, we're done here. Goodnight.";
   private static readonly WRAPUP_GENERATION_TIMEOUT_MS = 6000;
-
-  /** Spoken synchronously when entering wrapup so the user hears something while the
-   *  closing line generates (~2-3s on Sonnet). Without a bridge there's a long dead pause. */
-  private static readonly WRAPUP_BRIDGES = [
-    "Alright, alright, before I go —",
-    "Welllll, on that note —",
-    "Anyway, one last thing —",
-    "Okay, last word and I'm out —",
-    "Right, before I peace out —",
-  ];
+  // Closing lines (WRAPUP_FALLBACK / WRAPUP_BRIDGES) live in src/lib/scriptLines.ts.
 
   private enterWrapup(): void {
     this.pendingWrapup = false;
     this._clearTimers();
     this._cancelSpeculative();
+    this._cancelExpectedJokesGen();
     this._cancelHopper();
     this._cancelPipelinePrefetch();
     this._cancelRephrase();
@@ -2568,9 +2870,7 @@ export class ComedianBrain {
     // so its TTS fetch happens in parallel with the closing-line generation.
     if (!COMEDIAN_CONFIG.skipScriptedLines) {
       const bridge =
-        ComedianBrain.WRAPUP_BRIDGES[
-          Math.floor(Math.random() * ComedianBrain.WRAPUP_BRIDGES.length)
-        ];
+        WRAPUP_BRIDGES[Math.floor(Math.random() * WRAPUP_BRIDGES.length)];
       this.deps.queueSpeak(bridge, "smug", 0.7);
       this.deps.logTiming(`brain: wrapup bridge — "${bridge}"`);
     }
@@ -2597,7 +2897,7 @@ export class ComedianBrain {
     const timeout = setTimeout(() => {
       if (resolved) return;
       this.deps.logTiming("brain: wrapup generation timeout — using fallback");
-      queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+      queueClosing(WRAPUP_FALLBACK);
     }, ComedianBrain.WRAPUP_GENERATION_TIMEOUT_MS);
 
     this._generateJoke({
@@ -2615,12 +2915,12 @@ export class ComedianBrain {
         queueClosing(closing.text, closing.motion, closing.intensity);
       } else {
         this.deps.logTiming("brain: wrapup generation empty — using fallback");
-        queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+        queueClosing(WRAPUP_FALLBACK);
       }
     }).catch(() => {
       clearTimeout(timeout);
       this.deps.logTiming("brain: wrapup generation error — using fallback");
-      queueClosing(ComedianBrain.WRAPUP_FALLBACK);
+      queueClosing(WRAPUP_FALLBACK);
     });
   }
 
@@ -2706,6 +3006,124 @@ export class ComedianBrain {
       this.speculativeRequest.abort.abort();
       this.speculativeRequest = null;
     }
+  }
+
+  // ─── Speculative pre-gen by expected answer (Rapid Fire) ─────────────────────
+
+  /**
+   * Fire a single LLM call that generates jokes for EACH expected answer of
+   * the given question. Result is cached on `expectedJokesCache`. When the
+   * user actually answers, the brain matches the STT to a key and delivers
+   * the cached pair without waiting on a fresh LLM round-trip.
+   *
+   * No-op when:
+   *   - flowMode !== "rapid_fire" (Original flow doesn't use this path)
+   *   - the question has no `expectedAnswers` (e.g., "name" — open-ended)
+   *   - a cache is already in flight or resolved for this same questionId
+   *
+   * Failures resolve to an empty cache, which the consumer treats as a miss
+   * and falls back to fresh gen — silently degrading, never throwing.
+   */
+  private _fireExpectedJokesGen(question: ComedyQuestion): void {
+    if (this.deps.getFlowMode() !== "rapid_fire") return;
+    if (!question.expectedAnswers || question.expectedAnswers.length === 0) return;
+    // Already cached/in-flight for this question? Reuse.
+    if (this.expectedJokesCache?.questionId === question.id) return;
+    // Different question pending — cancel before we replace.
+    this._cancelExpectedJokesGen();
+
+    const abort = new AbortController();
+    // Build the request body defensively. JSON.stringify can throw for
+    // circular refs / BigInts — none expected here, but the brain's
+    // never-throws contract means we belt-and-suspender it.
+    let bodyJson: string;
+    try {
+      bodyJson = JSON.stringify({
+        question: question.question,
+        expectedAnswers: question.expectedAnswers,
+        persona: this.deps.getPersona(),
+        burnIntensity: this.deps.getBurnIntensity(),
+        contentMode: this.deps.getContentMode(),
+        model: this.deps.getRoastModel(),
+        knownFacts: this._getThrowbackContext(),
+      });
+    } catch (err) {
+      this.deps.logTiming(`brain: expected-jokes serialize failed q=${question.id}: ${String(err).slice(0, 80)}`);
+      return;
+    }
+    const ready = fetch("/api/generate-expected-jokes", {
+      method: "POST",
+      signal: abort.signal,
+      headers: { "Content-Type": "application/json" },
+      body: bodyJson,
+    })
+      .then((r) => r.json() as Promise<ExpectedJokesResponse>)
+      .then((data) => {
+        if (abort.signal.aborted) return;
+        if (this.expectedJokesCache?.questionId !== question.id) return; // stale
+        const map = new Map<string, JokeItem[]>();
+        for (const [key, jokes] of Object.entries(data.jokesByAnswer ?? {})) {
+          if (Array.isArray(jokes) && jokes.length > 0) {
+            map.set(key, jokes as JokeItem[]);
+          }
+        }
+        this.expectedJokesCache.jokesByAnswer = map;
+        this.deps.logTiming(
+          `brain: expected-jokes ready q=${question.id} keys=${[...map.keys()].join("|")}`,
+        );
+      })
+      .catch((err) => {
+        if (abort.signal.aborted) return;
+        this.deps.logTiming(`brain: expected-jokes fetch failed q=${question.id}: ${String(err).slice(0, 80)}`);
+        if (this.expectedJokesCache?.questionId === question.id) {
+          this.expectedJokesCache.jokesByAnswer = new Map(); // empty → consumer falls back
+        }
+      });
+
+    this.expectedJokesCache = {
+      questionId: question.id,
+      abort,
+      jokesByAnswer: null,
+      ready,
+    };
+    this.deps.logTiming(`brain: expected-jokes fired q=${question.id} keys=${question.expectedAnswers.join("|")}`);
+  }
+
+  private _cancelExpectedJokesGen(): void {
+    if (this.expectedJokesCache) {
+      this.expectedJokesCache.abort.abort();
+      this.expectedJokesCache = null;
+    }
+  }
+
+  /**
+   * Look up cached pre-gen'd jokes for the given answer. Returns the joke
+   * array if there's a confident match, else null (caller falls back to
+   * fresh generation).
+   *
+   * Consumes the cache on hit — same pair won't be reused on a re-ask.
+   */
+  private _tryConsumeExpectedJokes(answer: string): JokeItem[] | null {
+    const cache = this.expectedJokesCache;
+    if (!cache) return null;
+    if (cache.questionId !== this.currentQuestion?.id) return null;
+    if (cache.jokesByAnswer === null) {
+      // Cache still resolving — too early to use, fall through.
+      return null;
+    }
+    const keys = [...cache.jokesByAnswer.keys()];
+    if (keys.length === 0) return null;
+    const matched = matchExpectedAnswer(answer, keys);
+    if (!matched) {
+      this.deps.logTiming(`brain: expected-jokes miss "${answer.slice(0, 30)}" — fall back`);
+      return null;
+    }
+    const jokes = cache.jokesByAnswer.get(matched) ?? null;
+    if (!jokes || jokes.length === 0) return null;
+    // Consume — clear so a re-ask doesn't reuse the same pair.
+    this.expectedJokesCache = null;
+    this.deps.logTiming(`brain: expected-jokes hit "${matched}" — ${jokes.length} jokes`);
+    return jokes;
   }
 
   // ─── Joke Hopper ──────────────────────────────────────────────────────────────
@@ -2968,6 +3386,11 @@ export class ComedianBrain {
   // ─── Helpers ──────────────────────────────────────────────────────────────────
 
   private _transition(next: BrainState): void {
+    // Leaving "generating" — a joke streamed in (or we're being redirected/aborted).
+    // Either way the watchdog's job is done; cancel it so it can't fire a spurious fallback.
+    if (this.state === "generating" && next !== "generating") {
+      this._clearGenerationWatchdog();
+    }
     const config = STATE_CONFIG[next];
     this.state = next;
     this.micMode = config.micMode;
@@ -2981,6 +3404,7 @@ export class ComedianBrain {
     if (this.devNoteTimer) { clearTimeout(this.devNoteTimer); this.devNoteTimer = null; }
     if (this.greetingVisionTimeout) { clearTimeout(this.greetingVisionTimeout); this.greetingVisionTimeout = null; }
     this._clearConfirmTimer();
+    this._clearGenerationWatchdog();
     // Pump cancellation — _clearTimers fires on stop / cancellation / wait_answer entry, all
     // paths where leaving "generating" without delivering a joke is possible. No timer to
     // cancel (pump runs purely off drain events), just flip the flag.
@@ -2988,16 +3412,11 @@ export class ComedianBrain {
   }
 
   private _getPersonaGreetings(): string[] {
-    return PERSONAS[this.deps.getPersona()]?.greetings ?? ["Hey there!"];
+    return PERSONAS[this.deps.getPersona()]?.greetings ?? [DEFAULT_GREETING];
   }
 
   private _rhetoricalVersion(question: string): string {
-    const rhetoricals: Record<string, string> = {
-      "What's your name?": "I'd ask your name but you can't even talk to me. Let me just look at you instead.",
-      "Where are you from?": "I'd ask where you're from but you're the strong silent type. We'll make do.",
-      "What do you do for a living?": "I'd ask what you do but you're not exactly forthcoming. I'll use my imagination.",
-    };
-    return rhetoricals[question] ?? `I'd ask you ${question.toLowerCase()} but I'll just have to guess.`;
+    return RHETORICAL_QUESTIONS[question] ?? `I'd ask you ${question.toLowerCase()} but I'll just have to guess.`;
   }
 
   private _generateJokeStream(
@@ -3020,6 +3439,7 @@ export class ComedianBrain {
       callback?: { text: string; motion: string; intensity: number };
     }) => void,
     onError: () => void,
+    signal?: AbortSignal,
   ): void {
     const streamingTtsEnabled = !!this.deps.openJokeStream;
     const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
@@ -3032,6 +3452,10 @@ export class ComedianBrain {
     fetch("/api/generate-speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Watchdog-owned signal — lets the generation watchdog abort a hung request so the
+      // brain can fall back instead of stranding the user in silence. Undefined on the
+      // pipeline path, which is fine (short-lived, has its own drain handling).
+      signal,
       body: JSON.stringify({
         ...params,
         model: this.deps.getRoastModel(),
@@ -3189,7 +3613,7 @@ export class ComedianBrain {
 
   private async _generateJoke(
     params: {
-      context: "greeting" | "vision_opening" | "answer_roast" | "vision_react" | "hopper" | "wrapup";
+      context: "greeting" | "rapid_fire_greeting" | "vision_opening" | "answer_roast" | "vision_react" | "hopper" | "wrapup";
       /** Override the roast model for this request (e.g. Gemini Flash for vision-reactive jokes). */
       model?: string;
       question?: string;
@@ -3229,6 +3653,21 @@ export class ComedianBrain {
           const provider = (body as { provider?: string }).provider ?? "unknown";
           this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
           this.deps.logTiming(`brain: QUOTA ERROR from ${provider}`);
+        } else if (resp.status === 503) {
+          const body = await resp.json().catch(() => ({}));
+          const b = body as { error?: string; failedModel?: string; suggestedFallback?: string };
+          if (
+            b.error === "model_unavailable" &&
+            b.failedModel &&
+            b.suggestedFallback &&
+            !this.modelUnavailableFired
+          ) {
+            this.modelUnavailableFired = true;
+            this.deps.logTiming(
+              `brain: MODEL_UNAVAILABLE ${b.failedModel} → suggest ${b.suggestedFallback}`,
+            );
+            this.deps.onModelUnavailable?.(b.failedModel, b.suggestedFallback);
+          }
         }
         return null;
       }

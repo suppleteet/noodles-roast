@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useDevUnlock } from "@/lib/devUnlock";
 
 const ERROR_DISMISS_MS = 8000;
 
@@ -34,7 +35,7 @@ export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
   const isConversation = sessionMode === "conversation";
   const isRoasting = phase === "roasting";
   const isStopped = phase === "stopped";
-  const isDev = process.env.NODE_ENV !== "production";
+  const isDev = useDevUnlock();
 
   return (
     <div

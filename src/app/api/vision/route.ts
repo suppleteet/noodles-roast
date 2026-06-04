@@ -4,6 +4,7 @@ import { VISION_SYSTEM_PROMPT } from "@/lib/prompts";
 import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
 import { recordGeminiUsage } from "@/lib/usageTracker";
+import { toModelUnavailableError } from "@/lib/llmClient";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -49,6 +50,18 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ scene: sceneJson });
   } catch (err) {
+    const unavailable = toModelUnavailableError(VISION_MODEL, err);
+    if (unavailable) {
+      console.error("[vision] MODEL_UNAVAILABLE:", unavailable.failedModel);
+      return NextResponse.json(
+        {
+          error: "model_unavailable",
+          failedModel: unavailable.failedModel,
+          suggestedFallback: unavailable.suggestedFallback,
+        },
+        { status: 503 },
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[vision]", message);
     return NextResponse.json({ error: "Vision API failed", detail: message }, { status: 500 });

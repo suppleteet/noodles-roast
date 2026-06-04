@@ -100,13 +100,13 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, ambient-context, comedian-session, debug-usage, generate-joke, generate-question, generate-speak, list-feedback, live-token, monetization/{checkout,redeem,status,webhook}, open-videos-folder, prewarm-tts, rephrase-question, roast, save-feedback, save-log, save-transcript, save-video, save-voice-note, serve-video, town-flavor, tts, tts-ws, vision)
+src/app/api/           Next.js API routes (analyze, ambient-context, comedian-session, debug-usage, generate-expected-jokes, generate-joke, generate-question, generate-speak, list-feedback, live-token, monetization/{checkout,redeem,status,webhook}, name-video, open-videos-folder, prewarm-tts, rephrase-question, roast, save-feedback, save-log, save-transcript, save-video, save-voice-note, serve-video, town-flavor, tts, tts-ws, upload-to-drive, vision)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, FeedbackBox, DebugTranscript)
-src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets, ttsChunkBuffer, llmClient
+src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets, ttsChunkBuffer, llmClient, scriptLines (all canned spoken lines)
 src/lib/stateMachine/      State machine types, transitions, and configs (SessionPhase, BrainState, MotionState)
 src/lib/comedianBrain.ts   State machine class (conversation mode)
 src/lib/comedianBrainConfig.ts  Declarative STATE_CONFIG map

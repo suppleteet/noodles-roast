@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
+import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
@@ -62,6 +63,7 @@ function makeDeps(overrides?: Partial<ComedianBrainDeps>): ComedianBrainDeps {
     getBurnIntensity: vi.fn().mockReturnValue(3),
     getContentMode: vi.fn().mockReturnValue("clean"),
     getRoastModel: vi.fn().mockReturnValue("gemini-3.5-flash"),
+    getFlowMode: vi.fn().mockReturnValue("original"),
     getInputAmplitude: vi.fn().mockReturnValue(0.1),
     getObservations: vi.fn().mockReturnValue([]),
     getVisionSetting: vi.fn().mockReturnValue(null),
@@ -237,6 +239,25 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
+  it("watchdog rescues a hung generation — delivers fallback instead of dead air", async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+    // generate-speak hangs forever (simulates Gemini / server stall — the exact
+    // failure seen in the 2026-06-01 session: 6 fillers then permanent silence).
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    brain.onInputTranscription("My name is Mike Johnson plumber");
+    vi.advanceTimersByTime(1600); // commit answer → generating
+    expect(getStates(deps)).toContain("generating");
+    (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
+    // Watchdog fires at generationTimeoutMs (13s) — aborts the hang, delivers a
+    // canned roast, and leaves "generating" so the show advances.
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(getStates(deps)).toContain("delivering");
+    expect(deps.queueSpeak).toHaveBeenCalled(); // a fallback roast line was spoken
+  });
+
   it("does not immediately commit an unfinalized sentence starter", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
@@ -248,6 +269,64 @@ describe("ComedianBrain — Q&A cycle", () => {
     vi.advanceTimersByTime(1000);
 
     expect(getStates(deps)).not.toContain("generating");
+  });
+});
+
+// ─── Rapid Fire burst cadence ──────────────────────────────────────────────────
+
+describe("ComedianBrain — Rapid Fire burst", () => {
+  /** Commit one answer, then drain the ack + next-question TTS so we land back in wait_answer. */
+  async function rapidAnswer(brain: ComedianBrain, text: string): Promise<void> {
+    brain.onInputTranscription(text);
+    await vi.advanceTimersByTimeAsync(1600); // silence commits the answer
+    brain.onTtsQueueDrained();               // ack + next question drained → wait_answer
+  }
+
+  // Distinct multi-word answers so each commits cleanly (avoids confirm/echo paths).
+  const BURST_ANSWERS = [
+    "My name is Tyler",
+    "Nope I am single",
+    "I live in Seattle",
+    "I am a plumber",
+    "About forty years old",
+  ];
+
+  it("acks and advances instead of joking until the burst is full", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+
+    // Every answer EXCEPT the burst-filling one → quick ack + next question, NO generation.
+    const acksBeforeBurst = COMEDIAN_CONFIG.rapidFireBurstSize - 1;
+    for (let i = 0; i < acksBeforeBurst; i++) {
+      await rapidAnswer(brain, BURST_ANSWERS[i]);
+    }
+
+    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
+    // Should have looped back through ask_question for the next burst question.
+    expect(getStates(deps)).toContain("ask_question");
+  });
+
+  it("fires a joke burst once rapidFireBurstSize answers are collected", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+    const brain = new ComedianBrain(deps);
+    await driveToWaitAnswer(brain);
+
+    const burstSize = COMEDIAN_CONFIG.rapidFireBurstSize;
+    // Answers up to (but not including) the last one just ack.
+    for (let i = 0; i < burstSize - 1; i++) {
+      await rapidAnswer(brain, BURST_ANSWERS[i]);
+    }
+    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
+
+    // The answer that fills the burst → one combined joke burst generates.
+    brain.onInputTranscription(BURST_ANSWERS[burstSize - 1]);
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(getStates(deps)).toContain("generating");
   });
 });
 
@@ -614,7 +693,7 @@ describe("ComedianBrain — filler echo gating", () => {
     // Word-anchored fillers with leading-only "..." — ElevenLabs renders the ellipsis as a
     // ~250ms breath beat before each filler. Trailing ellipsis was dropped because it
     // doubled the gap between stacked fillers (250ms trail + 250ms lead = 500ms dead beat).
-    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Gotcha\.)$/);
+    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Ah, gotcha\.)$/);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

@@ -12,12 +12,31 @@ import {
 
 export type ContentMode = "clean" | "vulgar";
 
+/**
+ * Conversation flow style. "original" = current behavior (LLM-personalized
+ * bank questions, vision_react interrupts, single-joke-per-cycle delivery).
+ * "rapid_fire" = short Q&As with binary/short-answer questions, jokes fired
+ * as 2-joke bursts about the gathered info, no vision_react interrupts.
+ * Dev-only toggle for now — production users always get "original".
+ */
+export type FlowMode = "original" | "rapid_fire";
+
 export type RoastModelId =
   | "gemini-3.5-flash"
+  | "gemini-2.5-flash"
   | "gemini-3.1-flash-lite"
   | "gpt-4o"
   | "claude-sonnet-4-6"
   | "claude-haiku-4-5-20251001";
+
+/**
+ * Surfaced when a Gemini model returns 503 UNAVAILABLE ("high demand").
+ * UI shows a prompt offering to swap to a healthy fallback and restart.
+ */
+export interface ModelUnavailableInfo {
+  failedModel: string;
+  suggestedFallback: string;
+}
 
 export interface VoiceSettings {
   stability: number;        // 0-1
@@ -88,9 +107,17 @@ export interface RoastSentence {
 interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
+  flowMode: FlowMode;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
   roastModel: RoastModelId;
+  /** Gemini model used for vision + greeting prefetch. Swapped together with
+   *  roastModel when the fallback prompt is accepted, since both default to
+   *  the same Gemini Flash tier. */
+  visionModel: string;
+  /** Non-null when a Gemini model returned 503 UNAVAILABLE. UI shows the
+   *  fallback prompt; user accepts → swap models + restart session. */
+  modelUnavailable: ModelUnavailableInfo | null;
   activePersona: PersonaId;
   isSpeaking: boolean;
   isListening: boolean;
@@ -153,9 +180,16 @@ interface SessionState {
   // actions
   setPhase: (phase: SessionPhase, trigger: SessionTrigger) => void;
   setSessionMode: (mode: SessionMode) => void;
+  setFlowMode: (mode: FlowMode) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
   setContentMode: (mode: ContentMode) => void;
   setRoastModel: (model: RoastModelId) => void;
+  setVisionModel: (model: string) => void;
+  setModelUnavailable: (info: ModelUnavailableInfo | null) => void;
+  /** Apply the suggested fallback to both roastModel and visionModel, then
+   *  clear modelUnavailable. UI calls setPhase("idle") after to drop the
+   *  user back to the landing screen for a clean restart. */
+  acceptModelFallback: () => void;
   setActivePersona: (persona: PersonaId) => void;
   setIsSpeaking: (speaking: boolean) => void;
   setIsListening: (listening: boolean) => void;
@@ -202,9 +236,12 @@ interface SessionState {
 const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
+  flowMode: "original" as FlowMode,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
   roastModel: "gemini-3.5-flash" as RoastModelId,
+  visionModel: "gemini-3.5-flash",
+  modelUnavailable: null as ModelUnavailableInfo | null,
   activePersona: DEFAULT_PERSONA,
   isSpeaking: false,
   isListening: false,
@@ -257,9 +294,22 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ phase });
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
+  setFlowMode: (flowMode) => set({ flowMode }),
   setBurnIntensity: (burnIntensity) => set({ burnIntensity }),
   setContentMode: (contentMode) => set({ contentMode }),
   setRoastModel: (roastModel) => set({ roastModel }),
+  setVisionModel: (visionModel) => set({ visionModel }),
+  setModelUnavailable: (modelUnavailable) => set({ modelUnavailable }),
+  acceptModelFallback: () => set((s) => {
+    const info = s.modelUnavailable;
+    if (!info) return {};
+    const fallback = info.suggestedFallback;
+    return {
+      modelUnavailable: null,
+      roastModel: fallback as RoastModelId,
+      visionModel: fallback,
+    };
+  }),
   setActivePersona: (activePersona) => set({ activePersona }),
   setIsSpeaking: (isSpeaking) => set({ isSpeaking }),
   setIsListening: (isListening) => set({ isListening }),

@@ -19,7 +19,7 @@ import { getBaseJokePrompt } from "@/lib/prompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
-import { generateText, generateTextStream, type UserPart } from "@/lib/llmClient";
+import { generateText, generateTextStream, toModelUnavailableError, type UserPart } from "@/lib/llmClient";
 import {
   estimateTokenCount,
   estimateUserPartsTokens,
@@ -182,7 +182,14 @@ export async function sendMessage(
   const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
 
   if (session.geminiChat) {
-    const result = await session.geminiChat.sendMessage({ message: userParts });
+    let result;
+    try {
+      result = await session.geminiChat.sendMessage({ message: userParts });
+    } catch (err) {
+      const unavailable = toModelUnavailableError(session.model, err);
+      if (unavailable) throw unavailable;
+      throw err;
+    }
     const text = result.text ?? "";
     const usage = result.usageMetadata;
     recordLlmUsage({
@@ -237,7 +244,14 @@ export async function* sendMessageStream(
   const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
 
   if (session.geminiChat) {
-    const stream = await session.geminiChat.sendMessageStream({ message: userParts });
+    let stream;
+    try {
+      stream = await session.geminiChat.sendMessageStream({ message: userParts });
+    } catch (err) {
+      const unavailable = toModelUnavailableError(session.model, err);
+      if (unavailable) throw unavailable;
+      throw err;
+    }
     let accumulated = "";
     let promptTokenCount: number | undefined;
     let candidatesTokenCount: number | undefined;
@@ -402,11 +416,22 @@ Keep it tight: quick opener + ONE comprehensive roast line that combines multipl
 Use at least 3 concrete observations when available.
 Set "relevant": true. Generate exactly 1 joke.`,
 
+    rapid_fire_greeting: `TASK: Rapid Fire opening — ONE charismatic WELCOME line. This is the ONE line in the
+whole show that is NOT a roast. OVERRIDE your roast intensity for this line only — you are
+a warm, quick-witted HOST right now (late-night-host energy), not a roast comedian.
+- ONE sentence, max 18 words. Warm, playful, a little cheeky — genuinely glad they're here.
+- A LIGHT friendly nod to what you see / the time of day / weather is fine — a compliment-shaped
+  tease at most, NEVER a put-down. ZERO insults, zero burns, nothing mean.
+- Then pivot into the game with energy (signal quick questions are coming). End upbeat, not on a punchline.
+- If unsure whether a line is mean, it is — soften it. The roasting starts on the NEXT turn, not now.
+Set "relevant": true. Generate exactly 1 joke whose text IS this welcome line.`,
+
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.
 Max 20 words, punchline at the end. Set "relevant": true. Generate exactly 1 joke.`,
 
     answer_roast: `TASK: Roast the user's answer. 1-2 jokes that directly reference and roast their answer.
 Max 20 words per sentence, punchline at the end. Each sentence self-contained.
+DO NOT restate or echo the user's answer back ("So you're a plumber...", "Five and seven, huh..."). They know what they said — react and twist, don't repeat.
 If FILLER_ALREADY_SAID is provided, that exact line was just spoken aloud — do NOT open with the same sound or phrasing.
 If FILLER_ALREADY_SAID ends in a question mark (e.g. "Tyler?", "So — Seattle?", "a dentist, huh?"), it already echoed the user's answer back as a question. Do NOT open your joke by re-asking or re-stating the answer ("Tyler? Really?", "So a dentist?") — go straight into the punchline.
 If off-topic, set "relevant": false with a witty "redirect".
