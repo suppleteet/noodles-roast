@@ -2166,8 +2166,8 @@ export class ComedianBrain {
         const isFirstJoke = jokesQueued === 0;
         if (isFirstJoke) {
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
-          // chain. The last filler's trailing "..." already provides the pre-joke breath, so
-          // the joke text itself stays unmodified.
+          // chain. _stopFillerPump also cancels a pending breath (pumpTimer) so no further
+          // filler queues ahead of the joke. The joke text itself stays unmodified.
           this._stopFillerPump();
           // Retarget puppet body language to anticipate the joke's mood while the last
           // filler audio is still draining. The motion-inferred-from-user-answer pose
