@@ -98,7 +98,7 @@ describe("ComedianBrain", () => {
         _pickFiller: (answer: string) => string;
       };
 
-      expect(brain._pickFiller("Gerard.")).toBe("Gerard, huh.");
+      expect(brain._pickFiller("Gerard.")).toBe("Gerard, huh. Okay.");
     });
 
     it("removes a repeated answer lead from a joke after echo filler", () => {

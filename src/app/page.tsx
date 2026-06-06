@@ -7,6 +7,7 @@ import HUDOverlay from "@/components/ui/HUDOverlay";
 import ShareScreen from "@/components/ui/ShareScreen";
 import DebugTimeline from "@/components/ui/DebugTimeline";
 import DebugTranscript from "@/components/ui/DebugTranscript";
+import LlmLogPanel from "@/components/ui/LlmLogPanel";
 import PuppetScene from "@/components/puppet/PuppetScene";
 import WebcamCapture, { type WebcamCaptureHandle } from "@/components/session/WebcamCapture";
 import AudioPlayer, { type AudioPlayerHandle } from "@/components/audio/AudioPlayer";
@@ -70,7 +71,6 @@ function MainApp() {
   const setPhase = useSessionStore((s) => s.setPhase);
   const setError = useSessionStore((s) => s.setError);
   const logTiming = useSessionStore((s) => s.logTiming);
-  const timingLog = useSessionStore((s) => s.timingLog);
   const setSessionStartTs = useSessionStore((s) => s.setSessionStartTs);
   const timeToFirstSpeechMs = useSessionStore((s) => s.timeToFirstSpeechMs);
   const observations = useSessionStore((s) => s.observations);
@@ -696,15 +696,7 @@ function MainApp() {
               </div>
             </div>
           )}
-          {timingLog.length > 0 && (
-            <div className="max-h-52 overflow-y-auto bg-black/80 border border-yellow-400/40 rounded p-2 font-mono text-[10px] text-yellow-300 leading-tight pointer-events-auto">
-              {timingLog.map((line, i) => (
-                <div key={i} className={line.startsWith("──") ? "text-yellow-500 mt-1" : "pl-2"}>
-                  {line}
-                </div>
-              ))}
-            </div>
-          )}
+          <LlmLogPanel />
         </div>
       )}
       {process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_BUILD_TIME && (

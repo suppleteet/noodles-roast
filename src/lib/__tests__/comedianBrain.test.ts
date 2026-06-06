@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
+import { NONWORD_FILLERS } from "@/lib/scriptLines";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
@@ -239,9 +240,10 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
-  it("watchdog rescues a hung generation — delivers fallback instead of dead air", async () => {
+  it("watchdog gracefully ends the session when generation hangs", async () => {
     vi.useFakeTimers();
-    const deps = makeDeps();
+    const onSessionEnd = vi.fn();
+    const deps = makeDeps({ onSessionEnd });
     const brain = new ComedianBrain(deps);
     await driveToWaitAnswer(brain);
     // generate-speak hangs forever (simulates Gemini / server stall — the exact
@@ -251,11 +253,14 @@ describe("ComedianBrain — Q&A cycle", () => {
     vi.advanceTimersByTime(1600); // commit answer → generating
     expect(getStates(deps)).toContain("generating");
     (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
-    // Watchdog fires at generationTimeoutMs (13s) — aborts the hang, delivers a
-    // canned roast, and leaves "generating" so the show advances.
+    // Watchdog fires at generationTimeoutMs (13s) — aborts the hang, speaks a
+    // persona-flavored "technical difficulties" line, then ends the session
+    // on TTS drain (rather than grinding through more canned fallbacks).
     await vi.advanceTimersByTimeAsync(13_000);
-    expect(getStates(deps)).toContain("delivering");
-    expect(deps.queueSpeak).toHaveBeenCalled(); // a fallback roast line was spoken
+    expect(getStates(deps)).toContain("wrapup");
+    expect(deps.queueSpeak).toHaveBeenCalled(); // tech-difficulties line was spoken
+    brain.onTtsQueueDrained();
+    expect(onSessionEnd).toHaveBeenCalled();
   });
 
   it("does not immediately commit an unfinalized sentence starter", async () => {
@@ -674,6 +679,10 @@ describe("ComedianBrain — filler echo gating", () => {
 
     brain.onInputTranscription(answer, true);
     vi.advanceTimersByTime(1600);
+    // The filler is queued after a fillerBreathMs breath (a real setTimeout). Fire that timer
+    // synchronously — BEFORE awaiting, so the mocked joke fetch can't resolve and stop the pump
+    // first — so the captured first queueSpeak is the filler, not the joke.
+    vi.advanceTimersByTime(COMEDIAN_CONFIG.fillerBreathMs);
     await vi.runAllTimersAsync();
 
     // First queueSpeak after answer-complete is the filler.
@@ -690,10 +699,10 @@ describe("ComedianBrain — filler echo gating", () => {
   it("uses a non-echo filler when echo probability misses", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0.99);
     expect(filler.toLowerCase()).not.toContain("tyler");
-    // Word-anchored fillers with leading-only "..." — ElevenLabs renders the ellipsis as a
-    // ~250ms breath beat before each filler. Trailing ellipsis was dropped because it
-    // doubled the gap between stacked fillers (250ms trail + 250ms lead = 500ms dead beat).
-    expect(filler).toMatch(/^\.{3} (Mm, okay\.|Hm, alright\.|Uh-huh, sure\.|Right, right\.|I see\.|Okay then\.|Yeah, alright\.|Ah, gotcha\.)$/);
+    // No leading "..." anymore — the breath beat is inserted in code (fillerBreathMs of
+    // silence) instead of baked into the text. The filler is one of the verbatim non-word lines.
+    expect(filler.startsWith("...")).toBe(false);
+    expect(NONWORD_FILLERS).toContain(filler);
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

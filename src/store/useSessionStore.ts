@@ -130,6 +130,9 @@ interface SessionState {
   recordedBlob: Blob | null;
   error: string | null;
   timingLog: string[];
+  /** Legible LLM call/response log for the debug panel — "→" is what we asked the model,
+   *  "←" is what came back (plain text, never JSON). */
+  llmLog: { ts: number; dir: "→" | "←"; label: string; text: string }[];
   observations: string[];
   visionSetting: string | null; // best guess at user's location from background analysis
   locationConsent: boolean; // user opted in to share location
@@ -202,6 +205,8 @@ interface SessionState {
   setError: (error: string | null) => void;
   logTiming: (entry: string) => void;
   clearTimingLog: () => void;
+  pushLlmLog: (dir: "→" | "←", label: string, text: string) => void;
+  clearLlmLog: () => void;
   setObservations: (obs: string[]) => void;
   setVisionSetting: (setting: string | null) => void;
   setLocationConsent: (consent: boolean) => void;
@@ -254,6 +259,7 @@ const initialState = {
   recordedBlob: null,
   error: null,
   timingLog: [] as string[],
+  llmLog: [] as { ts: number; dir: "→" | "←"; label: string; text: string }[],
   observations: [] as string[],
   visionSetting: null as string | null,
   locationConsent: true,
@@ -332,6 +338,11 @@ export const useSessionStore = create<SessionState>((set) => ({
       return { timingLog: next };
     }),
   clearTimingLog: () => set({ timingLog: [] }),
+  pushLlmLog: (dir, label, text) =>
+    set((s) => ({
+      llmLog: [...s.llmLog.slice(-299), { ts: Date.now(), dir, label, text: text.trim() }],
+    })),
+  clearLlmLog: () => set({ llmLog: [] }),
   setObservations: (observations) => set({ observations }),
   setVisionSetting: (visionSetting) => set({ visionSetting }),
   setLocationConsent: (locationConsent) => set({ locationConsent }),

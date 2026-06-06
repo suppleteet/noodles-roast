@@ -1046,6 +1046,7 @@ export default function LiveSessionController({
     micBlockedLoggedRef.current = false;
     useSessionStore.getState().setError(null); // clear any prior quota/session error
     useSessionStore.getState().clearTimingLog();
+    useSessionStore.getState().clearLlmLog();
     useSessionStore.getState().clearConversationEvents();
     useSessionStore.getState().clearTimelineSpans();
     useSessionStore.getState().clearTranscriptHistory();
@@ -1113,6 +1114,7 @@ export default function LiveSessionController({
       setCurrentQuestion: (q) => useSessionStore.getState().setCurrentQuestion(q),
       setUserAnswer: (a) => useSessionStore.getState().setUserAnswer(a),
       logTiming: (e) => useSessionStore.getState().logTiming(e),
+      logLlm: (dir, label, text) => useSessionStore.getState().pushLlmLog(dir, label, text),
       setError: (e) => useSessionStore.getState().setError(e),
       onModelUnavailable: (failedModel, suggestedFallback) => {
         const store = useSessionStore.getState();

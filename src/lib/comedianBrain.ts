@@ -43,6 +43,7 @@ import {
   GREETING_FALLBACK,
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
+  TECHNICAL_DIFFICULTIES_LINES,
   CONTEXTUAL_QUESTION_PRODS,
   CONTEXTUAL_FALLBACK_QUESTION,
   CONTEXTUAL_FALLBACK_PRODS,
@@ -132,6 +133,9 @@ export interface ComedianBrainDeps {
   setCurrentQuestion: (q: string | null) => void;
   setUserAnswer: (ans: string) => void;
   logTiming: (entry: string) => void;
+  /** Legible LLM call/response log for the debug panel. "→" = what we asked the model,
+   *  "←" = the text it returned. Plain text only, never JSON. */
+  logLlm?: (dir: "→" | "←", label: string, text: string) => void;
   /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
   setError?: (error: string) => void;
   /** Called when a Gemini call returns 503 UNAVAILABLE. Controller surfaces a
@@ -164,6 +168,15 @@ export interface ComedianBrainDeps {
     appendToPrev?: boolean,
   ) => void;
 }
+
+// Fillers drive body animation from the inferred reaction (smug/conspiratorial/etc.), but
+// the VOICE always uses this fixed mild "energetic" preset. The inferred motion is frequently
+// low-energy ("thinking" raises stability, "conspiratorial" lowers style + speed), which made
+// fillers render flat/monotone — the opposite of what we want while the puppet is "thinking out
+// loud." energetic lowers stability (→ more expressive) without changing the pinned 0.7 speed
+// (the speed override in _queueNextPumpFiller wins last). Tune by ear.
+const FILLER_VOICE_MOTION: MotionState = "energetic";
+const FILLER_VOICE_INTENSITY = 0.55;
 
 // ─── Fisher-Yates shuffle ───────────────────────────────────────────────────────
 
@@ -349,9 +362,11 @@ export class ComedianBrain {
   private devNoteTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Filler pump (active during "generating" — keeps audio chain non-silent until joke arrives).
-  // No timers: each filler is wrapped "... <text> ..." so ElevenLabs renders ~250ms breath
-  // beats before and after, which provides the pre-react beat, inter-filler gaps, and the
-  // pre-joke breath naturally. The pump is just a flag + a queue call on each drain event.
+  // Each filler is preceded by COMEDIAN_CONFIG.fillerBreathMs of real silence (pumpTimer)
+  // instead of a baked-in leading "..." — EL rendered the ellipsis flatly and spiked the
+  // attack on the following word. pumpTimer fires the breath; on its tick we queue the filler
+  // audio, and the next drain event schedules the next breath. Cancelled when the pump stops.
+  private pumpTimer: ReturnType<typeof setTimeout> | null = null;
   private fillerPumpActive = false;
   private fillerLineCount = 0;
   private fillerAnswerForPump = "";
@@ -408,11 +423,6 @@ export class ComedianBrain {
   // Model availability — flipped once a 503 has fired the onModelUnavailable
   // callback, so we don't spam the user with the same prompt for every retry.
   private modelUnavailableFired = false;
-  /** Consecutive generation-watchdog fires. Reset to 0 whenever a real joke
-   *  arrives. ≥2 in a row implies the LLM is degraded (client-side timeout
-   *  before any status code), so we trip the same model-unavailable prompt
-   *  that a 503 would have. */
-  private consecutiveWatchdogFires = 0;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -468,7 +478,6 @@ export class ComedianBrain {
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
     this.modelUnavailableFired = false;
-    this.consecutiveWatchdogFires = 0;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -1762,6 +1771,8 @@ export class ComedianBrain {
   private _stopFillerPump(): { fillerQueued: boolean } {
     const queued = this.fillerLineCount > 0;
     this.fillerPumpActive = false;
+    // Cancel a pending breath so it can't queue a stray filler on top of the joke.
+    if (this.pumpTimer) { clearTimeout(this.pumpTimer); this.pumpTimer = null; }
     return { fillerQueued: queued };
   }
 
@@ -1771,7 +1782,7 @@ export class ComedianBrain {
    * while we're still stuck in "generating" (no joke ever streamed), aborts the hung
    * request and delivers a canned fallback roast so the show never dead-airs.
    */
-  private _armGenerationWatchdog(answer: string): void {
+  private _armGenerationWatchdog(_answer: string): void {
     this._clearGenerationWatchdog();
     // Abort the PREVIOUS in-flight fetch before stomping the ref. Without this,
     // a barge-in restart leaves the prior generate-speak stream running — its
@@ -1784,44 +1795,53 @@ export class ComedianBrain {
       // If a joke arrived we've already left "generating" — nothing to rescue.
       if (this.state !== "generating") return;
       this.deps.logTiming(
-        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — aborting + fallback`,
+        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — graceful exit`,
       );
-      // Cancel the hung fetch so a late response can't double-fire on top of the fallback.
+      // Cancel the hung fetch so a late response can't double-fire on top of the goodbye.
       try { this.generationAbort?.abort(); } catch { /* best-effort */ }
       this.generationAbort = null;
       // Invalidate any in-flight stream callbacks (they check deliveryGeneration).
       this.deliveryGeneration++;
       this._stopFillerPump();
-      this._onWatchdogFired();
-      // Deliver a canned roast and advance — enterDelivering with no jokes picks the fallback.
-      this.enterDelivering(answer, { relevant: true, jokes: [] }, undefined);
+      // Speak a persona-flavored "technical difficulties" line and end the session.
+      // Previously this delivered a canned fallback roast and kept going, which
+      // led to multiple watchdog fires per session (each = ~10s of fillers + a
+      // generic line) when the LLM was actually broken.
+      this._enterTechnicalDifficultiesExit();
     }, COMEDIAN_CONFIG.generationTimeoutMs);
   }
 
   /**
-   * Track consecutive watchdog fires. When the LLM stalls twice in a row,
-   * Gemini is degraded (the symptoms are identical to a 503, but the request
-   * times out client-side before any status code arrives — so the structured
-   * 503 → model-unavailable path never triggers). Surface the same fallback
-   * modal so the user can switch models and recover instead of sitting through
-   * canned fallback roasts.
+   * Watchdog-triggered graceful exit. Speaks a persona-flavored
+   * technical-difficulties line and routes through the wrapup state so
+   * the existing drain handler fires onSessionEnd. Skips the LLM closing-line
+   * call (that's what just failed) — uses a canned line directly.
    */
-  private _onWatchdogFired(): void {
-    this.consecutiveWatchdogFires++;
-    if (this.consecutiveWatchdogFires < 2 || this.modelUnavailableFired) return;
-    const failedModel = this.deps.getRoastModel();
-    // Inline the suggested fallback (don't import llmClient — that pulls in
-    // server-only Anthropic/OpenAI/Gemini SDKs into the browser bundle).
-    const suggestedFallback =
-      failedModel.startsWith("gemini-") && failedModel !== "gemini-2.5-flash"
-        ? "gemini-2.5-flash"
-        : null;
-    if (!suggestedFallback) return;
-    this.modelUnavailableFired = true;
-    this.deps.logTiming(
-      `brain: ${this.consecutiveWatchdogFires} consecutive watchdog fires — prompting fallback to ${suggestedFallback}`,
-    );
-    this.deps.onModelUnavailable?.(failedModel, suggestedFallback);
+  private _enterTechnicalDifficultiesExit(): void {
+    // Cancel anything that could still queue audio after us.
+    this._clearTimers();
+    this._cancelSpeculative();
+    this._cancelExpectedJokesGen();
+    this._cancelHopper();
+    this._cancelPipelinePrefetch();
+    this._cancelRephrase();
+    this.preQueuedQuestion = null;
+    this.preQueuedRephrasedText = null;
+    this.pipelinePrefetch = null;
+    this.pendingWrapup = false;
+
+    this._transition("wrapup");
+    this.deps.setMotion("conspiratorial", 0.7);
+
+    const persona = this.deps.getPersona();
+    const lines =
+      TECHNICAL_DIFFICULTIES_LINES[persona] ?? TECHNICAL_DIFFICULTIES_LINES.kvetch;
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    this.deps.logTiming(`brain: technical-difficulties exit — "${line.slice(0, 60)}"`);
+    this.deps.queueSpeak(line, "conspiratorial", 0.7);
+    this._addLedger("joke", line, []);
+    // Flip the gate so the next wrapup drain event fires session end.
+    this.wrapupClosingQueued = true;
   }
 
   /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */
@@ -1833,9 +1853,10 @@ export class ComedianBrain {
   }
 
   /**
-   * Queue the next filler in the pump. Called directly — no setTimeout. The 250ms pre- and
-   * post-breath is baked into the filler text via "..." padding, so ElevenLabs handles all
-   * pacing. Bails if the pump was stopped, we're no longer generating, or we've hit the cap.
+   * Schedule the next filler in the pump. We wait COMEDIAN_CONFIG.fillerBreathMs of real
+   * silence (the breath beat we used to get from a leading "..."), then queue the filler audio.
+   * Bails up front if the pump was stopped, we're no longer generating, or we've hit the cap;
+   * the deferred callback re-checks those guards in case the joke arrived during the breath.
    */
   private _queueNextPumpFiller(): void {
     if (!this.fillerPumpActive) return;
@@ -1847,29 +1868,32 @@ export class ComedianBrain {
     }
     // First filler can echo the answer; subsequent stacked fillers stay non-word so we don't
     // repeat the same echo phrase or sound like a broken record.
-    const filler =
-      this.fillerLineCount === 0
-        ? this._pickFiller(this.fillerAnswerForPump)
-        : this._pickNonWordFiller(this.fillerLastText);
-    if (this.fillerLineCount === 0) this.fillerFirstText = filler;
-    this.fillerLastText = filler;
-    this.fillerLineCount++;
-    // Leading-only ellipsis → ~250ms breath BEFORE each filler. No trailing ellipsis: the
-    // next filler's leading "..." already provides the inter-filler gap, and the joke after
-    // the last filler shouldn't have a long pause either. Trailing ellipses would double-up
-    // between stacked fillers (~500ms gap), which felt like an audible dead beat.
-    const wrapped = `... ${filler}`;
-    // Drive puppet animation via setMotion (visual cue) but DO NOT pass motion to queueSpeak
-    // — voice presets layer stability/style/speed deltas and compounded drift across stacked
-    // fillers sounded erratic. Slow the speed to 0.7 so the filler reads as pondering rather
-    // than another sentence. Joke that follows returns to base speed (1.0) so the punch
-    // line lands at full pace.
+    const isFirst = this.fillerLineCount === 0;
+    const filler = isFirst
+      ? this._pickFiller(this.fillerAnswerForPump)
+      : this._pickNonWordFiller(this.fillerLastText);
+    // Body animation reflects the inferred reaction immediately; the breath happens before voice.
     this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
-    this.deps.queueSpeak(wrapped, undefined, undefined, false, { speed: 0.7 });
-    this.deps.logTiming(
-      `brain: filler[${this.fillerLineCount}] (${this.fillerMotion}, speed=0.7) — "${filler}"`,
-    );
-    // The next filler is queued directly when the queue drains (see onTtsQueueDrained "generating").
+    // Add the breath ourselves: fillerBreathMs of silence, THEN queue the audio. We DON'T bake
+    // a leading "..." into the text anymore — EL rendered it flatly and spiked the attack on the
+    // word after it. The bookkeeping (count / lastText) only advances once the audio is actually
+    // queued, so a joke arriving mid-breath leaves the counters consistent.
+    if (this.pumpTimer) clearTimeout(this.pumpTimer);
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = null;
+      if (!this.fillerPumpActive || this.state !== "generating") return;
+      if (isFirst) this.fillerFirstText = filler;
+      this.fillerLastText = filler;
+      this.fillerLineCount++;
+      // Voice uses a fixed mild "energetic" preset (FILLER_VOICE_MOTION) for expressiveness;
+      // the { speed: 0.7 } override wins last so fillers still read as unhurried "thinking out
+      // loud". The joke that follows returns to base speed so the punch line lands at full pace.
+      this.deps.queueSpeak(filler, FILLER_VOICE_MOTION, FILLER_VOICE_INTENSITY, false, { speed: 0.7 });
+      this.deps.logTiming(
+        `brain: filler[${this.fillerLineCount}] (voice=${FILLER_VOICE_MOTION}, body=${this.fillerMotion}, speed=0.7) — "${filler}"`,
+      );
+    }, COMEDIAN_CONFIG.fillerBreathMs);
+    // The next filler is scheduled when the queue drains (see onTtsQueueDrained "generating").
   }
 
   private _removeEchoedAnswerLead(text: string, answer: string, fillerAlreadySaid?: string): string {
@@ -1920,10 +1944,10 @@ export class ComedianBrain {
     this._armGenerationWatchdog(answer);
 
     // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
-    // pause. First filler queues immediately; each filler is wrapped "... <text> ..." so
-    // ElevenLabs renders ~250ms breath beats on both sides. The pre-react beat, inter-filler
-    // gaps, and the pre-joke breath all come from the trailing ellipsis on the prior chain
-    // entry; no setTimeouts. Pump stops when the first joke arrives.
+    // pause. _queueNextPumpFiller waits COMEDIAN_CONFIG.fillerBreathMs of silence (the breath
+    // beat), then queues each filler; the next breath is scheduled on each drain event. The
+    // pre-react beat and inter-filler gaps both come from that timer. Pump stops when the first
+    // joke arrives.
     let fillerAlreadySaid: string | undefined;
     if (!COMEDIAN_CONFIG.skipFiller && !this.fillerFiredForAnswer) {
       this.fillerFiredForAnswer = true;
@@ -2141,10 +2165,6 @@ export class ComedianBrain {
         if (this.state !== "generating" && this.state !== "delivering") return;
         const isFirstJoke = jokesQueued === 0;
         if (isFirstJoke) {
-          // Real joke arrived → LLM is healthy. Reset the watchdog counter so
-          // it takes 2 more consecutive timeouts to retrip the model-unavailable
-          // prompt.
-          this.consecutiveWatchdogFires = 0;
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
           // chain. The last filler's trailing "..." already provides the pre-joke breath, so
           // the joke text itself stays unmodified.
@@ -3451,9 +3471,10 @@ export class ComedianBrain {
     this._clearConfirmTimer();
     this._clearGenerationWatchdog();
     // Pump cancellation — _clearTimers fires on stop / cancellation / wait_answer entry, all
-    // paths where leaving "generating" without delivering a joke is possible. No timer to
-    // cancel (pump runs purely off drain events), just flip the flag.
+    // paths where leaving "generating" without delivering a joke is possible. Flip the flag and
+    // cancel any pending breath so a deferred filler can't fire after we've moved on.
     this.fillerPumpActive = false;
+    if (this.pumpTimer) { clearTimeout(this.pumpTimer); this.pumpTimer = null; }
   }
 
   private _getPersonaGreetings(): string[] {
@@ -3499,6 +3520,14 @@ export class ComedianBrain {
     /** Whether the brain has emitted a transcript entry for this joke yet. */
     const jokeAppendState: Map<number, boolean> = new Map();
     let jokesSeen = 0;
+
+    // Debug LLM log: legible record of what we're asking for.
+    {
+      const bits: string[] = [];
+      if (params.question) bits.push(`Q:"${params.question}"`);
+      if (params.userAnswer) bits.push(`A:"${params.userAnswer}"`);
+      this.deps.logLlm?.("→", params.context, bits.join(" ") || "(streaming roast)");
+    }
 
     fetch("/api/generate-speak", {
       method: "POST",
@@ -3584,6 +3613,7 @@ export class ComedianBrain {
             }
           } else if (event.type === "joke") {
             const joke = event as unknown as JokeItem & { index?: number };
+            this.deps.logLlm?.("←", "joke", joke.text);
             // Streaming path: record transcript now (LLM has all the text),
             // but DO NOT close the audio buffer — EL is still synthesizing.
             // The buffer is closed by the `audio-end` event above.
@@ -3692,6 +3722,13 @@ export class ComedianBrain {
     signal?: AbortSignal,
   ): Promise<JokeResponse | null> {
     try {
+      {
+        const bits: string[] = [];
+        if (params.question) bits.push(`Q:"${params.question}"`);
+        if (params.userAnswer) bits.push(`A:"${params.userAnswer}"`);
+        if (params.observations?.length) bits.push(`sees: ${params.observations.slice(0, 4).join(", ")}`);
+        this.deps.logLlm?.("→", params.context, bits.join(" ") || "(generate)");
+      }
       const resp = await fetch("/api/generate-joke", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3733,7 +3770,10 @@ export class ComedianBrain {
         }
         return null;
       }
-      return (await resp.json()) as JokeResponse;
+      const json = (await resp.json()) as JokeResponse;
+      const firstText = json.jokes?.[0]?.text;
+      if (firstText) this.deps.logLlm?.("←", params.context, firstText);
+      return json;
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         console.error("[brain] generate-joke error:", e);

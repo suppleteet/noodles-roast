@@ -17,14 +17,11 @@ function relTime(ts: number, startTs: number | null): string {
  */
 export default function DebugTranscript() {
   const [expanded, setExpanded] = useState(true);
-  const [tab, setTab] = useState<"transcript" | "log">("transcript");
   const [debugInput, setDebugInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
-  const logBottomRef = useRef<HTMLDivElement>(null);
 
   const transcriptHistory = useSessionStore((s) => s.transcriptHistory);
-  const timingLog = useSessionStore((s) => s.timingLog);
   const brainState = useSessionStore((s) => s.brainState);
   const userAnswer = useSessionStore((s) => s.userAnswer);
   const isListening = useSessionStore((s) => s.isListening);
@@ -53,11 +50,8 @@ export default function DebugTranscript() {
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
-    if (expanded && tab === "transcript") transcriptBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcriptHistory.length, expanded, tab]);
-  useEffect(() => {
-    if (expanded && tab === "log") logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [timingLog.length, expanded, tab]);
+    if (expanded) transcriptBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcriptHistory.length, expanded]);
 
   // Auto-focus input when listening starts
   useEffect(() => {
@@ -110,21 +104,6 @@ export default function DebugTranscript() {
 
       {expanded && (
         <div className="w-72 bg-black/90 border border-emerald-400/30 rounded overflow-hidden">
-          {/* Tab bar */}
-          <div className="flex border-b border-emerald-400/20">
-            {(["transcript", "log"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`flex-1 py-0.5 font-mono text-[10px] transition-colors ${
-                  tab === t ? "text-emerald-300 bg-emerald-900/30" : "text-white/30 hover:text-white/50"
-                }`}
-              >
-                {t === "log" ? `log (${timingLog.length})` : `transcript (${transcriptHistory.length})`}
-              </button>
-            ))}
-          </div>
-
           {/* State + answer buffer header */}
           <div className="px-2 py-1 font-mono text-[10px] text-emerald-500 border-b border-emerald-400/20">
             state: <span className="text-white/60">{brainState ?? "—"}</span>
@@ -133,10 +112,9 @@ export default function DebugTranscript() {
             )}
           </div>
 
-          {/* Tab content */}
+          {/* Transcript */}
           <div className="max-h-[50vh] overflow-y-auto p-2 font-mono text-[10px] leading-relaxed">
-            {tab === "transcript" && (
-              <>
+            <>
                 {groupedTranscript.length === 0 ? (
                   <div className="text-white/20 italic">No transcript yet</div>
                 ) : (
@@ -193,35 +171,7 @@ export default function DebugTranscript() {
                   })
                 )}
                 <div ref={transcriptBottomRef} />
-              </>
-            )}
-            {tab === "log" && (
-              <>
-                {timingLog.length === 0 ? (
-                  <div className="text-white/20 italic">No log entries yet</div>
-                ) : (
-                  timingLog.map((line, i) => (
-                    <div
-                      key={i}
-                      className={
-                        line.includes("brain: →")
-                          ? "text-purple-300/80 font-bold mb-0.5"
-                          : line.includes("ERROR") || line.includes("error")
-                          ? "text-red-400/90 mb-0.5"
-                          : line.includes("joke[")
-                          ? "text-orange-300/70 mb-0.5"
-                          : line.includes("heard")
-                          ? "text-cyan-300/70 mb-0.5"
-                          : "text-white/40 mb-0.5"
-                      }
-                    >
-                      {line}
-                    </div>
-                  ))
-                )}
-                <div ref={logBottomRef} />
-              </>
-            )}
+            </>
           </div>
         </div>
       )}
