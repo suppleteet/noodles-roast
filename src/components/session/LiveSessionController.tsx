@@ -316,6 +316,12 @@ export default function LiveSessionController({
     intensity?: number,
     appendToPrev?: boolean,
   ): void {
+    // NOTE: `buffer` was synthesized upstream (greeting prefetch in page.tsx) from
+    // the original text, so stripping here only sanitizes the TRANSCRIPT, not the
+    // audio. That's fine: the only prefetched path is the LLM-generated greeting,
+    // whose prompt forbids stage directions — so there's nothing to mismatch. The
+    // failed-buffer fallback below re-routes through queueSpeak, which synthesizes
+    // from this stripped text directly.
     text = stripStageDirections(text);
     if (!text.trim() || !isRunningRef.current) return;
     if (buffer.failed) {

@@ -45,7 +45,8 @@
 |----------|----------|----------|
 | `VISION_MODEL` | `gemini-3.5-flash` | Webcam frame analysis (`/api/vision`, `/api/analyze`) |
 | `ROAST_MODEL` | `gemini-3.5-flash` | Default joke generation model (`/api/generate-joke`, `/api/generate-speak`, `/api/generate-question`, `/api/rephrase-question`) — Claude Sonnet 4.6, Claude Haiku 4.5, GPT-4o, and `gemini-3.1-flash-lite` also selectable via UI |
-| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel |
+| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel (Roast). Picked per-experience by `voiceIdForExperience()` |
+| `TOAST_VOICE_ID` | `vamKBH1qWYogA4WG6UPB` | TTS voice for the Toast experience (drunk-wedding-toast character). Override via `ELEVENLABS_TOAST_VOICE_ID` env |
 | `LIVE_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | Live API STT/VAD only (`/api/live-token`) |
 | `LIVE_VOICE_NAME` | `Kore` | Gemini native audio voice (used in session config) |
 
