@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useSessionStore, DEFAULT_VOICE_SETTINGS } from "@/store/useSessionStore";
+import { useSessionStore, DEFAULT_VOICE_SETTINGS, TOAST_VOICE_SETTINGS } from "@/store/useSessionStore";
 import type { VoiceSettings } from "@/store/useSessionStore";
 
 type TranscriptEntry = ReturnType<typeof useSessionStore.getState>["transcriptHistory"][number];
@@ -202,6 +202,9 @@ function VoiceSliders({ voiceSettings, setVoiceSettings, burnIntensity, setBurnI
   setBurnIntensity: (n: 1 | 2 | 3 | 4 | 5) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Reset to the active experience's defaults (Toast's drunk seed, not Roast's).
+  const experienceType = useSessionStore((s) => s.experienceType);
+  const resetTarget = experienceType === "toast" ? TOAST_VOICE_SETTINGS : DEFAULT_VOICE_SETTINGS;
   return (
     <div className="w-72 bg-black/90 border border-purple-400/30 rounded overflow-hidden">
       <button
@@ -255,7 +258,7 @@ function VoiceSliders({ voiceSettings, setVoiceSettings, burnIntensity, setBurnI
             Speaker Boost
           </label>
           <button
-            onClick={() => setVoiceSettings(DEFAULT_VOICE_SETTINGS)}
+            onClick={() => setVoiceSettings(resetTarget)}
             className="w-full py-0.5 font-mono text-[9px] text-white/30 hover:text-white/60 border border-white/10 hover:border-white/20 rounded transition-colors"
           >
             Reset defaults

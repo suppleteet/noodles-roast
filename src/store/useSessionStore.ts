@@ -66,6 +66,25 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   use_speaker_boost: true,
 };
 
+/**
+ * Toast's starting voice — seeded into `voiceSettings` when the user picks Toast,
+ * so the debug VoiceSliders still drive her live. Tuned for DRUNK, not loud:
+ *  - LOW stability is what reads as drunk — loose, wandering, slurry, emotional.
+ *    (High stability sounds flat/sober/boring; that was the earlier mistake.)
+ *    Left high enough that the energetic/laugh motion deltas (−0.2/−0.3) can dip
+ *    it further without turning to warble.
+ *  - `style` moderate + `use_speaker_boost` OFF keeps her from getting loud or
+ *    clipping (speaker-boost was the gain that pushed the cloned voice hot).
+ *  - Slower `speed` for the drawl.
+ */
+export const TOAST_VOICE_SETTINGS: VoiceSettings = {
+  stability: 0.4,           // LOW = drunk/loose/slurry (was wrongly raised to 0.85)
+  similarity_boost: 0.7,
+  style: 0.5,               // expressive but not the maxed-out 1.0 that read as loud
+  speed: 0.9,               // drunk drawl — slower than the 1.0 default
+  use_speaker_boost: false, // EL speaker-boost raises output level → hot/clipping. Off for Toast.
+};
+
 /** Ambient context derived from geolocation — time-of-day, weather, city. */
 export interface AmbientContext {
   city: string;
@@ -316,7 +335,19 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
   setFlowMode: (flowMode) => set({ flowMode }),
-  setExperienceType: (experienceType) => set({ experienceType }),
+  setExperienceType: (experienceType) =>
+    set((s) =>
+      // Only reseed the voice when the experience actually changes — protects any
+      // live VoiceSliders tweaks from being clobbered by a redundant set call.
+      s.experienceType === experienceType
+        ? { experienceType }
+        : {
+            experienceType,
+            voiceSettings: {
+              ...(experienceType === "toast" ? TOAST_VOICE_SETTINGS : DEFAULT_VOICE_SETTINGS),
+            },
+          },
+    ),
   setBurnIntensity: (burnIntensity) => set({ burnIntensity }),
   setContentMode: (contentMode) => set({ contentMode }),
   setRoastModel: (roastModel) => set({ roastModel }),

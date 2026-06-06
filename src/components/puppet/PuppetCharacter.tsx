@@ -37,6 +37,17 @@ const PUPIL_RADIUS = 0.133;
 const LEFT_PUPIL_POS:  [number, number, number] = [ 0.036, 0.171, 0.111];
 const RIGHT_PUPIL_POS: [number, number, number] = [-0.036, 0.171, 0.111];
 
+// Toast eyelid tilt: the cap is centered on the eye's local +Y (top of dome),
+// but the pupil sits ~34° off that top toward the front (+Z), so a level cap
+// buries it. Rotating the cap BACK about local X (negative → +Y leans toward
+// -Z) lifts the front edge clear of the pupil and reads as a back-set droopy
+// hood. Euler XYZ in RADIANS. X = -0.61 (≈35° back) clears the pupil while still
+// reading as a droopy lid; Z = ±0.26 (≈15°) cants each lid OUTWARD toward the
+// temple — positive on the left eye, negative on the right — for a heavier,
+// asymmetric drunk droop.
+const LEFT_EYELID_ROT:  [number, number, number] = [-0.61, 0,  0.26];
+const RIGHT_EYELID_ROT: [number, number, number] = [-0.61, 0, -0.26];
+
 // ── Palette ───────────────────────────────────────────────────────────────────
 // Two palettes — the experienceType picks one at session start. Roast keeps the
 // existing purple/dark-red look; Toast shifts everything warm-gold + amber
@@ -179,7 +190,7 @@ function ProceduralHead() {
             radius than the eyeball (0.305 vs 0.30) so there's no
             z-fight along the seam. */}
         {isToast && (
-          <mesh position={[0, 0.05, 0]}>
+          <mesh position={[0, 0.05, 0]} rotation={LEFT_EYELID_ROT}>
             <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
             <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
           </mesh>
@@ -197,7 +208,7 @@ function ProceduralHead() {
           <meshStandardMaterial color={palette.pupil} roughness={0.3} />
         </mesh>
         {isToast && (
-          <mesh position={[0, 0.05, 0]}>
+          <mesh position={[0, 0.05, 0]} rotation={RIGHT_EYELID_ROT}>
             <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
             <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
           </mesh>

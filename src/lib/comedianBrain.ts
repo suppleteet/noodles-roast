@@ -1344,8 +1344,12 @@ export class ComedianBrain {
       // After every bank question, generate a contextual one (what do you do in that office?).
       // Rapid Fire skips contextual entirely — bank questions only, no LLM detour mid-game.
       const bankAvailable = this._nextValidQuestion();
+      // Toast never detours to LLM-generated contextual questions — its 11-question
+      // bank is the whole point, and generic contextual questions read as off-voice
+      // ("not a good question for a toast"). Stay on the bank.
       const shouldUseContextual =
         !this._isRapidFireFlow() &&
+        !this._isToast() &&
         this.bankQuestionsInARow >= 1 &&
         this.cameraAvailable;
 
@@ -2564,6 +2568,19 @@ export class ComedianBrain {
       return;
     }
 
+    // Toast: questions are hand-authored drunk self-interruptions — the rambling
+    // seam IS the comedy. The roast-only /api/rephrase-question forces a roast
+    // persona voice + a <15-word single-sentence cap, flattening them to a generic
+    // line ("So, what is your name anyway?"). Deliver the authored bank question
+    // verbatim instead.
+    if (this._isToast()) {
+      this.deps.queueSpeak(questionText, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(questionText);
+      this._addLedger("question", questionText, []);
+      this.deps.logTiming("brain: toast — verbatim bank question (no rephrase)");
+      return;
+    }
+
     // Get the last joke text for rephrase context
     const lastJoke = this.ledger
       .filter((e) => e.type === "joke")
@@ -2699,7 +2716,9 @@ export class ComedianBrain {
     if (this.preQueuedQuestion) return;
 
     const isRapidFire = this._isRapidFireFlow();
-    const shouldUseContextual = !isRapidFire && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+    // Toast stays on its authored bank — never pre-fetch a generic contextual question.
+    const shouldUseContextual =
+      !isRapidFire && !this._isToast() && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
       this._preFetchContextualQuestion();
@@ -2728,6 +2747,13 @@ export class ComedianBrain {
   }
 
   private _fetchRephraseForPreQueue(questionText: string): void {
+    // Toast: skip rephrase entirely (see _queueQuestionWithBridge) — stash the
+    // authored bank question verbatim so enterAskQuestion speaks it as written.
+    if (this._isToast()) {
+      this.preQueuedRephrasedText = questionText;
+      this.deps.logTiming("brain: toast pre-queue — verbatim bank question (no rephrase)");
+      return;
+    }
     const lastJoke = this.ledger.filter((e) => e.type === "joke").at(-1)?.text ?? "";
     const knownFacts = this._getThrowbackContext();
     const targetSlot = this.preQueuedQuestion;
@@ -3229,6 +3255,12 @@ export class ComedianBrain {
     observations?: string[],
     answer?: string,
   ): void {
+    // Toast: the hopper is disabled. Its only live consumer (vision_react) already
+    // generates a fresh single joke on demand when the hopper is empty, and the old
+    // bonus-joke / silence-fallback consumers are gone — so background batches were
+    // pure waste that also buried the funniest scored lines (never spoken). Roast
+    // still uses the hopper.
+    if (this._isToast()) return;
     // Cancel stale hopper generation
     this._cancelHopper();
 

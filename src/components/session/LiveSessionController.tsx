@@ -28,6 +28,22 @@ import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
 import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 
+/**
+ * Remove asterisk-wrapped stage directions (e.g. "*sip*", "*clink*", "*gestures*")
+ * before any text reaches TTS or the transcript. No persona should ever SPEAK
+ * these — ElevenLabs would pronounce the word literally ("sip"). Toast's bank
+ * questions embed them for on-page rhythm and now play verbatim (rephrase is
+ * skipped for Toast), so this is the single guaranteed place to drop them.
+ * Surrounding em-dash pauses are preserved so the drunk cadence survives.
+ */
+function stripStageDirections(text: string): string {
+  return text
+    .replace(/\*[^*\n]*\*/g, "")        // drop *sip* / *clink* / *gestures* tokens
+    .replace(/\s*—\s*—\s*/g, " — ")     // collapse a "— —" left by a removed mid-clause token
+    .replace(/[ \t]{2,}/g, " ")          // collapse runs of spaces the removal left behind
+    .replace(/[ \t]+([.,!?;:])/g, "$1")  // tidy any space stranded before punctuation
+    .trim();
+}
 
 interface Props {
   webcamRef: React.RefObject<WebcamCaptureHandle | null>;
@@ -176,6 +192,7 @@ export default function LiveSessionController({
     appendToPrev?: boolean,
     voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
   ): void {
+    text = stripStageDirections(text);
     if (!text.trim() || !isRunningRef.current) return;
     useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
     wasDrainedRef.current = false; // reset edge so drain detection fires when this plays through
@@ -299,6 +316,7 @@ export default function LiveSessionController({
     intensity?: number,
     appendToPrev?: boolean,
   ): void {
+    text = stripStageDirections(text);
     if (!text.trim() || !isRunningRef.current) return;
     if (buffer.failed) {
       // TTS prefetch errored — fall back to legacy queueSpeak.
@@ -353,6 +371,9 @@ export default function LiveSessionController({
       const startedAt = Date.now();
       let firstAudioLogged = false;
       try {
+        // Base voice comes from the store for BOTH experiences so the debug
+        // VoiceSliders drive playback live. Toast's drunk defaults are seeded
+        // into the store by setExperienceType when she's picked.
         const baseVoice = useSessionStore.getState().voiceSettings;
         const motionMerged = voiceSettingsForMotion(baseVoice, motion, intensity);
         // voiceOverride wins last — used to slow fillers below the base speed.
