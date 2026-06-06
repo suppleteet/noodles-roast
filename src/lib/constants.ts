@@ -7,12 +7,12 @@ export const VISION_MODEL = "gemini-3.5-flash";
 export const ROAST_MODEL = "gemini-3.5-flash";
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "EXAVITQu4vr4xnSDxMaL"; // Rachel (default, Roast)
 
-/** Toast uses a different ElevenLabs voice — warmer / more chaotic for the
- *  drunk-toast-at-a-wedding character. Charlotte (XB0fDUnXU5powFXDhCwa) is the
- *  default; override via the ELEVENLABS_TOAST_VOICE_ID env var if a better
- *  voice surfaces. */
+/** Toast uses a different ElevenLabs voice — the drunk-toast-at-a-wedding
+ *  character. vamKBH1qWYogA4WG6UPB is the picked voice for her; override via
+ *  the ELEVENLABS_TOAST_VOICE_ID env var if it ever needs to change without
+ *  a code push. */
 export const TOAST_VOICE_ID =
-  process.env.ELEVENLABS_TOAST_VOICE_ID ?? "XB0fDUnXU5powFXDhCwa";
+  process.env.ELEVENLABS_TOAST_VOICE_ID ?? "vamKBH1qWYogA4WG6UPB";
 
 /** Pick the right ElevenLabs voice for an experience type. Callers that
  *  already know the experience can use this directly; routes resolve it
