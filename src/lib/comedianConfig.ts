@@ -63,8 +63,10 @@ const defaults = {
   // Each filler is prefixed with "..." so ElevenLabs renders a ~250ms breath beat BEFORE
   // each one. No trailing ellipsis: the next filler's leading "..." provides the inter-
   // filler gap, and the joke after the last filler shouldn't have a long pause either.
-  // Hard cap as a safety net if the LLM hangs — ~6 covers >12s of stack at avg filler length.
-  fillerMaxStack: 6,
+  // Cap is also the user-facing dead-air budget when the LLM hangs: at ~2s per filler,
+  // a stack of 4 ≈ 8s of fillers before the 13s generationTimeoutMs watchdog fires. Lower
+  // is snappier on hangs but risks a real audible pause for slow-but-healthy generations.
+  fillerMaxStack: 4,
 
   // Rapid Fire burst — ask this many short questions back-to-back (each with only a quick
   // one-word ack), THEN drop one joke burst that ties all the answers together. This is what
