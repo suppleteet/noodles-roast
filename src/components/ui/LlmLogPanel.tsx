@@ -20,7 +20,7 @@ export default function LlmLogPanel() {
   }, [llmLog.length]);
 
   return (
-    <div className="bg-black/80 border border-yellow-400/40 rounded p-2 font-mono text-[10px] leading-snug pointer-events-auto overflow-y-auto max-h-[78vh] min-h-[8rem]">
+    <div className="bg-black/80 border border-yellow-400/40 rounded p-2 font-mono text-[10px] leading-snug pointer-events-auto overflow-y-auto flex-1 min-h-[8rem]">
       <div className="text-yellow-500 mb-1 sticky top-0 bg-black/80">LLM ({llmLog.length})</div>
       {llmLog.length === 0 ? (
         <div className="text-white/25 italic">No LLM calls yet</div>

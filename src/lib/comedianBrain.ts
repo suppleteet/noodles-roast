@@ -178,14 +178,10 @@ export interface ComedianBrainDeps {
   ) => void;
 }
 
-// Fillers drive body animation from the inferred reaction (smug/conspiratorial/etc.), but
-// the VOICE always uses this fixed mild "energetic" preset. The inferred motion is frequently
-// low-energy ("thinking" raises stability, "conspiratorial" lowers style + speed), which made
-// fillers render flat/monotone — the opposite of what we want while the puppet is "thinking out
-// loud." energetic lowers stability (→ more expressive) without changing the pinned 0.7 speed
-// (the speed override in _queueNextPumpFiller wins last). Tune by ear.
-const FILLER_VOICE_MOTION: MotionState = "energetic";
-const FILLER_VOICE_INTENSITY = 0.55;
+// Filler voice motion is now threaded from `lastJokeMotion` per call (see
+// _queueNextPumpFiller) so the filler reads as a damped echo of the prior
+// joke's mood — earlier the constant "energetic" preset jumped tone between
+// joke and filler every cycle. No module-level constant anymore.
 
 // ─── Fisher-Yates shuffle ───────────────────────────────────────────────────────
 
@@ -1920,12 +1916,29 @@ export class ComedianBrain {
       if (isFirst) this.fillerFirstText = filler;
       this.fillerLastText = filler;
       this.fillerLineCount++;
-      // Voice uses a fixed mild "energetic" preset (FILLER_VOICE_MOTION) for expressiveness;
-      // the { speed: 0.7 } override wins last so fillers still read as unhurried "thinking out
-      // loud". The joke that follows returns to base speed so the punch line lands at full pace.
-      this.deps.queueSpeak(filler, FILLER_VOICE_MOTION, FILLER_VOICE_INTENSITY, false, { speed: 0.7 });
+      // INTONATION CONTINUITY: thread the prior delivery's motion through to the
+      // filler voice instead of a fixed FILLER_VOICE_MOTION constant. The filler
+      // sits between the question (or prior joke) and the upcoming joke — locking
+      // it to "energetic" made it jump moods. Now: filler reads as a damped echo
+      // of the last joke's vibe ("she's still in smug-mode, still thinking it
+      // through"). Damped intensity (× 0.6) keeps the filler quieter than the
+      // joke that spawned it. Falls back to "thinking" on the first cycle of the
+      // session — measured, not expressive — since lastJokeMotion is empty then.
+      const fillerVoiceMotion = (this.lastJokeMotion ?? "thinking") as import("@/lib/motionStates").MotionState;
+      const fillerVoiceIntensity = Math.max(0.3, (this.lastJokeIntensity ?? 0.7) * 0.6);
+      // STABILITY CLAMP: motion deltas push stability DOWN (more expressive).
+      // Toast's base voice already runs at stability 0.4 — adding a smug delta
+      // (-0.15) drops it to 0.27, and short fillers like "Mm-hm, mm-HM" warble
+      // at that level. The voiceOverride wins last; pin stability to 0.65 so
+      // fillers stay LEGIBLE while still inheriting the prior joke's style/speed
+      // direction. Speed override 0.7 stays for the unhurried "thinking-out-loud"
+      // beat; joke that follows returns to base speed for the punchline pop.
+      this.deps.queueSpeak(filler, fillerVoiceMotion, fillerVoiceIntensity, false, {
+        speed: 0.7,
+        stability: 0.65,
+      });
       this.deps.logTiming(
-        `brain: filler[${this.fillerLineCount}] (voice=${FILLER_VOICE_MOTION}, body=${this.fillerMotion}, speed=0.7) — "${filler}"`,
+        `brain: filler[${this.fillerLineCount}] (voice=${fillerVoiceMotion}@${fillerVoiceIntensity.toFixed(2)}, body=${this.fillerMotion}, speed=0.7, stability=0.65) — "${filler}"`,
       );
     }, COMEDIAN_CONFIG.fillerBreathMs);
     // The next filler is scheduled when the queue drains (see onTtsQueueDrained "generating").

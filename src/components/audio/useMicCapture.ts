@@ -120,6 +120,20 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
       analyserRef.current = analyser;
       analyserBuf.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
 
+      // Software gain on top of the platform AGC. Real sessions had Gemini
+      // missing transcripts entirely when the user spoke at normal volume
+      // from across the room — RMS hovered around 0.005-0.006 (the platform
+      // AGC was being conservative because the puppet TTS was already loud
+      // through the same stack and echoCancellation kept clamping things
+      // down). Boost is enough to push speech well clear of Gemini's
+      // STT noise floor; clipping is hard-limited to ±1.0.
+      //
+      // Declared BEFORE updateAmplitude so the analyser reading reflects what
+      // we actually send to Gemini — otherwise the brain's `inputAmplitudeMin`
+      // threshold (0.02) compares against raw 0.006 levels and rejects normal
+      // speech while we ship the boosted 0.030 to STT.
+      const MIC_GAIN = 5.0;
+
       const updateAmplitude = () => {
         if (!analyserRef.current || !analyserBuf.current) return;
         analyserRef.current.getByteTimeDomainData(analyserBuf.current);
@@ -128,7 +142,10 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
           const v = (analyserBuf.current[i] - 128) / 128;
           sum += v * v;
         }
-        const rms = Math.sqrt(sum / analyserBuf.current.length);
+        // Multiply by MIC_GAIN so the brain's amplitude threshold lives in
+        // the same units as what's actually being sent to the recognizer.
+        // Clamp at 1.0 to mirror the per-chunk hard limiter below.
+        const rms = Math.min(1, Math.sqrt(sum / analyserBuf.current.length) * MIC_GAIN);
         inputAmplitudeRef.current = rms;
 
         const now = performance.now();
@@ -141,15 +158,6 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
       };
 
       let gotFirstChunk = false;
-
-      // Software gain on top of the platform AGC. Real sessions had Gemini
-      // missing transcripts entirely when the user spoke at normal volume
-      // from across the room — RMS hovered around 0.005-0.006 (the platform
-      // AGC was being conservative because the puppet TTS was already loud
-      // through the same stack and echoCancellation kept clamping things
-      // down). 3× boost is enough to push speech well clear of Gemini's
-      // STT noise floor; clipping is hard-limited to ±1.0.
-      const MIC_GAIN = 3.0;
       const handlePcmChunk = (pcm: Float32Array) => {
         gotFirstChunk = true;
         const boosted = new Float32Array(pcm.length);
