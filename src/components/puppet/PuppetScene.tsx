@@ -3,6 +3,14 @@ import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Environment, OrbitControls } from "@react-three/drei";
 import PuppetCharacter from "./PuppetCharacter";
+import { useSessionStore } from "@/store/useSessionStore";
+
+// Scene clear color, per experience type. Toastie is a warmer dark amber to
+// match the gold-foil/champagne vibe of the puppet without going too bright
+// (the lit puppet still needs to pop). Roast keeps the existing dark-brown
+// stage feel.
+const ROAST_BG = "#1a0a00";
+const TOASTIE_BG = "#2a1f08";
 
 function SceneLights() {
   return (
@@ -21,6 +29,11 @@ interface Props {
 }
 
 export default function PuppetScene({ canvasRef, children }: Props) {
+  // Subscribe at the scene level so the background swaps when the user picks
+  // Toastie on the landing screen. The selector is OUTSIDE useFrame so this
+  // is fine per invariant #1.
+  const experienceType = useSessionStore((s) => s.experienceType);
+  const bg = experienceType === "toastie" ? TOASTIE_BG : ROAST_BG;
   return (
     <Canvas
       ref={canvasRef}
@@ -29,7 +42,7 @@ export default function PuppetScene({ canvasRef, children }: Props) {
       className="w-full h-full"
       shadows
     >
-      <color attach="background" args={["#1a0a00"]} />
+      <color attach="background" args={[bg]} />
       <SceneLights />
 
       <Suspense fallback={null}>

@@ -1,5 +1,5 @@
 "use client";
-import React, { useRef, Suspense } from "react";
+import React, { useRef, Suspense, createContext, useContext } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -7,6 +7,7 @@ import { useMotionState } from "./useMotionState";
 import { useSpringPhysics } from "./useSpringPhysics";
 import type { SpringTargets } from "./useSpringPhysics";
 import { useSessionStore } from "@/store/useSessionStore";
+import type { ExperienceType } from "@/store/useSessionStore";
 
 const R = 1.0; // head sphere radius
 
@@ -36,13 +37,63 @@ const PUPIL_RADIUS = 0.133;
 const LEFT_PUPIL_POS:  [number, number, number] = [ 0.036, 0.171, 0.111];
 const RIGHT_PUPIL_POS: [number, number, number] = [-0.036, 0.171, 0.111];
 
-const HEAD_COLOR  = "#5a1a8a";
-const EYE_WHITE   = "#f0f0f0";
-const PUPIL_COLOR = "#0a0a0a";
-const NOSE_COLOR  = "#f5e560"; // light yellow
-const BROW_COLOR  = "#241430"; // dark plum — a touch brighter than near-black
-const MOUTH_COLOR = "#3a0510"; // dark red interior cavity
-const TONGUE_COLOR = "#d44d61"; // light red tongue
+// ── Palette ───────────────────────────────────────────────────────────────────
+// Two palettes — the experienceType picks one at session start. Roast keeps the
+// existing purple/dark-red look; Toastie shifts everything warm-gold + amber
+// (drunk woman at a wedding, champagne / gold-foil energy).
+
+interface PuppetPalette {
+  head: string;
+  eyeWhite: string;
+  pupil: string;
+  nose: string;
+  brow: string;
+  mouth: string;
+  tongue: string;
+  /** Hemisphere top-eyelid color (Toastie only — Roast renders no eyelid). */
+  eyelid: string;
+}
+
+const ROAST_PALETTE: PuppetPalette = {
+  head: "#5a1a8a",       // purple
+  eyeWhite: "#f0f0f0",
+  pupil: "#0a0a0a",
+  nose: "#f5e560",       // light yellow
+  brow: "#241430",       // dark plum — a touch brighter than near-black
+  mouth: "#3a0510",      // dark red interior cavity
+  tongue: "#d44d61",     // light red tongue
+  eyelid: "#5a1a8a",     // unused in roast — eyelids only render in toastie
+};
+
+const TOASTIE_PALETTE: PuppetPalette = {
+  head: "#e8c547",       // warm gold — drunk-wedding-toaster yellow
+  eyeWhite: "#fbf6e6",   // slightly creamier white to play with the gold head
+  pupil: "#1a1208",      // warm near-black (less harsh than pure black)
+  nose: "#d49a2a",       // deeper amber for nose contrast against the gold head
+  brow: "#000000",       // unused in toastie — brows are hidden
+  mouth: "#b8520a",      // warm amber-brown mouth interior
+  tongue: "#e09060",     // peachy tongue
+  eyelid: "#d49a2a",     // amber droopy eyelid sitting over each eye
+};
+
+/** Resolved per-experience context — palette + experienceType for branch
+ *  decisions (e.g. "should I render eyelids? eyebrows?"). Threaded via React
+ *  context so MouthHemispheres + Nose don't need their own props. Default
+ *  is the Roast palette for safety when no provider is mounted (rig-edit
+ *  mode etc.). */
+interface PuppetContextValue {
+  palette: PuppetPalette;
+  experienceType: ExperienceType;
+}
+
+const PuppetCtx = createContext<PuppetContextValue>({
+  palette: ROAST_PALETTE,
+  experienceType: "roast",
+});
+
+function usePuppetCtx(): PuppetContextValue {
+  return useContext(PuppetCtx);
+}
 
 interface Props {
   modelUrl?: string | null;
@@ -50,6 +101,12 @@ interface Props {
 
 export default function PuppetCharacter({ modelUrl = null }: Props) {
   const groupRef = useRef<THREE.Group>(null);
+
+  // Subscribe to experienceType so the puppet swaps palette + geometry
+  // when the user picks Roast vs Toastie. Hook-selector subscription is OK
+  // here — invariant #1 only forbids selectors INSIDE useFrame.
+  const experienceType = useSessionStore((s) => s.experienceType);
+  const palette = experienceType === "toastie" ? TOASTIE_PALETTE : ROAST_PALETTE;
 
   const targets = useRef<SpringTargets>({ pitch: 0, yaw: 0, roll: 0.05, bobY: -0.03 });
   const { stiffnessRef, dampingRef } = useMotionState(targets);
@@ -65,17 +122,19 @@ export default function PuppetCharacter({ modelUrl = null }: Props) {
   });
 
   return (
-    <group ref={groupRef}>
-      {modelUrl ? (
-        <GLBErrorBoundary fallback={<ProceduralHead />}>
-          <Suspense fallback={<ProceduralHead />}>
-            <GLBModel modelUrl={modelUrl} />
-          </Suspense>
-        </GLBErrorBoundary>
-      ) : (
-        <ProceduralHead />
-      )}
-    </group>
+    <PuppetCtx.Provider value={{ palette, experienceType }}>
+      <group ref={groupRef}>
+        {modelUrl ? (
+          <GLBErrorBoundary fallback={<ProceduralHead />}>
+            <Suspense fallback={<ProceduralHead />}>
+              <GLBModel modelUrl={modelUrl} />
+            </Suspense>
+          </GLBErrorBoundary>
+        ) : (
+          <ProceduralHead />
+        )}
+      </group>
+    </PuppetCtx.Provider>
   );
 }
 
@@ -97,6 +156,8 @@ class GLBErrorBoundary extends React.Component<
 
 // ── Procedural puppet head (fallback when no GLB is available) ────────────────
 function ProceduralHead() {
+  const { palette, experienceType } = usePuppetCtx();
+  const isToastie = experienceType === "toastie";
   return (
     // Eyes and nose are children of MouthHemispheres so they tilt with the top jaw
     <MouthHemispheres>
@@ -104,41 +165,62 @@ function ProceduralHead() {
       <group position={LEFT_EYE_POS} rotation={LEFT_EYE_ROT}>
         <mesh>
           <sphereGeometry args={[0.30, 40, 40, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshStandardMaterial color={EYE_WHITE} roughness={0.08} />
+          <meshStandardMaterial color={palette.eyeWhite} roughness={0.08} />
         </mesh>
         <mesh position={LEFT_PUPIL_POS}>
           <sphereGeometry args={[PUPIL_RADIUS, 24, 24]} />
-          <meshStandardMaterial color={PUPIL_COLOR} roughness={0.3} />
+          <meshStandardMaterial color={palette.pupil} roughness={0.3} />
         </mesh>
+        {/* Toastie eyelid: top-third hemisphere sitting on the upper surface
+            of the eye dome, colored to match the head so it reads as a
+            heavy droopy "had a few drinks" lid. Local +Y of the eye group
+            is already the "top of the eyeball" since the dome was rotated
+            so its base sits flush with the head sphere. Slightly larger
+            radius than the eyeball (0.305 vs 0.30) so there's no
+            z-fight along the seam. */}
+        {isToastie && (
+          <mesh position={[0, 0.05, 0]}>
+            <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
+            <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
+          </mesh>
+        )}
       </group>
 
       {/* ── Right eye ── */}
       <group position={RIGHT_EYE_POS} rotation={RIGHT_EYE_ROT}>
         <mesh>
           <sphereGeometry args={[0.30, 40, 40, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshStandardMaterial color={EYE_WHITE} roughness={0.08} />
+          <meshStandardMaterial color={palette.eyeWhite} roughness={0.08} />
         </mesh>
         <mesh position={RIGHT_PUPIL_POS}>
           <sphereGeometry args={[PUPIL_RADIUS, 24, 24]} />
-          <meshStandardMaterial color={PUPIL_COLOR} roughness={0.3} />
+          <meshStandardMaterial color={palette.pupil} roughness={0.3} />
         </mesh>
+        {isToastie && (
+          <mesh position={[0, 0.05, 0]}>
+            <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
+            <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
+          </mesh>
+        )}
       </group>
 
       {/* ── Nose ── */}
       <Nose />
 
-      {/* ── Eyebrows — thick capsule pills sitting right on top of the
-            eyeballs with a small gap between them. Capsule default axis
-            is Y, rotate Math.PI/2 around Z to lay them horizontal. Felt
-            finish (rough, no metalness). ── */}
-      <mesh position={[-0.22, 0.82, 0.85]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.12, 0.18, 6, 12]} />
-        <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
-      </mesh>
-      <mesh position={[0.22, 0.82, 0.85]} rotation={[0.9, 0, Math.PI / 2]}>
-        <capsuleGeometry args={[0.12, 0.18, 6, 12]} />
-        <meshStandardMaterial color={BROW_COLOR} roughness={1.0} metalness={0} />
-      </mesh>
+      {/* ── Eyebrows (Roast only) — Toastie skips these entirely; the eyelids
+            above are the brow region's visual focus in that mode. ── */}
+      {!isToastie && (
+        <>
+          <mesh position={[-0.22, 0.82, 0.85]} rotation={[0.9, 0, Math.PI / 2]}>
+            <capsuleGeometry args={[0.12, 0.18, 6, 12]} />
+            <meshStandardMaterial color={palette.brow} roughness={1.0} metalness={0} />
+          </mesh>
+          <mesh position={[0.22, 0.82, 0.85]} rotation={[0.9, 0, Math.PI / 2]}>
+            <capsuleGeometry args={[0.12, 0.18, 6, 12]} />
+            <meshStandardMaterial color={palette.brow} roughness={1.0} metalness={0} />
+          </mesh>
+        </>
+      )}
     </MouthHemispheres>
   );
 }
@@ -155,6 +237,7 @@ const TOP_RANGE_RATIO = 0.4;   // unchanged — top moves 40% as much as bottom
 const JAW_CURVE_EXPONENT = 1.3;
 
 function MouthHemispheres({ children }: { children?: React.ReactNode }) {
+  const { palette } = usePuppetCtx();
   const topGroupRef    = useRef<THREE.Group>(null);
   const bottomGroupRef = useRef<THREE.Group>(null);
   const openAmt        = useRef(0);
@@ -190,12 +273,12 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
       <group ref={topGroupRef}>
         <mesh>
           <sphereGeometry args={[R, 64, 64, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
+          <meshStandardMaterial color={palette.head} roughness={1.0} metalness={0} />
         </mesh>
         {/* Red disc cap — fills the flat opening at the bottom of the top hemisphere */}
         <mesh rotation={[Math.PI / 2, 0, 0]}>
           <circleGeometry args={[R, 48]} />
-          <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
+          <meshStandardMaterial color={palette.mouth} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
         </mesh>
         {children}
       </group>
@@ -204,12 +287,12 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
       <group ref={bottomGroupRef}>
         <mesh>
           <sphereGeometry args={[R * 0.95, 64, 64, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]} />
-          <meshStandardMaterial color={HEAD_COLOR} roughness={1.0} metalness={0} />
+          <meshStandardMaterial color={palette.head} roughness={1.0} metalness={0} />
         </mesh>
         {/* Red disc cap — fills the flat opening at the top of the bottom hemisphere */}
         <mesh rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[R * 0.95, 48]} />
-          <meshStandardMaterial color={MOUTH_COLOR} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
+          <meshStandardMaterial color={palette.mouth} roughness={1.0} metalness={0} side={THREE.DoubleSide} />
         </mesh>
         {/* Tongue: large, very flat ellipsoid resting on top of the bottom
             disc, tilted slightly forward. meshLambertMaterial → pure
@@ -217,7 +300,7 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
             the rest of the head). */}
         <mesh position={[0, 0.03, 0.30]} rotation={[-0.25, 0, 0]} scale={[0.90, 0.10, 1.05]}>
           <sphereGeometry args={[0.32, 32, 24]} />
-          <meshLambertMaterial color={TONGUE_COLOR} />
+          <meshLambertMaterial color={palette.tongue} />
         </mesh>
       </group>
     </>
@@ -226,10 +309,11 @@ function MouthHemispheres({ children }: { children?: React.ReactNode }) {
 
 // ── Static nose ──────────────────────────────────────────────────────────────
 function Nose() {
+  const { palette } = usePuppetCtx();
   return (
     <mesh position={[0, 0.18, 0.95]} scale={[0.88, 1.12, 0.80]}>
       <sphereGeometry args={[0.34, 40, 40]} />
-      <meshStandardMaterial color={NOSE_COLOR} roughness={1.0} metalness={0} />
+      <meshStandardMaterial color={palette.nose} roughness={1.0} metalness={0} />
     </mesh>
   );
 }

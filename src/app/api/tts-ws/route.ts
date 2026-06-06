@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getElevenLabsModelId, streamElTts, type ElVoiceSettings } from "@/lib/elTtsStream";
 import { recordTtsUsage } from "@/lib/usageTracker";
+import { voiceIdForExperience } from "@/lib/constants";
 
 /**
  * Streaming TTS endpoint using ElevenLabs WebSocket.
@@ -16,7 +17,15 @@ export async function POST(req: NextRequest) {
     return new Response("ELEVENLABS_API_KEY not set", { status: 500 });
   }
 
-  let body: { text?: string; previousText?: string; voiceSettings?: Partial<ElVoiceSettings> };
+  let body: {
+    text?: string;
+    previousText?: string;
+    voiceSettings?: Partial<ElVoiceSettings>;
+    /** Optional — if provided, picks the experience's default voice ID. */
+    experienceType?: string;
+    /** Optional explicit voice ID override (takes precedence over experienceType). */
+    voiceId?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -27,6 +36,9 @@ export async function POST(req: NextRequest) {
     return new Response("text required", { status: 400 });
   }
 
+  // Resolve voice id: explicit override → experience default → server default.
+  const voiceId = body.voiceId ?? voiceIdForExperience(body.experienceType);
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -35,6 +47,7 @@ export async function POST(req: NextRequest) {
         text: body.text!,
         previousText: body.previousText,
         voiceSettings: body.voiceSettings,
+        voiceId,
         onAudioChunk: (base64Pcm) => {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: "audio", chunk: base64Pcm })}\n\n`),

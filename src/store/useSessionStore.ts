@@ -21,6 +21,18 @@ export type ContentMode = "clean" | "vulgar";
  */
 export type FlowMode = "original" | "rapid_fire";
 
+/**
+ * Top-level experience the user picks on the landing screen — two side-by-side
+ * buttons, "Roast Me" (orange) vs "Toast Me" (champagne). Toastie is a parallel
+ * experience to the standard roast: a drunk woman at a wedding mic giving a
+ * toast to the user, who she's pretending she knows. Same brain state machine,
+ * different question bank, prompts, scripted lines, voice, and puppet palette.
+ *
+ * In "toastie": persona is ignored (one character), flowMode is ignored
+ * (single flow — no Rapid Fire variant).
+ */
+export type ExperienceType = "roast" | "toastie";
+
 export type RoastModelId =
   | "gemini-3.5-flash"
   | "gemini-2.5-flash"
@@ -108,6 +120,7 @@ interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
   flowMode: FlowMode;
+  experienceType: ExperienceType;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
   roastModel: RoastModelId;
@@ -184,6 +197,7 @@ interface SessionState {
   setPhase: (phase: SessionPhase, trigger: SessionTrigger) => void;
   setSessionMode: (mode: SessionMode) => void;
   setFlowMode: (mode: FlowMode) => void;
+  setExperienceType: (type: ExperienceType) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
   setContentMode: (mode: ContentMode) => void;
   setRoastModel: (model: RoastModelId) => void;
@@ -242,6 +256,7 @@ const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
   flowMode: "original" as FlowMode,
+  experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
   roastModel: "gemini-3.5-flash" as RoastModelId,
@@ -301,6 +316,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
   setFlowMode: (flowMode) => set({ flowMode }),
+  setExperienceType: (experienceType) => set({ experienceType }),
   setBurnIntensity: (burnIntensity) => set({ burnIntensity }),
   setContentMode: (contentMode) => set({ contentMode }),
   setRoastModel: (roastModel) => set({ roastModel }),

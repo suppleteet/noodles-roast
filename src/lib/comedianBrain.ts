@@ -30,6 +30,7 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
+import { TOASTIE_QUESTION_BANK } from "@/lib/toastieQuestionBank";
 import {
   NONWORD_FILLERS,
   ECHO_FILLER_TEMPLATES,
@@ -44,6 +45,9 @@ import {
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
   TECHNICAL_DIFFICULTIES_LINES,
+  TOASTIE_FILLER_LINES,
+  TOASTIE_TECHNICAL_DIFFICULTIES_LINES,
+  TOASTIE_ANSWER_FALLBACK_ROASTS,
   CONTEXTUAL_QUESTION_PRODS,
   CONTEXTUAL_FALLBACK_QUESTION,
   CONTEXTUAL_FALLBACK_PRODS,
@@ -125,6 +129,11 @@ export interface ComedianBrainDeps {
   getRoastModel: () => string;
   /** Conversation flow style. Drives which question bank the brain pulls from. */
   getFlowMode: () => import("@/store/useSessionStore").FlowMode;
+  /** Top-level experience the user picked on the landing screen — "roast" or "toastie".
+   *  When "toastie": brain pulls from TOASTIE_QUESTION_BANK, skips the FlowMode/persona
+   *  branches, and swaps scripted lines (greetings, fillers, fallbacks) to the Toastie
+   *  variants. Defaults to "roast" if the dep isn't supplied (back-compat for tests). */
+  getExperienceType?: () => import("@/store/useSessionStore").ExperienceType;
   /** Current mic input RMS (0-1) — used for background noise gating. */
   getInputAmplitude: () => number;
   /** Multi-turn chat session ID — if set, API routes reuse the session instead of sending the full persona. */
@@ -452,12 +461,21 @@ export class ComedianBrain {
 
     // Always lead with name so the puppet has something personal to work with.
     // Everything else shuffles freely — avoids the show feeling like a questionnaire.
-    // Flow mode determines which bank we pull from. Rapid Fire uses short-answer questions
-    // and the burst cadence (collect a few answers behind quick acks, then one combined
-    // joke burst); Original uses the open-ended bank with rephrase-personalization.
+    // ExperienceType is the top-level switch:
+    //   - "toastie": one bank (TOASTIE_QUESTION_BANK), no FlowMode branching,
+    //     no Rapid Fire, no persona.
+    //   - "roast": existing FlowMode-driven selection (Rapid Fire vs Original).
+    const experienceType = this._getExperienceType();
     const flowMode = this.deps.getFlowMode();
-    const bank = flowMode === "rapid_fire" ? RAPID_FIRE_QUESTION_BANK : QUESTION_BANK;
-    this.deps.logTiming(`brain: flow=${flowMode} bank=${bank.length}q`);
+    const bank =
+      experienceType === "toastie"
+        ? TOASTIE_QUESTION_BANK
+        : flowMode === "rapid_fire"
+          ? RAPID_FIRE_QUESTION_BANK
+          : QUESTION_BANK;
+    this.deps.logTiming(
+      `brain: experience=${experienceType} flow=${flowMode} bank=${bank.length}q`,
+    );
     const nameQuestion = bank.find((q) => q.id === "name");
     const rest = shuffle(bank.filter((q) => q.id !== "name"));
     this.shuffledQuestions = nameQuestion ? [nameQuestion, ...rest] : shuffle(bank);
@@ -921,15 +939,17 @@ export class ComedianBrain {
    * Does NOT echo the user's answer — the filler already does that work, so
    * including it here doubled up ("Smooches, you say." → "Smooches. Stunning…").
    */
-  private static _pickFallbackRoast(_answer: string): {
+  private _pickFallbackRoast(_answer: string): {
     text: string;
     motion: string;
     intensity: number;
   } {
+    // Toastie's fallback "save" line is warmer + drunker than the roast version.
+    const pool = this._isToastie() ? TOASTIE_ANSWER_FALLBACK_ROASTS : ANSWER_FALLBACK_ROASTS;
     return {
-      text: ANSWER_FALLBACK_ROASTS[Math.floor(Math.random() * ANSWER_FALLBACK_ROASTS.length)],
-      motion: "smug",
-      intensity: 0.6,
+      text: pool[Math.floor(Math.random() * pool.length)],
+      motion: this._isToastie() ? "energetic" : "smug",
+      intensity: this._isToastie() ? 0.7 : 0.6,
     };
   }
 
@@ -1113,7 +1133,7 @@ export class ComedianBrain {
     // opener that doubles as the name question — no LLM, no waiting on the camera — so TTFS is
     // just the TTS round-trip (~1s instead of ~10s). Vision analysis keeps running in the
     // background and feeds the interleaved vision jokes that come later.
-    if (this.deps.getFlowMode() === "rapid_fire") {
+    if (this._isRapidFireFlow()) {
       const vulgar = this.deps.getContentMode() === "vulgar";
       const openers = vulgar ? RAPID_FIRE_OPENERS_VULGAR : RAPID_FIRE_OPENERS;
       const opener = openers[Math.floor(Math.random() * openers.length)];
@@ -1141,7 +1161,7 @@ export class ComedianBrain {
     } else {
       const observations = this.deps.getObservations();
       const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
-      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
+      const greetingContext = this._isRapidFireFlow() ? "rapid_fire_greeting" : "greeting";
       this.visionJokePrefetch = this._generateJoke({
         context: greetingContext,
         model: VISION_MODEL, // greeting always uses Gemini — fastest + best at vision
@@ -1206,7 +1226,7 @@ export class ComedianBrain {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
       const observations = this.deps.getObservations();
-      const greetingContext = this.deps.getFlowMode() === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
+      const greetingContext = this._isRapidFireFlow() ? "rapid_fire_greeting" : "greeting";
       this._generateJoke({
         context: greetingContext,
         model: VISION_MODEL,
@@ -1325,7 +1345,7 @@ export class ComedianBrain {
       // Rapid Fire skips contextual entirely — bank questions only, no LLM detour mid-game.
       const bankAvailable = this._nextValidQuestion();
       const shouldUseContextual =
-        this.deps.getFlowMode() !== "rapid_fire" &&
+        !this._isRapidFireFlow() &&
         this.bankQuestionsInARow >= 1 &&
         this.cameraAvailable;
 
@@ -1506,7 +1526,7 @@ export class ComedianBrain {
     if (
       COMEDIAN_CONFIG.confirmationEnabled &&
       !COMEDIAN_CONFIG.skipScriptedLines &&
-      this.deps.getFlowMode() !== "rapid_fire"
+      !this._isRapidFireFlow()
     ) {
       const qId = this.currentQuestion?.id ?? "";
       // Name confirmations are useful for short transcripts ("Mike"/"Mark"),
@@ -1744,6 +1764,13 @@ export class ComedianBrain {
   }
 
   private _pickFiller(answer: string): string {
+    // Toastie skips echo fillers entirely — she's interrupting herself, not
+    // listening attentively. Always uses drunk-thinking non-word fillers.
+    if (this._isToastie()) {
+      return TOASTIE_FILLER_LINES[
+        Math.floor(Math.random() * TOASTIE_FILLER_LINES.length)
+      ];
+    }
     if (this._isFillerEchoable(answer) && Math.random() < ECHO_FILLER_PROBABILITY) {
       const cleaned = ComedianBrain._stripLeadingHesitation(
         answer.trim().replace(/[.?!,]+$/, "").trim(),
@@ -1762,8 +1789,9 @@ export class ComedianBrain {
 
   /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
   private _pickNonWordFiller(avoid: string | null): string {
-    const opts = NONWORD_FILLERS.filter((f) => f !== avoid);
-    const pool = opts.length > 0 ? opts : NONWORD_FILLERS;
+    const pool0 = this._isToastie() ? TOASTIE_FILLER_LINES : NONWORD_FILLERS;
+    const opts = pool0.filter((f) => f !== avoid);
+    const pool = opts.length > 0 ? opts : pool0;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -1833,9 +1861,12 @@ export class ComedianBrain {
     this._transition("wrapup");
     this.deps.setMotion("conspiratorial", 0.7);
 
-    const persona = this.deps.getPersona();
-    const lines =
-      TECHNICAL_DIFFICULTIES_LINES[persona] ?? TECHNICAL_DIFFICULTIES_LINES.kvetch;
+    // Toastie has her own drunk-apologetic exit lines that DON'T branch on
+    // persona (Toastie is one character). Roast uses the per-persona table.
+    const lines = this._isToastie()
+      ? TOASTIE_TECHNICAL_DIFFICULTIES_LINES
+      : TECHNICAL_DIFFICULTIES_LINES[this.deps.getPersona()] ??
+        TECHNICAL_DIFFICULTIES_LINES.kvetch;
     const line = lines[Math.floor(Math.random() * lines.length)];
     this.deps.logTiming(`brain: technical-difficulties exit — "${line.slice(0, 60)}"`);
     this.deps.queueSpeak(line, "conspiratorial", 0.7);
@@ -1915,7 +1946,7 @@ export class ComedianBrain {
     // questions (each gets only a one-word ack), then fire ONE joke burst tying them
     // together. _handleRapidFireAnswer either ack's + advances (returns), or — when the
     // burst is full — calls _enterRapidFireBurst() to generate the combined roast.
-    if (this.deps.getFlowMode() === "rapid_fire") {
+    if (this._isRapidFireFlow()) {
       this._handleRapidFireAnswer(answer);
       return;
     }
@@ -2352,7 +2383,7 @@ export class ComedianBrain {
         this._onDeliveringDrained();
         return;
       }
-      const fallback = ComedianBrain._pickFallbackRoast(answer);
+      const fallback = this._pickFallbackRoast(answer);
       this.deps.logTiming(`brain: enterDelivering empty — fallback "${fallback.text.slice(0, 60)}"`);
       this.deps.queueSpeak(fallback.text, fallback.motion as MotionState, fallback.intensity);
       this._addLedger("joke", fallback.text, []);
@@ -2524,7 +2555,7 @@ export class ComedianBrain {
     // Rapid Fire: skip rephrase entirely — questions are already short and punchy;
     // rephrase only adds latency and makes them longer. Occasionally drop the user's
     // name in ("Are you single, Tyler?").
-    if (this.deps.getFlowMode() === "rapid_fire") {
+    if (this._isRapidFireFlow()) {
       const spoken = this._maybeInjectName(questionText);
       this.deps.queueSpeak(spoken, "emphasis", 0.6);
       this.deps.setCurrentQuestion(spoken);
@@ -2667,7 +2698,7 @@ export class ComedianBrain {
     if (this.visionOnlyMode) return;
     if (this.preQueuedQuestion) return;
 
-    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
+    const isRapidFire = this._isRapidFireFlow();
     const shouldUseContextual = !isRapidFire && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
@@ -2852,7 +2883,7 @@ export class ComedianBrain {
     // delivery), skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
     // the answer's roast and the next question. Vision interrupt still fires
     // when there's nothing queued — see refresh of previousObservations below.
-    const isRapidFire = this.deps.getFlowMode() === "rapid_fire";
+    const isRapidFire = this._isRapidFireFlow();
     const hasQueuedNext = !!this.preQueuedQuestion;
     if (hasQueuedNext) {
       const current = this.deps.getObservations();
@@ -3090,7 +3121,7 @@ export class ComedianBrain {
    * and falls back to fresh gen — silently degrading, never throwing.
    */
   private _fireExpectedJokesGen(question: ComedyQuestion): void {
-    if (this.deps.getFlowMode() !== "rapid_fire") return;
+    if (!this._isRapidFireFlow()) return;
     if (!question.expectedAnswers || question.expectedAnswers.length === 0) return;
     // Already cached/in-flight for this question? Reuse.
     if (this.expectedJokesCache?.questionId === question.id) return;
@@ -3361,6 +3392,25 @@ export class ComedianBrain {
     );
   }
 
+  /** Resolve the experience type with a safe default. The dep is optional so
+   *  existing tests / harnesses that don't supply it still default to "roast". */
+  private _getExperienceType(): import("@/store/useSessionStore").ExperienceType {
+    return this.deps.getExperienceType?.() ?? "roast";
+  }
+
+  /** Convenience: brain code reads `this._isToastie()` instead of comparing strings. */
+  private _isToastie(): boolean {
+    return this._getExperienceType() === "toastie";
+  }
+
+  /** True only when ROAST experience AND flowMode is rapid_fire. Toastie has no
+   *  Rapid Fire variant — even if the store's flowMode is set, we don't route
+   *  through the Rapid Fire branches when in Toastie. Use this everywhere
+   *  instead of comparing `getFlowMode() === "rapid_fire"` directly. */
+  private _isRapidFireFlow(): boolean {
+    return !this._isToastie() && this.deps.getFlowMode() === "rapid_fire";
+  }
+
   /** All question texts asked so far. Passed to generate-question to prevent topic repetition. */
   private _getPreviousQuestionTexts(): string[] {
     return this.ledger.filter((e) => e.type === "question").map((e) => e.text);
@@ -3539,6 +3589,7 @@ export class ComedianBrain {
       body: JSON.stringify({
         ...params,
         model: this.deps.getRoastModel(),
+        experienceType: this._getExperienceType(),
         sessionId: this.deps.getSessionId(),
         persona: this.deps.getPersona(),
         burnIntensity: this.deps.getBurnIntensity(),
@@ -3735,6 +3786,7 @@ export class ComedianBrain {
         body: JSON.stringify({
           model: this.deps.getRoastModel(),
           ...params,
+          experienceType: this._getExperienceType(),
           sessionId: this.deps.getSessionId(),
           persona: this.deps.getPersona(),
           burnIntensity: this.deps.getBurnIntensity(),

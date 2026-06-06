@@ -16,6 +16,7 @@
 import { GoogleGenAI, type Chat } from "@google/genai";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getBaseJokePrompt } from "@/lib/prompts";
+import { getToastieBasePrompt, getToastieContextInstructions } from "@/lib/toastiePrompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
@@ -34,6 +35,8 @@ interface HistoryEntry {
   content: string;
 }
 
+export type ExperienceType = "roast" | "toastie";
+
 interface SessionEntry {
   model: string;
   systemPrompt: string;
@@ -46,6 +49,10 @@ interface SessionEntry {
   persona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode: "clean" | "vulgar";
+  /** "roast" uses persona-based prompts; "toastie" uses the drunk-toaster
+   *  prompt and ignores persona. Cached here so per-turn lookups don't have
+   *  to re-thread it on every request. */
+  experienceType: ExperienceType;
   /** Tracks which stable-per-session context blocks have already been sent
    *  through the chat. Lets per-turn routes skip re-sending them — the
    *  model has them in chat history and Gemini implicit caching benefits
@@ -100,7 +107,9 @@ function buildHistoryText(history: HistoryEntry[]): string {
 }
 
 /**
- * Create a new chat session with the comedian persona baked in.
+ * Create a new chat session with the comedian persona (or the Toastie character)
+ * baked into the systemInstruction. `experienceType === "toastie"` switches the
+ * base prompt to the drunk-toaster character and ignores `persona`.
  */
 export function createSession(
   apiKey: string,
@@ -108,11 +117,16 @@ export function createSession(
   burnIntensity: BurnIntensity,
   contentMode: "clean" | "vulgar",
   model?: string,
+  experienceType: ExperienceType = "roast",
 ): string {
   const resolvedModel = model ?? ROAST_MODEL;
   // Base persona only — NO context-specific task instructions.
   // Per-turn context instructions come via getContextInstructions() in each user message.
-  const systemPrompt = getBaseJokePrompt(persona, burnIntensity, contentMode);
+  // Toastie has no persona axis; getToastieBasePrompt ignores it.
+  const systemPrompt =
+    experienceType === "toastie"
+      ? getToastieBasePrompt(burnIntensity, contentMode)
+      : getBaseJokePrompt(persona, burnIntensity, contentMode);
 
   let geminiChat: Chat | undefined;
 
@@ -140,6 +154,7 @@ export function createSession(
     persona,
     burnIntensity,
     contentMode,
+    experienceType,
     sentStableBlocks: {},
   });
 
@@ -398,11 +413,18 @@ export function compactStableContext<T extends StableContextFields>(
  * Build the per-turn context instructions for a specific joke context.
  * This replaces the full system prompt on each request — only the small
  * task-specific instructions are sent as part of the user message.
+ *
+ * When `experienceType === "toastie"`, delegates to the Toastie preamble
+ * table (different voice, "she's pretending she knows you" framing).
  */
 export function getContextInstructions(
   context: JokeContext,
   contentMode: "clean" | "vulgar" = "clean",
+  experienceType: ExperienceType = "roast",
 ): string {
+  if (experienceType === "toastie") {
+    return getToastieContextInstructions(context, contentMode);
+  }
   // These are the task-specific parts from prompts.ts contextInstructions,
   // but without the persona/character setup (that's in the chat systemInstruction).
   const wrapupVulgarSuffix = contentMode === "vulgar"

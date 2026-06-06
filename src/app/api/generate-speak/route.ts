@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
+import { getToastieBasePrompt, getToastieContextInstructions } from "@/lib/toastiePrompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
@@ -14,6 +15,7 @@ import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "@/store/useSessionSt
 import type { MotionState } from "@/lib/motionStates";
 import { recordTtsUsage } from "@/lib/usageTracker";
 import { getElevenLabsModelId } from "@/lib/elTtsStream";
+import { voiceIdForExperience } from "@/lib/constants";
 
 type StreamEvent =
   | { type: "joke"; index?: number; text: string; motion: string; intensity: number; score: number }
@@ -43,6 +45,9 @@ export interface GenerateSpeakRequest {
   persona?: PersonaId;
   burnIntensity?: BurnIntensity;
   contentMode?: "clean" | "vulgar";
+  /** "roast" (default) routes through persona prompts; "toastie" uses the
+   *  drunk-toaster character prompt set. */
+  experienceType?: "roast" | "toastie";
   question?: string;
   userAnswer?: string;
   fillerAlreadySaid?: string;
@@ -147,6 +152,11 @@ export async function POST(req: NextRequest) {
     ...(body.baseVoiceSettings ?? {}),
   };
   const useStreamingTts = body.streamingTts === true;
+  // Experience: session value wins (locked in at createSession), body value
+  // is the fallback. Default "roast". Available throughout the request handler.
+  const experienceType =
+    session?.experienceType ??
+    (body.experienceType === "toastie" ? "toastie" : "roast");
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -220,6 +230,7 @@ export async function POST(req: NextRequest) {
 
         const ctl = openElTtsStream({
           voiceSettings: mergedVoice,
+          voiceId: voiceIdForExperience(experienceType),
           onAudioChunk: (b64) => {
             safeEnqueue({ type: "audio", index, chunk: b64 });
           },
@@ -250,9 +261,16 @@ export async function POST(req: NextRequest) {
       try {
         let textStream: AsyncIterable<string>;
 
+        // experienceType is resolved once at request start (above). Used here
+        // by getContextInstructions and the stateless system-prompt fallback.
+
         if (session) {
           // ── Multi-turn path: persona is in the session's system prompt ──
-          const taskPreamble = getContextInstructions(body.context ?? "answer_roast");
+          const taskPreamble = getContextInstructions(
+            body.context ?? "answer_roast",
+            session.contentMode,
+            session.experienceType,
+          );
           const userParts = buildUserParts(body, taskPreamble);
           textStream = sendMessageStream(body.sessionId!, userParts);
         } else {
@@ -266,7 +284,13 @@ export async function POST(req: NextRequest) {
             ? (body.burnIntensity as BurnIntensity)
             : 3;
           const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
-          const systemPrompt = getJokePrompt(body.context ?? "answer_roast", personaId, burnIntensity, contentMode);
+          const systemPrompt =
+            experienceType === "toastie"
+              ? `${getToastieBasePrompt(burnIntensity, contentMode)}\n\n${getToastieContextInstructions(
+                  body.context ?? "answer_roast",
+                  contentMode,
+                )}`
+              : getJokePrompt(body.context ?? "answer_roast", personaId, burnIntensity, contentMode);
           const userParts = buildUserParts(body);
 
           textStream = generateTextStream({

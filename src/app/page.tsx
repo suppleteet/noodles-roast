@@ -177,6 +177,7 @@ function MainApp() {
         contentMode: s.contentMode,
         flowMode: s.flowMode,
         visionModel: s.visionModel,
+        experienceType: s.experienceType,
       });
     })().catch(() => null);
 
@@ -186,8 +187,14 @@ function MainApp() {
       .then((response) => {
         if (!response?.jokes.length) return null;
         const joke = response.jokes[0];
-        const baseVoice = useSessionStore.getState().voiceSettings;
-        return prefetchGreetingAudio(joke.text, joke.motion, joke.intensity, baseVoice);
+        const s = useSessionStore.getState();
+        return prefetchGreetingAudio(
+          joke.text,
+          joke.motion,
+          joke.intensity,
+          s.voiceSettings,
+          s.experienceType,
+        );
       })
       .catch(() => null);
   }

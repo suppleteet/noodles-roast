@@ -15,6 +15,9 @@ export interface GreetingPrefetchSnapshot {
   flowMode?: FlowMode;
   /** Override the default VISION_MODEL — set when fallback was applied. */
   visionModel?: string;
+  /** "roast" | "toastie" — routes the greeting through the right prompt set
+   *  AND picks the right TTS voice (Toastie uses a warmer female voice). */
+  experienceType?: "roast" | "toastie";
 }
 
 interface VisionData {
@@ -100,6 +103,9 @@ function rememberVisionData(visionData: VisionData | null): string[] {
 }
 
 function greetingContext(snapshot: GreetingPrefetchSnapshot): JokeContext {
+  // Toastie always uses the "greeting" context — the Toastie prompt itself
+  // handles the mid-thought-pivot beat, no separate rapid_fire variant.
+  if (snapshot.experienceType === "toastie") return "greeting";
   return snapshot.flowMode === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
 }
 
@@ -115,6 +121,7 @@ async function generateGreetingFromObservations(
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,
+      experienceType: snapshot.experienceType,
       observations,
       setting: useSessionStore.getState().visionSetting,
     },
@@ -134,6 +141,7 @@ async function generateDirectImageGreeting(
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
       contentMode: snapshot.contentMode,
+      experienceType: snapshot.experienceType,
       observations: [],
       imageBase64: greetingFrame,
     },
@@ -230,6 +238,7 @@ export function prefetchGreetingAudio(
   motion: MotionState | string | undefined,
   intensity: number | undefined,
   baseVoiceSettings: VoiceSettings,
+  experienceType: "roast" | "toastie" = "roast",
 ): TtsChunkBuffer {
   const buffer = new TtsChunkBuffer();
   if (!text.trim()) {
@@ -252,6 +261,7 @@ export function prefetchGreetingAudio(
         body: JSON.stringify({
           text: text.trim(),
           voiceSettings: mergedVoice,
+          experienceType,
         }),
       });
 

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
+import { ELEVENLABS_VOICE_ID, voiceIdForExperience } from "@/lib/constants";
 import { getElevenLabsModelId } from "@/lib/elTtsStream";
 import { recordTtsUsage } from "@/lib/usageTracker";
 
@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
       voiceId: overrideVoiceId,
       voiceSettings: overrideSettings,
       previousRequestIds,
+      experienceType,
     } = await req.json();
     if (!text) {
       return new Response(JSON.stringify({ error: "text required" }), { status: 400 });
@@ -22,7 +23,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const voiceId = overrideVoiceId ?? process.env.ELEVENLABS_VOICE_ID ?? ELEVENLABS_VOICE_ID;
+    // Voice id precedence: explicit override → experienceType default →
+    // ELEVENLABS_VOICE_ID env / constant.
+    const voiceId =
+      overrideVoiceId ??
+      (experienceType ? voiceIdForExperience(experienceType) : null) ??
+      process.env.ELEVENLABS_VOICE_ID ??
+      ELEVENLABS_VOICE_ID;
     const voiceSettings = overrideSettings ?? {
       stability: 0.72,
       similarity_boost: 0.7,

@@ -364,6 +364,7 @@ export default function LiveSessionController({
             text,
             ...(previousText ? { previousText } : {}),
             voiceSettings: mergedVoice,
+            experienceType: useSessionStore.getState().experienceType,
           }),
         });
 
@@ -1103,6 +1104,7 @@ export default function LiveSessionController({
       getContentMode: () => useSessionStore.getState().contentMode,
       getRoastModel: () => useSessionStore.getState().roastModel,
       getFlowMode: () => useSessionStore.getState().flowMode,
+      getExperienceType: () => useSessionStore.getState().experienceType,
       getInputAmplitude: () => mic.getInputAmplitude(),
       getObservations: () => useSessionStore.getState().observations,
       getVisionSetting: () => useSessionStore.getState().visionSetting,
@@ -1186,13 +1188,14 @@ export default function LiveSessionController({
           burnIntensity: store.burnIntensity,
           contentMode: store.contentMode,
           model: store.roastModel,
+          experienceType: store.experienceType,
         }),
       })
         .then((r) => r.json())
         .then((data: { sessionId?: string }) => {
           if (data.sessionId && isRunningRef.current) {
             comedianSessionIdRef.current = data.sessionId;
-            useSessionStore.getState().logTiming(`live: comedian chat session ready (${data.sessionId}) model=${store.roastModel}`);
+            useSessionStore.getState().logTiming(`live: comedian chat session ready (${data.sessionId}) model=${store.roastModel} experience=${store.experienceType}`);
           }
         })
         .catch(() => { /* stateless fallback — no action needed */ });

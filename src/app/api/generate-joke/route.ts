@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
+import { getToastieBasePrompt, getToastieContextInstructions } from "@/lib/toastiePrompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { MotionState } from "@/lib/motionStates";
@@ -40,6 +41,10 @@ export interface GenerateJokeRequest {
   persona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode?: "clean" | "vulgar";
+  /** "roast" (default) routes through persona prompts; "toastie" uses the
+   *  drunk-toaster character (Toastie). The brain reads the user's selection
+   *  from the store and threads it on every request. */
+  experienceType?: "roast" | "toastie";
   question?: string;
   userAnswer?: string;
   fillerAlreadySaid?: string;
@@ -123,9 +128,20 @@ export async function POST(req: NextRequest) {
 
     let rawText: string;
 
+    // Experience type: session-stored if available, else fall back to the
+    // body's hint, else default to "roast". Belt-and-suspenders so we never
+    // route a Toastie session through roast prompts (and vice versa).
+    const sessionExperienceType = session?.experienceType ?? null;
+    const bodyExperienceType = body.experienceType === "toastie" ? "toastie" : "roast";
+    const experienceType = sessionExperienceType ?? bodyExperienceType;
+
     if (session) {
       // ── Multi-turn path: persona is in the session's system prompt ──
-      const taskPreamble = getContextInstructions(body.context ?? "hopper", session.contentMode);
+      const taskPreamble = getContextInstructions(
+        body.context ?? "hopper",
+        session.contentMode,
+        session.experienceType,
+      );
       const userParts: UserPart[] = [];
       userParts.push({ text: buildUserText(body, taskPreamble) });
       if (body.imageBase64) {
@@ -142,7 +158,15 @@ export async function POST(req: NextRequest) {
         ? body.burnIntensity
         : 3;
       const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
-      const systemPrompt = getJokePrompt(body.context ?? "hopper", personaId, burnIntensity, contentMode);
+      // Toastie: drunk-toaster system prompt (one character, ignores persona).
+      // Roast: existing persona-based prompt.
+      const systemPrompt =
+        experienceType === "toastie"
+          ? `${getToastieBasePrompt(burnIntensity, contentMode)}\n\n${getToastieContextInstructions(
+              body.context ?? "hopper",
+              contentMode,
+            )}`
+          : getJokePrompt(body.context ?? "hopper", personaId, burnIntensity, contentMode);
 
       const userParts: UserPart[] = [];
       userParts.push({ text: buildUserText(body) });

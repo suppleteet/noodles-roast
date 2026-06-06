@@ -41,6 +41,7 @@ export default function LandingScreen() {
   const setRoastModel = useSessionStore((s) => s.setRoastModel);
   const flowMode = useSessionStore((s) => s.flowMode);
   const setFlowMode = useSessionStore((s) => s.setFlowMode);
+  const setExperienceType = useSessionStore((s) => s.setExperienceType);
   const IS_DEV = useDevUnlock();
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
   const [paymentBusy, setPaymentBusy] = useState<RoastPassSku | "redeem" | null>(null);
@@ -232,13 +233,28 @@ export default function LandingScreen() {
           </div>
         )}
 
-        <button
-          onClick={handleStart}
-          disabled={paymentBusy !== null}
-          className="rounded-2xl bg-orange-600 px-10 py-5 text-2xl font-black text-white shadow-lg shadow-orange-950/50 transition-all hover:-translate-y-0.5 hover:bg-orange-500 active:translate-y-0"
-        >
-          {paymentBusy === "redeem" ? "Starting..." : "Roast Me"}
-        </button>
+        <div className="flex w-full flex-wrap items-center justify-center gap-4">
+          <button
+            onClick={() => {
+              setExperienceType("roast");
+              void handleStart();
+            }}
+            disabled={paymentBusy !== null}
+            className="rounded-2xl bg-orange-600 px-8 py-5 text-xl font-black text-white shadow-lg shadow-orange-950/50 transition-all hover:-translate-y-0.5 hover:bg-orange-500 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {paymentBusy === "redeem" ? "Starting..." : "Roast Me"}
+          </button>
+          <button
+            onClick={() => {
+              setExperienceType("toastie");
+              void handleStart();
+            }}
+            disabled={paymentBusy !== null}
+            className="rounded-2xl bg-amber-200 px-8 py-5 text-xl font-black text-amber-950 shadow-lg shadow-amber-900/40 transition-all hover:-translate-y-0.5 hover:bg-amber-100 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {paymentBusy === "redeem" ? "Starting..." : "Toast Me"}
+          </button>
+        </div>
       </div>
     </div>
   );

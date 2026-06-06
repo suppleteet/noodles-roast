@@ -16,7 +16,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 });
   }
 
-  let body: { persona?: string; burnIntensity?: number; contentMode?: string; model?: string };
+  let body: {
+    persona?: string;
+    burnIntensity?: number;
+    contentMode?: string;
+    model?: string;
+    experienceType?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -32,8 +38,16 @@ export async function POST(req: NextRequest) {
     ? (body.burnIntensity as BurnIntensity)
     : 3;
   const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
+  const experienceType = body.experienceType === "toastie" ? "toastie" : "roast";
 
-  const sessionId = createSession(apiKey, persona, burnIntensity, contentMode, body.model);
+  const sessionId = createSession(
+    apiKey,
+    persona,
+    burnIntensity,
+    contentMode,
+    body.model,
+    experienceType,
+  );
 
   // Prime provider prompt caches with the session's system prompt so the
   // user's first turn isn't paying cold-cache latency. Best-effort, async.

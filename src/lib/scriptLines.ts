@@ -174,6 +174,49 @@ export const TECHNICAL_DIFFICULTIES_LINES: Record<PersonaId, string[]> = {
   ],
 };
 
+// ─── Toastie experience: scripted lines ─────────────────────────────────────
+/** Toastie's mid-thought greetings — she's already been talking to someone
+ *  offstage and pivots to the camera. The user feels like they walked in on
+ *  her toast already in progress. */
+export const TOASTIE_GREETINGS = [
+  "…and THEN, AND THEN — oh! Hi! Sorry, you must be the guest of honor.",
+  "…I'm just SAYING, that's all I'm saying. *clink* — okay, hi! Hi gorgeous.",
+  "…and that is EXACTLY what I told her. Oh — hello! Look at this face.",
+  "…anyway, anyway, ANYWAY — oh god, sorry, you're here, hi!",
+  "Okay okay, settle down, everyone — *clink* — there you are, sweetie!",
+];
+
+/** Drunk-thinking fillers — same role as NONWORD_FILLERS but in Toastie's
+ *  voice. Slightly meandering, warmer, hint at champagne. */
+export const TOASTIE_FILLER_LINES = [
+  "Hmm, where was I, where was I.",
+  "Oh god, hold on, let me think.",
+  "Wait wait wait, lemme — yeah, yeah.",
+  "Okay so, hold that thought.",
+  "Mm, yeah, no, totally, totally.",
+  "Right, right, okay, *sip*.",
+  "Oh that's good, okay, hang on.",
+];
+
+/** Toastie's version of the watchdog goodbye — drunk apologetic, ends the
+ *  session in voice. */
+export const TOASTIE_TECHNICAL_DIFFICULTIES_LINES = [
+  "Oh god, I am WAY too drunk for this. Sweetie, come back when I've sobered up.",
+  "Oh shit — my brain just left the building. Try me again later, gorgeous, I'm sorry.",
+  "Okay, okay, I gotta — I gotta sit down for a sec. Come back later, I LOVE YOU.",
+];
+
+/** Toastie's answer-fallback roasts — generic save-the-moment lines used
+ *  only when the LLM returns nothing for an answer cycle. Warmer + drunker
+ *  than ANSWER_FALLBACK_ROASTS. */
+export const TOASTIE_ANSWER_FALLBACK_ROASTS = [
+  "I love that. Truly. I have no notes.",
+  "Iconic. Honestly, iconic. *clink*",
+  "Okay okay okay. We love that for you.",
+  "Stunning. Stunning answer. Stunning energy.",
+  "Yes. YES. I am writing that down.",
+];
+
 // ─── Wrap-up / closing ──────────────────────────────────────────────────────
 /** Spoken if the LLM closing line fails to generate. */
 export const WRAPUP_FALLBACK = "And on that note, we're done here. Goodnight.";
