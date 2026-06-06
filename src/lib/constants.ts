@@ -7,19 +7,19 @@ export const VISION_MODEL = "gemini-3.5-flash";
 export const ROAST_MODEL = "gemini-3.5-flash";
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "EXAVITQu4vr4xnSDxMaL"; // Rachel (default, Roast)
 
-/** Toastie uses a different ElevenLabs voice — warmer / more chaotic for the
+/** Toast uses a different ElevenLabs voice — warmer / more chaotic for the
  *  drunk-toast-at-a-wedding character. Charlotte (XB0fDUnXU5powFXDhCwa) is the
- *  default; override via the ELEVENLABS_TOASTIE_VOICE_ID env var if a better
+ *  default; override via the ELEVENLABS_TOAST_VOICE_ID env var if a better
  *  voice surfaces. */
-export const TOASTIE_VOICE_ID =
-  process.env.ELEVENLABS_TOASTIE_VOICE_ID ?? "XB0fDUnXU5powFXDhCwa";
+export const TOAST_VOICE_ID =
+  process.env.ELEVENLABS_TOAST_VOICE_ID ?? "XB0fDUnXU5powFXDhCwa";
 
 /** Pick the right ElevenLabs voice for an experience type. Callers that
  *  already know the experience can use this directly; routes resolve it
  *  from the request body. Falls through to ELEVENLABS_VOICE_ID if the type
  *  is unrecognized. */
 export function voiceIdForExperience(experienceType: string | undefined): string {
-  return experienceType === "toastie" ? TOASTIE_VOICE_ID : ELEVENLABS_VOICE_ID;
+  return experienceType === "toast" ? TOAST_VOICE_ID : ELEVENLABS_VOICE_ID;
 }
 export const COMPOSITOR_SIZE = 720;
 export const VISION_FRAME_SIZE = 512; // 512px square — higher res for better Gemini vision detail

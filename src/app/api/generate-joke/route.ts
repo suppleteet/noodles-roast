@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
-import { getToastieBasePrompt, getToastieContextInstructions } from "@/lib/toastiePrompts";
+import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
 import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { MotionState } from "@/lib/motionStates";
@@ -41,10 +41,10 @@ export interface GenerateJokeRequest {
   persona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode?: "clean" | "vulgar";
-  /** "roast" (default) routes through persona prompts; "toastie" uses the
-   *  drunk-toaster character (Toastie). The brain reads the user's selection
+  /** "roast" (default) routes through persona prompts; "toast" uses the
+   *  drunk-toaster character (Toast). The brain reads the user's selection
    *  from the store and threads it on every request. */
-  experienceType?: "roast" | "toastie";
+  experienceType?: "roast" | "toast";
   question?: string;
   userAnswer?: string;
   fillerAlreadySaid?: string;
@@ -130,9 +130,9 @@ export async function POST(req: NextRequest) {
 
     // Experience type: session-stored if available, else fall back to the
     // body's hint, else default to "roast". Belt-and-suspenders so we never
-    // route a Toastie session through roast prompts (and vice versa).
+    // route a Toast session through roast prompts (and vice versa).
     const sessionExperienceType = session?.experienceType ?? null;
-    const bodyExperienceType = body.experienceType === "toastie" ? "toastie" : "roast";
+    const bodyExperienceType = body.experienceType === "toast" ? "toast" : "roast";
     const experienceType = sessionExperienceType ?? bodyExperienceType;
 
     if (session) {
@@ -158,11 +158,11 @@ export async function POST(req: NextRequest) {
         ? body.burnIntensity
         : 3;
       const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
-      // Toastie: drunk-toaster system prompt (one character, ignores persona).
+      // Toast: drunk-toaster system prompt (one character, ignores persona).
       // Roast: existing persona-based prompt.
       const systemPrompt =
-        experienceType === "toastie"
-          ? `${getToastieBasePrompt(burnIntensity, contentMode)}\n\n${getToastieContextInstructions(
+        experienceType === "toast"
+          ? `${getToastBasePrompt(burnIntensity, contentMode)}\n\n${getToastContextInstructions(
               body.context ?? "hopper",
               contentMode,
             )}`

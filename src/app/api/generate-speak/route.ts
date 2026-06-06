@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
-import { getToastieBasePrompt, getToastieContextInstructions } from "@/lib/toastiePrompts";
+import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
@@ -45,9 +45,9 @@ export interface GenerateSpeakRequest {
   persona?: PersonaId;
   burnIntensity?: BurnIntensity;
   contentMode?: "clean" | "vulgar";
-  /** "roast" (default) routes through persona prompts; "toastie" uses the
+  /** "roast" (default) routes through persona prompts; "toast" uses the
    *  drunk-toaster character prompt set. */
-  experienceType?: "roast" | "toastie";
+  experienceType?: "roast" | "toast";
   question?: string;
   userAnswer?: string;
   fillerAlreadySaid?: string;
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
   // is the fallback. Default "roast". Available throughout the request handler.
   const experienceType =
     session?.experienceType ??
-    (body.experienceType === "toastie" ? "toastie" : "roast");
+    (body.experienceType === "toast" ? "toast" : "roast");
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -285,8 +285,8 @@ export async function POST(req: NextRequest) {
             : 3;
           const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
           const systemPrompt =
-            experienceType === "toastie"
-              ? `${getToastieBasePrompt(burnIntensity, contentMode)}\n\n${getToastieContextInstructions(
+            experienceType === "toast"
+              ? `${getToastBasePrompt(burnIntensity, contentMode)}\n\n${getToastContextInstructions(
                   body.context ?? "answer_roast",
                   contentMode,
                 )}`

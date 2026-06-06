@@ -30,7 +30,7 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
-import { TOASTIE_QUESTION_BANK } from "@/lib/toastieQuestionBank";
+import { TOAST_QUESTION_BANK } from "@/lib/toastQuestionBank";
 import {
   NONWORD_FILLERS,
   ECHO_FILLER_TEMPLATES,
@@ -45,9 +45,9 @@ import {
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
   TECHNICAL_DIFFICULTIES_LINES,
-  TOASTIE_FILLER_LINES,
-  TOASTIE_TECHNICAL_DIFFICULTIES_LINES,
-  TOASTIE_ANSWER_FALLBACK_ROASTS,
+  TOAST_FILLER_LINES,
+  TOAST_TECHNICAL_DIFFICULTIES_LINES,
+  TOAST_ANSWER_FALLBACK_ROASTS,
   CONTEXTUAL_QUESTION_PRODS,
   CONTEXTUAL_FALLBACK_QUESTION,
   CONTEXTUAL_FALLBACK_PRODS,
@@ -129,9 +129,9 @@ export interface ComedianBrainDeps {
   getRoastModel: () => string;
   /** Conversation flow style. Drives which question bank the brain pulls from. */
   getFlowMode: () => import("@/store/useSessionStore").FlowMode;
-  /** Top-level experience the user picked on the landing screen — "roast" or "toastie".
-   *  When "toastie": brain pulls from TOASTIE_QUESTION_BANK, skips the FlowMode/persona
-   *  branches, and swaps scripted lines (greetings, fillers, fallbacks) to the Toastie
+  /** Top-level experience the user picked on the landing screen — "roast" or "toast".
+   *  When "toast": brain pulls from TOAST_QUESTION_BANK, skips the FlowMode/persona
+   *  branches, and swaps scripted lines (greetings, fillers, fallbacks) to the Toast
    *  variants. Defaults to "roast" if the dep isn't supplied (back-compat for tests). */
   getExperienceType?: () => import("@/store/useSessionStore").ExperienceType;
   /** Current mic input RMS (0-1) — used for background noise gating. */
@@ -462,14 +462,14 @@ export class ComedianBrain {
     // Always lead with name so the puppet has something personal to work with.
     // Everything else shuffles freely — avoids the show feeling like a questionnaire.
     // ExperienceType is the top-level switch:
-    //   - "toastie": one bank (TOASTIE_QUESTION_BANK), no FlowMode branching,
+    //   - "toast": one bank (TOAST_QUESTION_BANK), no FlowMode branching,
     //     no Rapid Fire, no persona.
     //   - "roast": existing FlowMode-driven selection (Rapid Fire vs Original).
     const experienceType = this._getExperienceType();
     const flowMode = this.deps.getFlowMode();
     const bank =
-      experienceType === "toastie"
-        ? TOASTIE_QUESTION_BANK
+      experienceType === "toast"
+        ? TOAST_QUESTION_BANK
         : flowMode === "rapid_fire"
           ? RAPID_FIRE_QUESTION_BANK
           : QUESTION_BANK;
@@ -944,12 +944,12 @@ export class ComedianBrain {
     motion: string;
     intensity: number;
   } {
-    // Toastie's fallback "save" line is warmer + drunker than the roast version.
-    const pool = this._isToastie() ? TOASTIE_ANSWER_FALLBACK_ROASTS : ANSWER_FALLBACK_ROASTS;
+    // Toast's fallback "save" line is warmer + drunker than the roast version.
+    const pool = this._isToast() ? TOAST_ANSWER_FALLBACK_ROASTS : ANSWER_FALLBACK_ROASTS;
     return {
       text: pool[Math.floor(Math.random() * pool.length)],
-      motion: this._isToastie() ? "energetic" : "smug",
-      intensity: this._isToastie() ? 0.7 : 0.6,
+      motion: this._isToast() ? "energetic" : "smug",
+      intensity: this._isToast() ? 0.7 : 0.6,
     };
   }
 
@@ -1764,11 +1764,11 @@ export class ComedianBrain {
   }
 
   private _pickFiller(answer: string): string {
-    // Toastie skips echo fillers entirely — she's interrupting herself, not
+    // Toast skips echo fillers entirely — she's interrupting herself, not
     // listening attentively. Always uses drunk-thinking non-word fillers.
-    if (this._isToastie()) {
-      return TOASTIE_FILLER_LINES[
-        Math.floor(Math.random() * TOASTIE_FILLER_LINES.length)
+    if (this._isToast()) {
+      return TOAST_FILLER_LINES[
+        Math.floor(Math.random() * TOAST_FILLER_LINES.length)
       ];
     }
     if (this._isFillerEchoable(answer) && Math.random() < ECHO_FILLER_PROBABILITY) {
@@ -1789,7 +1789,7 @@ export class ComedianBrain {
 
   /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
   private _pickNonWordFiller(avoid: string | null): string {
-    const pool0 = this._isToastie() ? TOASTIE_FILLER_LINES : NONWORD_FILLERS;
+    const pool0 = this._isToast() ? TOAST_FILLER_LINES : NONWORD_FILLERS;
     const opts = pool0.filter((f) => f !== avoid);
     const pool = opts.length > 0 ? opts : pool0;
     return pool[Math.floor(Math.random() * pool.length)];
@@ -1861,10 +1861,10 @@ export class ComedianBrain {
     this._transition("wrapup");
     this.deps.setMotion("conspiratorial", 0.7);
 
-    // Toastie has her own drunk-apologetic exit lines that DON'T branch on
-    // persona (Toastie is one character). Roast uses the per-persona table.
-    const lines = this._isToastie()
-      ? TOASTIE_TECHNICAL_DIFFICULTIES_LINES
+    // Toast has her own drunk-apologetic exit lines that DON'T branch on
+    // persona (Toast is one character). Roast uses the per-persona table.
+    const lines = this._isToast()
+      ? TOAST_TECHNICAL_DIFFICULTIES_LINES
       : TECHNICAL_DIFFICULTIES_LINES[this.deps.getPersona()] ??
         TECHNICAL_DIFFICULTIES_LINES.kvetch;
     const line = lines[Math.floor(Math.random() * lines.length)];
@@ -3398,17 +3398,17 @@ export class ComedianBrain {
     return this.deps.getExperienceType?.() ?? "roast";
   }
 
-  /** Convenience: brain code reads `this._isToastie()` instead of comparing strings. */
-  private _isToastie(): boolean {
-    return this._getExperienceType() === "toastie";
+  /** Convenience: brain code reads `this._isToast()` instead of comparing strings. */
+  private _isToast(): boolean {
+    return this._getExperienceType() === "toast";
   }
 
-  /** True only when ROAST experience AND flowMode is rapid_fire. Toastie has no
+  /** True only when ROAST experience AND flowMode is rapid_fire. Toast has no
    *  Rapid Fire variant — even if the store's flowMode is set, we don't route
-   *  through the Rapid Fire branches when in Toastie. Use this everywhere
+   *  through the Rapid Fire branches when in Toast. Use this everywhere
    *  instead of comparing `getFlowMode() === "rapid_fire"` directly. */
   private _isRapidFireFlow(): boolean {
-    return !this._isToastie() && this.deps.getFlowMode() === "rapid_fire";
+    return !this._isToast() && this.deps.getFlowMode() === "rapid_fire";
   }
 
   /** All question texts asked so far. Passed to generate-question to prevent topic repetition. */

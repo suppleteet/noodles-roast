@@ -23,15 +23,15 @@ export type FlowMode = "original" | "rapid_fire";
 
 /**
  * Top-level experience the user picks on the landing screen — two side-by-side
- * buttons, "Roast Me" (orange) vs "Toast Me" (champagne). Toastie is a parallel
+ * buttons, "Roast Me" (orange) vs "Toast Me" (champagne). Toast is a parallel
  * experience to the standard roast: a drunk woman at a wedding mic giving a
  * toast to the user, who she's pretending she knows. Same brain state machine,
  * different question bank, prompts, scripted lines, voice, and puppet palette.
  *
- * In "toastie": persona is ignored (one character), flowMode is ignored
+ * In "toast": persona is ignored (one character), flowMode is ignored
  * (single flow — no Rapid Fire variant).
  */
-export type ExperienceType = "roast" | "toastie";
+export type ExperienceType = "roast" | "toast";
 
 export type RoastModelId =
   | "gemini-3.5-flash"

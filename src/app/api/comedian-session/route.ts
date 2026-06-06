@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     ? (body.burnIntensity as BurnIntensity)
     : 3;
   const contentMode = body.contentMode === "vulgar" ? "vulgar" : "clean";
-  const experienceType = body.experienceType === "toastie" ? "toastie" : "roast";
+  const experienceType = body.experienceType === "toast" ? "toast" : "roast";
 
   const sessionId = createSession(
     apiKey,

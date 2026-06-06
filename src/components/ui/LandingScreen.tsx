@@ -246,7 +246,7 @@ export default function LandingScreen() {
           </button>
           <button
             onClick={() => {
-              setExperienceType("toastie");
+              setExperienceType("toast");
               void handleStart();
             }}
             disabled={paymentBusy !== null}

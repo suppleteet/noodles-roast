@@ -39,7 +39,7 @@ const RIGHT_PUPIL_POS: [number, number, number] = [-0.036, 0.171, 0.111];
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 // Two palettes — the experienceType picks one at session start. Roast keeps the
-// existing purple/dark-red look; Toastie shifts everything warm-gold + amber
+// existing purple/dark-red look; Toast shifts everything warm-gold + amber
 // (drunk woman at a wedding, champagne / gold-foil energy).
 
 interface PuppetPalette {
@@ -50,7 +50,7 @@ interface PuppetPalette {
   brow: string;
   mouth: string;
   tongue: string;
-  /** Hemisphere top-eyelid color (Toastie only — Roast renders no eyelid). */
+  /** Hemisphere top-eyelid color (Toast only — Roast renders no eyelid). */
   eyelid: string;
 }
 
@@ -62,15 +62,15 @@ const ROAST_PALETTE: PuppetPalette = {
   brow: "#241430",       // dark plum — a touch brighter than near-black
   mouth: "#3a0510",      // dark red interior cavity
   tongue: "#d44d61",     // light red tongue
-  eyelid: "#5a1a8a",     // unused in roast — eyelids only render in toastie
+  eyelid: "#5a1a8a",     // unused in roast — eyelids only render in toast
 };
 
-const TOASTIE_PALETTE: PuppetPalette = {
+const TOAST_PALETTE: PuppetPalette = {
   head: "#e8c547",       // warm gold — drunk-wedding-toaster yellow
   eyeWhite: "#fbf6e6",   // slightly creamier white to play with the gold head
   pupil: "#1a1208",      // warm near-black (less harsh than pure black)
   nose: "#d49a2a",       // deeper amber for nose contrast against the gold head
-  brow: "#000000",       // unused in toastie — brows are hidden
+  brow: "#000000",       // unused in toast — brows are hidden
   mouth: "#b8520a",      // warm amber-brown mouth interior
   tongue: "#e09060",     // peachy tongue
   eyelid: "#d49a2a",     // amber droopy eyelid sitting over each eye
@@ -103,10 +103,10 @@ export default function PuppetCharacter({ modelUrl = null }: Props) {
   const groupRef = useRef<THREE.Group>(null);
 
   // Subscribe to experienceType so the puppet swaps palette + geometry
-  // when the user picks Roast vs Toastie. Hook-selector subscription is OK
+  // when the user picks Roast vs Toast. Hook-selector subscription is OK
   // here — invariant #1 only forbids selectors INSIDE useFrame.
   const experienceType = useSessionStore((s) => s.experienceType);
-  const palette = experienceType === "toastie" ? TOASTIE_PALETTE : ROAST_PALETTE;
+  const palette = experienceType === "toast" ? TOAST_PALETTE : ROAST_PALETTE;
 
   const targets = useRef<SpringTargets>({ pitch: 0, yaw: 0, roll: 0.05, bobY: -0.03 });
   const { stiffnessRef, dampingRef } = useMotionState(targets);
@@ -157,7 +157,7 @@ class GLBErrorBoundary extends React.Component<
 // ── Procedural puppet head (fallback when no GLB is available) ────────────────
 function ProceduralHead() {
   const { palette, experienceType } = usePuppetCtx();
-  const isToastie = experienceType === "toastie";
+  const isToast = experienceType === "toast";
   return (
     // Eyes and nose are children of MouthHemispheres so they tilt with the top jaw
     <MouthHemispheres>
@@ -171,14 +171,14 @@ function ProceduralHead() {
           <sphereGeometry args={[PUPIL_RADIUS, 24, 24]} />
           <meshStandardMaterial color={palette.pupil} roughness={0.3} />
         </mesh>
-        {/* Toastie eyelid: top-third hemisphere sitting on the upper surface
+        {/* Toast eyelid: top-third hemisphere sitting on the upper surface
             of the eye dome, colored to match the head so it reads as a
             heavy droopy "had a few drinks" lid. Local +Y of the eye group
             is already the "top of the eyeball" since the dome was rotated
             so its base sits flush with the head sphere. Slightly larger
             radius than the eyeball (0.305 vs 0.30) so there's no
             z-fight along the seam. */}
-        {isToastie && (
+        {isToast && (
           <mesh position={[0, 0.05, 0]}>
             <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
             <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
@@ -196,7 +196,7 @@ function ProceduralHead() {
           <sphereGeometry args={[PUPIL_RADIUS, 24, 24]} />
           <meshStandardMaterial color={palette.pupil} roughness={0.3} />
         </mesh>
-        {isToastie && (
+        {isToast && (
           <mesh position={[0, 0.05, 0]}>
             <sphereGeometry args={[0.305, 40, 16, 0, Math.PI * 2, 0, Math.PI / 3]} />
             <meshStandardMaterial color={palette.eyelid} roughness={1.0} metalness={0} />
@@ -207,9 +207,9 @@ function ProceduralHead() {
       {/* ── Nose ── */}
       <Nose />
 
-      {/* ── Eyebrows (Roast only) — Toastie skips these entirely; the eyelids
+      {/* ── Eyebrows (Roast only) — Toast skips these entirely; the eyelids
             above are the brow region's visual focus in that mode. ── */}
-      {!isToastie && (
+      {!isToast && (
         <>
           <mesh position={[-0.22, 0.82, 0.85]} rotation={[0.9, 0, Math.PI / 2]}>
             <capsuleGeometry args={[0.12, 0.18, 6, 12]} />

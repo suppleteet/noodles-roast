@@ -174,47 +174,52 @@ export const TECHNICAL_DIFFICULTIES_LINES: Record<PersonaId, string[]> = {
   ],
 };
 
-// ─── Toastie experience: scripted lines ─────────────────────────────────────
-/** Toastie's mid-thought greetings — she's already been talking to someone
- *  offstage and pivots to the camera. The user feels like they walked in on
- *  her toast already in progress. */
-export const TOASTIE_GREETINGS = [
-  "…and THEN, AND THEN — oh! Hi! Sorry, you must be the guest of honor.",
-  "…I'm just SAYING, that's all I'm saying. *clink* — okay, hi! Hi gorgeous.",
-  "…and that is EXACTLY what I told her. Oh — hello! Look at this face.",
-  "…anyway, anyway, ANYWAY — oh god, sorry, you're here, hi!",
-  "Okay okay, settle down, everyone — *clink* — there you are, sweetie!",
+// ─── Toast experience: scripted lines ─────────────────────────────────────
+/** Toast's mid-thought greetings — she's been mid-conversation with someone
+ *  offstage, fully WASTED, and is just now noticing the camera. Loud, sloppy,
+ *  affectionate. */
+export const TOAST_GREETINGS = [
+  "…and I SAID, I said — wait, who — OH MY GOD, hi! There you are! Look at YOU.",
+  "*clink* — okay, OKAY, settle down — hi, baby! Hi! You look — you look incredible.",
+  "…NO, you listen — wait wait wait, hold on. Hi. Hi gorgeous. There you are.",
+  "…and THAT is why I never — oh hi! HI! Sorry, I am, I am SO drunk right now. Welcome.",
+  "Okay, ohhhkay — *sip* — there's my person! Look at this FACE. Hi sweetie.",
+  "…and she goes, NO, and I'm like — *clink* — oh shit, hi! You're here! Welcome welcome.",
 ];
 
-/** Drunk-thinking fillers — same role as NONWORD_FILLERS but in Toastie's
- *  voice. Slightly meandering, warmer, hint at champagne. */
-export const TOASTIE_FILLER_LINES = [
-  "Hmm, where was I, where was I.",
-  "Oh god, hold on, let me think.",
-  "Wait wait wait, lemme — yeah, yeah.",
-  "Okay so, hold that thought.",
-  "Mm, yeah, no, totally, totally.",
-  "Right, right, okay, *sip*.",
-  "Oh that's good, okay, hang on.",
+/** Drunk-thinking fillers — same role as NONWORD_FILLERS but for a woman
+ *  who is genuinely WASTED. Meandering, slurry-adjacent, repeating herself,
+ *  losing the thread. */
+export const TOAST_FILLER_LINES = [
+  "Hmm, where was I, where was I, what was I —",
+  "Oh god, oh god — okay — let me think let me think.",
+  "Wait wait wait, lemme — what?",
+  "Okay so, okay so — hold that thought, hold that.",
+  "Mm, yeah, no, no totally, totally, totally.",
+  "Right, right right right, okay, *sip*.",
+  "Oh that's good, okay — okay — hang on, hang on.",
+  "I LOVE that — wait, what?",
+  "Mm-hm, mm-HM. Yeah. Yeah no, totally.",
 ];
 
-/** Toastie's version of the watchdog goodbye — drunk apologetic, ends the
+/** Toast's version of the watchdog goodbye — fully wasted apology, ends the
  *  session in voice. */
-export const TOASTIE_TECHNICAL_DIFFICULTIES_LINES = [
-  "Oh god, I am WAY too drunk for this. Sweetie, come back when I've sobered up.",
-  "Oh shit — my brain just left the building. Try me again later, gorgeous, I'm sorry.",
-  "Okay, okay, I gotta — I gotta sit down for a sec. Come back later, I LOVE YOU.",
+export const TOAST_TECHNICAL_DIFFICULTIES_LINES = [
+  "Oh GOD, I am — I am so drunk. SO drunk. Sweetie, come back later, I have to lie down.",
+  "Oh shit — oh SHIT — okay, my brain is — it's gone. I'm sorry. Come back, I LOVE YOU.",
+  "Okay, okay, okay — I cannot — I need water and a chair. Come back later, gorgeous.",
+  "Wait — what — okay no, I am done. I am DONE. *clink* — call me later, I'm serious.",
 ];
 
-/** Toastie's answer-fallback roasts — generic save-the-moment lines used
- *  only when the LLM returns nothing for an answer cycle. Warmer + drunker
- *  than ANSWER_FALLBACK_ROASTS. */
-export const TOASTIE_ANSWER_FALLBACK_ROASTS = [
-  "I love that. Truly. I have no notes.",
-  "Iconic. Honestly, iconic. *clink*",
-  "Okay okay okay. We love that for you.",
-  "Stunning. Stunning answer. Stunning energy.",
-  "Yes. YES. I am writing that down.",
+/** Toast's answer-fallback roasts — generic save-the-moment lines used
+ *  only when the LLM returns nothing for an answer cycle. Loud, drunk-supportive. */
+export const TOAST_ANSWER_FALLBACK_ROASTS = [
+  "I LOVE that. I LOVE that for you. I have — I have NO notes.",
+  "Iconic. Honestly — IconIC. *clink*",
+  "Okay okay okay okay. We love that. We LOVE that for you.",
+  "STUNNING. Stunning answer. Stunning ENERGY. Stunning everything.",
+  "YES. YES YES YES. I am writing — I am writing that DOWN.",
+  "Oh my GOD. Oh my god. Same. SAME. *sip*",
 ];
 
 // ─── Wrap-up / closing ──────────────────────────────────────────────────────
