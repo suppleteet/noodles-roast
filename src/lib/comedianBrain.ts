@@ -408,6 +408,11 @@ export class ComedianBrain {
   // Model availability — flipped once a 503 has fired the onModelUnavailable
   // callback, so we don't spam the user with the same prompt for every retry.
   private modelUnavailableFired = false;
+  /** Consecutive generation-watchdog fires. Reset to 0 whenever a real joke
+   *  arrives. ≥2 in a row implies the LLM is degraded (client-side timeout
+   *  before any status code), so we trip the same model-unavailable prompt
+   *  that a 503 would have. */
+  private consecutiveWatchdogFires = 0;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -463,6 +468,7 @@ export class ComedianBrain {
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
     this.modelUnavailableFired = false;
+    this.consecutiveWatchdogFires = 0;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -1767,6 +1773,11 @@ export class ComedianBrain {
    */
   private _armGenerationWatchdog(answer: string): void {
     this._clearGenerationWatchdog();
+    // Abort the PREVIOUS in-flight fetch before stomping the ref. Without this,
+    // a barge-in restart leaves the prior generate-speak stream running — its
+    // SSE chunks keep calling openJokeStream() into the playback chain and
+    // motion events arrive seconds after the fallback already played.
+    try { this.generationAbort?.abort(); } catch { /* best-effort */ }
     this.generationAbort = new AbortController();
     this.generationWatchdog = setTimeout(() => {
       this.generationWatchdog = null;
@@ -1781,9 +1792,36 @@ export class ComedianBrain {
       // Invalidate any in-flight stream callbacks (they check deliveryGeneration).
       this.deliveryGeneration++;
       this._stopFillerPump();
+      this._onWatchdogFired();
       // Deliver a canned roast and advance — enterDelivering with no jokes picks the fallback.
       this.enterDelivering(answer, { relevant: true, jokes: [] }, undefined);
     }, COMEDIAN_CONFIG.generationTimeoutMs);
+  }
+
+  /**
+   * Track consecutive watchdog fires. When the LLM stalls twice in a row,
+   * Gemini is degraded (the symptoms are identical to a 503, but the request
+   * times out client-side before any status code arrives — so the structured
+   * 503 → model-unavailable path never triggers). Surface the same fallback
+   * modal so the user can switch models and recover instead of sitting through
+   * canned fallback roasts.
+   */
+  private _onWatchdogFired(): void {
+    this.consecutiveWatchdogFires++;
+    if (this.consecutiveWatchdogFires < 2 || this.modelUnavailableFired) return;
+    const failedModel = this.deps.getRoastModel();
+    // Inline the suggested fallback (don't import llmClient — that pulls in
+    // server-only Anthropic/OpenAI/Gemini SDKs into the browser bundle).
+    const suggestedFallback =
+      failedModel.startsWith("gemini-") && failedModel !== "gemini-2.5-flash"
+        ? "gemini-2.5-flash"
+        : null;
+    if (!suggestedFallback) return;
+    this.modelUnavailableFired = true;
+    this.deps.logTiming(
+      `brain: ${this.consecutiveWatchdogFires} consecutive watchdog fires — prompting fallback to ${suggestedFallback}`,
+    );
+    this.deps.onModelUnavailable?.(failedModel, suggestedFallback);
   }
 
   /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */
@@ -2103,6 +2141,10 @@ export class ComedianBrain {
         if (this.state !== "generating" && this.state !== "delivering") return;
         const isFirstJoke = jokesQueued === 0;
         if (isFirstJoke) {
+          // Real joke arrived → LLM is healthy. Reset the watchdog counter so
+          // it takes 2 more consecutive timeouts to retrip the model-unavailable
+          // prompt.
+          this.consecutiveWatchdogFires = 0;
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
           // chain. The last filler's trailing "..." already provides the pre-joke breath, so
           // the joke text itself stays unmodified.
@@ -2241,6 +2283,7 @@ export class ComedianBrain {
         });
       },
       this.generationAbort?.signal,
+      gen,
     );
   }
 
@@ -2426,6 +2469,8 @@ export class ComedianBrain {
           this._onDeliveringDrained();
         }
       },
+      undefined,
+      gen,
     );
   }
 
@@ -3440,6 +3485,12 @@ export class ComedianBrain {
     }) => void,
     onError: () => void,
     signal?: AbortSignal,
+    /** deliveryGeneration snapshot from the caller — used to short-circuit
+     *  the SSE handler when a barge-in / watchdog fires and the caller has
+     *  already moved on. Without this, buffered SSE chunks open new audio
+     *  sinks via openJokeStream() that play seconds after the canned
+     *  fallback already landed. */
+    gen?: number,
   ): void {
     const streamingTtsEnabled = !!this.deps.openJokeStream;
     const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
@@ -3488,6 +3539,17 @@ export class ComedianBrain {
         let buffer = "";
 
         const handleEvent = (event: { type: string; [key: string]: unknown }): boolean => {
+          // Stale stream — the brain has moved on (barge-in / watchdog fired).
+          // Cancel any sinks already opened (they were enqueued into the TTS
+          // chain) and stop processing further events so we don't queue audio
+          // that the user shouldn't hear.
+          if (gen !== undefined && this.deliveryGeneration !== gen) {
+            if (jokeSinks.size > 0) {
+              for (const s of jokeSinks.values()) s.cancel();
+              jokeSinks.clear();
+            }
+            return true; // signal caller to stop reading more SSE chunks
+          }
           if (event.type === "joke-meta" && streamingTtsEnabled) {
             // Server opened EL WS — open a sink on our side to absorb audio.
             const index = (event.index as number) ?? 0;
