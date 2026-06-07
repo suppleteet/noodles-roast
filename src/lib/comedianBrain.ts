@@ -2679,6 +2679,7 @@ export class ComedianBrain {
         knownFacts: this._getThrowbackContext(),
         conversationSoFar: this._getLedgerContext(),
         previousQuestions: this._getPreviousQuestionTexts(),
+        style: this.deps.getLlmQuestions?.() ? "simple" : "open",
         imageBase64: frame,
       }),
     })
@@ -2735,9 +2736,12 @@ export class ComedianBrain {
     if (this.preQueuedQuestion) return;
 
     const isRapidFire = this._isRapidFireFlow();
+    // Dev experiment: llmQuestions on → pre-fetch every question from the LLM (repeat-aware).
+    const useLlmQuestions = this.deps.getLlmQuestions?.() === true && this.askedQuestionIds.size >= 1;
     // Toast stays on its authored bank — never pre-fetch a generic contextual question.
     const shouldUseContextual =
-      !isRapidFire && !this._isToast() && this.bankQuestionsInARow >= 1 && this.cameraAvailable;
+      !isRapidFire && !this._isToast() &&
+      (useLlmQuestions || (this.bankQuestionsInARow >= 1 && this.cameraAvailable));
     if (shouldUseContextual) {
       this.bankQuestionsInARow = 0;
       this._preFetchContextualQuestion();
@@ -2825,6 +2829,7 @@ export class ComedianBrain {
         knownFacts: this._getThrowbackContext(),
         conversationSoFar: this._getLedgerContext(),
         previousQuestions: this._getPreviousQuestionTexts(),
+        style: this.deps.getLlmQuestions?.() ? "simple" : "open",
         imageBase64: frame,
       }),
     })

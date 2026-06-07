@@ -1131,6 +1131,7 @@ export default function LiveSessionController({
       getContentMode: () => useSessionStore.getState().contentMode,
       getRoastModel: () => useSessionStore.getState().roastModel,
       getFlowMode: () => useSessionStore.getState().flowMode,
+      getLlmQuestions: () => useSessionStore.getState().llmQuestions,
       getExperienceType: () => useSessionStore.getState().experienceType,
       getInputAmplitude: () => mic.getInputAmplitude(),
       getObservations: () => useSessionStore.getState().observations,

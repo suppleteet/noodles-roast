@@ -11,6 +11,9 @@ interface GenerateQuestionRequest {
   knownFacts?: string[];
   conversationSoFar?: string[];
   previousQuestions?: string[];
+  /** "open" (default): one natural open question. "simple": closed yes/no or
+   *  basic-fact question — nothing open-ended (dev llmQuestions experiment). */
+  style?: "open" | "simple";
   imageBase64?: string;
 }
 
@@ -21,7 +24,7 @@ export async function POST(req: NextRequest) {
     const personaId: PersonaId = PERSONA_IDS.includes(body.persona) ? body.persona : DEFAULT_PERSONA;
     const persona = PERSONAS[personaId];
 
-    const systemPrompt = `You are "${persona.name}".
+    let systemPrompt = `You are "${persona.name}".
 Character voice: ${persona.toneDescription}
 
 Your job: generate ONE short, natural question to ask the person on camera.
@@ -57,6 +60,34 @@ GOOD examples (natural, observational, easy):
 - "What are you drinking?"
 
 Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hint for roasting their answer" }`;
+
+    // "simple" style (dev llmQuestions experiment): closed, low-effort questions.
+    if (body.style === "simple") {
+      systemPrompt = `You are "${persona.name}".
+Character voice: ${persona.toneDescription}
+
+Your job: generate ONE short, SIMPLE question to ask the person on camera.
+
+RULES:
+- Ask a CLOSED, low-effort question: a yes/no, or a basic fact they can answer in one or two words. Things like: "You married?", "Got any kids?", "Dog person?", "You work from home?", "You drive?", "From around here?", "You a coffee drinker?", "Live alone?".
+- NOTHING open-ended. NOTHING they'd have to think hard about or explain. No "tell me about…", no "what's the story with…", no feelings, no philosophy, no favorites that require deliberation.
+- React to what you SEE or build naturally on what you already know — but DO NOT re-ask anything already answered (see WHAT YOU ALREADY KNOW) or any topic in ALREADY ASKED. If they told you they're married, NEVER ask if they're married. Pick a genuinely new fact.
+- ONE short sentence. Casual, in character. Whatever they answer, you should be able to roast it.
+
+BAD (open-ended / too much thought):
+- "What do you do for fun?"   (open)
+- "Tell me about your job."   (open)
+- "What's your proudest moment?"  (deep)
+
+GOOD (simple, closed, fast):
+- "You married?"
+- "Any kids?"
+- "Cat or dog person?"
+- "You work from home?"
+- "You from around here?"
+
+Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hint for roasting their answer" }`;
+    }
 
     const userParts: UserPart[] = [];
 

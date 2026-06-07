@@ -41,6 +41,8 @@ export default function LandingScreen() {
   const setRoastModel = useSessionStore((s) => s.setRoastModel);
   const flowMode = useSessionStore((s) => s.flowMode);
   const setFlowMode = useSessionStore((s) => s.setFlowMode);
+  const llmQuestions = useSessionStore((s) => s.llmQuestions);
+  const setLlmQuestions = useSessionStore((s) => s.setLlmQuestions);
   const setExperienceType = useSessionStore((s) => s.setExperienceType);
   const IS_DEV = useDevUnlock();
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
@@ -159,6 +161,15 @@ export default function LandingScreen() {
                 </option>
               ))}
             </select>
+            <label className="mb-5 flex cursor-pointer items-center gap-2 font-mono text-sm text-purple-200">
+              <input
+                type="checkbox"
+                checked={llmQuestions}
+                onChange={(e) => setLlmQuestions(e.target.checked)}
+                className="h-4 w-4 accent-purple-400 cursor-pointer"
+              />
+              LLM-generated questions (simple/closed, repeat-aware)
+            </label>
           </>
         )}
 

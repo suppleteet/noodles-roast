@@ -836,10 +836,16 @@ function BuildTimeStamp() {
       <button
         type="button"
         onClick={handleTap}
-        suppressHydrationWarning
         className="select-none text-[10px] text-white/40 transition-colors hover:text-white/70 sm:text-xs"
       >
-        {new Date(buildTime).toLocaleString()}
+        {new Date(buildTime).toLocaleString("en-US", {
+          // Pin to Pacific so server (UTC) and client render the same string —
+          // otherwise the SSR'd build stamp lands as GMT and only flips to local
+          // after hydration. en-US format + Los_Angeles tz gives PST/PDT
+          // automatically depending on date.
+          timeZone: "America/Los_Angeles",
+          timeZoneName: "short",
+        })}
       </button>
     </div>
   );
