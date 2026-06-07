@@ -139,6 +139,9 @@ interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
   flowMode: FlowMode;
+  /** Dev experiment: when true, the LLM generates every question (simple/closed
+   *  style, aware of what's already been answered) instead of the fixed bank. */
+  llmQuestions: boolean;
   experienceType: ExperienceType;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
@@ -216,6 +219,7 @@ interface SessionState {
   setPhase: (phase: SessionPhase, trigger: SessionTrigger) => void;
   setSessionMode: (mode: SessionMode) => void;
   setFlowMode: (mode: FlowMode) => void;
+  setLlmQuestions: (v: boolean) => void;
   setExperienceType: (type: ExperienceType) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
   setContentMode: (mode: ContentMode) => void;
@@ -275,6 +279,7 @@ const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
   flowMode: "original" as FlowMode,
+  llmQuestions: false,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
@@ -335,6 +340,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
   setFlowMode: (flowMode) => set({ flowMode }),
+  setLlmQuestions: (llmQuestions) => set({ llmQuestions }),
   setExperienceType: (experienceType) =>
     set((s) =>
       // Only reseed the voice when the experience actually changes — protects any

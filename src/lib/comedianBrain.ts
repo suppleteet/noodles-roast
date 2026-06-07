@@ -129,6 +129,9 @@ export interface ComedianBrainDeps {
   getRoastModel: () => string;
   /** Conversation flow style. Drives which question bank the brain pulls from. */
   getFlowMode: () => import("@/store/useSessionStore").FlowMode;
+  /** Dev experiment: when true, generate every question via the LLM (simple/closed
+   *  style, repeat-aware) instead of the fixed bank. */
+  getLlmQuestions?: () => boolean;
   /** Top-level experience the user picked on the landing screen — "roast" or "toast".
    *  When "toast": brain pulls from TOAST_QUESTION_BANK, skips the FlowMode/persona
    *  branches, and swaps scripted lines (greetings, fillers, fallbacks) to the Toast
@@ -1343,11 +1346,14 @@ export class ComedianBrain {
       // Toast never detours to LLM-generated contextual questions — its 11-question
       // bank is the whole point, and generic contextual questions read as off-voice
       // ("not a good question for a toast"). Stay on the bank.
+      // Dev experiment: when llmQuestions is on, generate EVERY question (after the
+      // name) via the LLM instead of the bank — it's repeat-aware (knownFacts +
+      // previousQuestions), which fixes "I said married, then she asked if I'm married".
+      const useLlmQuestions = this.deps.getLlmQuestions?.() === true && this.askedQuestionIds.size >= 1;
       const shouldUseContextual =
         !this._isRapidFireFlow() &&
         !this._isToast() &&
-        this.bankQuestionsInARow >= 1 &&
-        this.cameraAvailable;
+        (useLlmQuestions || (this.bankQuestionsInARow >= 1 && this.cameraAvailable));
 
       if (bankAvailable && !shouldUseContextual) {
         // Use bank question
@@ -3399,6 +3405,10 @@ export class ComedianBrain {
     tags: string[],
   ): void {
     if (type === "joke") this.lastDeliveredJokeText = text;
+    // Mirror questions into the LLM debug log so it shows the FULL back-and-forth
+    // (jokes are already logged at their generation site). Keeps the panel in sync
+    // with the transcript + on-screen question instead of showing only jokes.
+    if (type === "question") this.deps.logLlm?.("←", "question", text);
     this.ledger.push({ type, text, timestamp: Date.now(), tags });
     // Keep last 30 entries
     if (this.ledger.length > 30) this.ledger = this.ledger.slice(-30);

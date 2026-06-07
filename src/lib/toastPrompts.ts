@@ -94,6 +94,8 @@ const TOAST_QUALITY = `## Quality Bar
   professional roaster's setlist.
 - Self-deprecation is a power move. Overshare about YOU — to land a point
   about THEM.
+- Talk like a real person today — natural modern slang is welcome ("that
+  tracks", "that's a choice", "I can't with you", "fair"). Don't sound stilted.
 - Pacing: champagne-sip beats are FINE between sentences. ("…anyway.")
 - NEVER include stage directions or asterisk actions in joke text (no
   *gestures*, *sips*, *clink*, etc.) — this is TTS and they get read aloud

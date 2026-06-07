@@ -655,7 +655,7 @@ function MainApp() {
       {IS_DEV && debugMode && <DebugTranscript />}
       {IS_DEV && debugMode && <DebugTimeline />}
       {IS_DEV && debugMode && (
-        <div className="fixed top-3 bottom-14 left-3 z-50 flex flex-col gap-2 max-w-xs">
+        <div className="fixed top-3 bottom-20 left-3 z-50 flex flex-col gap-2 max-w-xs">
           {/* Persona selector */}
           <div className="bg-black/80 border border-purple-400/40 rounded p-2 font-mono text-[10px] text-purple-300 leading-tight pointer-events-auto">
             <div className="text-purple-500 mb-1">persona</div>

@@ -48,10 +48,20 @@ export interface PcmPlaybackHandle {
  * Schedules AudioBufferSourceNodes in sequence for gapless playback.
  * Polls amplitude via AnalyserNode for mouth sync (same pattern as AudioPlayer).
  */
+/** Master output cap for puppet TTS. Toast's voice in particular hits hot
+ *  peaks that distort on Android — capping at 0.7 (≈ −3 dB) tames the
+ *  loudest moments without making conversational-volume lines feel quiet.
+ *  Recording still captures the un-attenuated analyser output, so the
+ *  saved video keeps full headroom. */
+const MASTER_PLAYBACK_GAIN = 0.7;
+
 export function usePcmPlayback(): PcmPlaybackHandle {
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const recordingDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const queueEndRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const rafRef = useRef<number>(0);
@@ -65,10 +75,6 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       // path its built-in AudioBufferSourceNode resampler glitches the first ~500ms
       // of audio (chipmunk effect). Resampling ourselves in enqueueChunk gives a
       // single deterministic code path on every device.
-      // latencyHint: "playback" tells Android Chrome this is media (not VoIP),
-      // so output routes through the MEDIA volume stream instead of VOICE_CALL.
-      // VOICE_CALL has a non-zero floor on Android — even at min volume you can
-      // still hear it. MEDIA goes to true silence at 0.
       ctx = new AudioContext({ latencyHint: "playback" });
       ctxRef.current = ctx;
 
@@ -77,18 +83,61 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       analyser.smoothingTimeConstant = 0.3;
       analyserRef.current = analyser;
 
-      const dest = ctx.createMediaStreamDestination();
-      destRef.current = dest;
+      // ── Output chains ────────────────────────────────────────────────
+      // RECORDING: analyser → recordingDest (un-attenuated, full quality
+      // captured into the MP4).
+      const recordingDest = ctx.createMediaStreamDestination();
+      recordingDestRef.current = recordingDest;
+      analyser.connect(recordingDest);
 
-      // Playback path: connect directly to ctx.destination (system audio out).
-      // The earlier <audio>+MediaStream indirection was an attempt to influence
-      // which channel Android Chrome routed to, but in practice that left the
-      // hardware volume buttons not controlling the puppet at all. Going
-      // through ctx.destination puts the audio on whatever stream Android picks
-      // for this AudioContext — and hardware volume controls THAT stream.
-      // Recording dest is kept separate so the captured video keeps audio.
-      analyser.connect(ctx.destination);
-      analyser.connect(dest);
+      // PLAYBACK: analyser → masterGain → playbackDest → <audio> element →
+      // device speakers.
+      //
+      // Why the <audio> indirection: ctx.destination alone does NOT reliably
+      // attach to the Android Chrome MEDIA volume widget. On many devices it
+      // routes outside the OS mixer entirely — hardware volume buttons don't
+      // affect it, and OS volume=0 still leaks audio through. Routing through
+      // a MediaStream into an <audio> element puts the playback path under the
+      // OS mixer (MEDIA stream), so the volume buttons control it AND zero
+      // means zero. masterGain caps Toast's hot peaks at ≈ −3 dB so loud lines
+      // don't blow out.
+      const masterGain = ctx.createGain();
+      masterGain.gain.value = MASTER_PLAYBACK_GAIN;
+      masterGainRef.current = masterGain;
+      const playbackDest = ctx.createMediaStreamDestination();
+      playbackDestRef.current = playbackDest;
+      analyser.connect(masterGain);
+      masterGain.connect(playbackDest);
+
+      // Mount the playback <audio> element. Imperative + appended to body so
+      // it survives any conditional rendering; the OS volume widget needs an
+      // element it can see in the DOM to bind controls to.
+      if (typeof document !== "undefined") {
+        let el = audioElRef.current;
+        if (!el) {
+          el = document.createElement("audio");
+          el.autoplay = true;
+          // playsInline isn't on the HTMLAudioElement type (it's HTMLVideoElement),
+          // but Android browsers respect the attribute on <audio> too — set it
+          // via setAttribute so it sticks without a type cast.
+          el.setAttribute("playsinline", "");
+          // Keep it out of the visual flow — but in the DOM so OS mixer sees it.
+          el.style.position = "fixed";
+          el.style.width = "0";
+          el.style.height = "0";
+          el.style.opacity = "0";
+          el.style.pointerEvents = "none";
+          // Don't show a default controls UI even if devtools force-shows it.
+          el.controls = false;
+          document.body.appendChild(el);
+          audioElRef.current = el;
+        }
+        el.srcObject = playbackDest.stream;
+        // .play() may reject without a user gesture — that's fine; the next
+        // enqueueChunk call (which happens after the user clicked Start) will
+        // re-trigger via the autoplay attribute once audio starts flowing.
+        el.play().catch(() => { /* gesture-pending — autoplay catches it */ });
+      }
     }
     return ctx;
   }
@@ -221,7 +270,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     // before recording starts — otherwise the MediaRecorder captures video-only.
     getDestinationStream: () => {
       getOrCreateContext();
-      return destRef.current?.stream ?? null;
+      return recordingDestRef.current?.stream ?? null;
     },
     getAudioContext: () => ctxRef.current,
     isQueueEmpty,
@@ -240,7 +289,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       gain.gain.value = RECORDING_MIC_GAIN;
       // Route to recording destination ONLY — not speakers — to avoid feedback.
       source.connect(gain);
-      gain.connect(destRef.current!);
+      gain.connect(recordingDestRef.current!);
       return () => {
         try { gain.disconnect(); } catch { /* ignore */ }
         try { source.disconnect(); } catch { /* ignore */ }
