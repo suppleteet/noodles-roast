@@ -29,6 +29,10 @@ export const GLOBAL_AVOID_TOPICS: string[] = [
   "Economy, cost-of-living, or inflation jokes: overplayed, don't land as personal insults",
   "Age clichés that apply to everyone: no 'back in my day' or 'kids today' — roast the specific person, not a generation",
 
+  // ── Keep it TIMELESS (no expiration date on the jokes) ──────────────────────
+  "Crypto, NFTs, Bitcoin, blockchain, web3 — never. Not funny here, full stop.",
+  "Recent or trendy pop culture — NO current/of-the-moment celebrities, hit shows/movies/songs, memes, viral trends, influencers, or named apps/platforms. The content must be TIMELESS: a clip should land just as well in ten years. Roast the actual person in front of you and evergreen human behavior, never what's trending this month.",
+
   // ── Already-prohibited (reinforced here for clarity) ────────────────────────
   "Race, ethnicity, religion, sexual orientation, or disability — off limits, full stop. (Apparent GENDER and AGE are fine to roast — see Read the Room — but never mock someone's gender IDENTITY or anyone for being trans/nonbinary.)",
   "Anything that implies violence or genuine threat, even as hyperbole",

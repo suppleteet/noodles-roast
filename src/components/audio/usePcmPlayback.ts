@@ -112,6 +112,18 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       // Mount the playback <audio> element. Imperative + appended to body so
       // it survives any conditional rendering; the OS volume widget needs an
       // element it can see in the DOM to bind controls to.
+      //
+      // ANDROID GOTCHA: <audio srcObject={mediaStream}> + autoplay only works
+      // reliably when (a) the stream isn't silent at srcObject-set time, and
+      // (b) play() is called inside a user gesture. warmUp() runs from
+      // startLiveSession() which is in an async effect — no gesture context.
+      // So we do two things:
+      //   1. Prime the stream with a 50ms silent buffer BEFORE setting
+      //      srcObject, so the MediaStream has data flowing when the audio
+      //      element binds to it.
+      //   2. If play() rejects, register a one-time pointerdown listener that
+      //      retries play() on the next user tap. The user's first tap is
+      //      almost always within a second of the puppet appearing anyway.
       if (typeof document !== "undefined") {
         let el = audioElRef.current;
         if (!el) {
@@ -132,11 +144,34 @@ export function usePcmPlayback(): PcmPlaybackHandle {
           document.body.appendChild(el);
           audioElRef.current = el;
         }
+        // (1) Prime the stream with 50ms of silence — analyser → masterGain →
+        // playbackDest now has data flowing before the <audio> element binds.
+        // Without this, Chrome Android sees an empty MediaStream and pauses
+        // the audio element until "data arrives", which it then can't auto-
+        // resume from outside a user gesture.
+        try {
+          const primeBuf = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.05), ctx.sampleRate);
+          const primeSrc = ctx.createBufferSource();
+          primeSrc.buffer = primeBuf;
+          primeSrc.connect(analyser);
+          primeSrc.start();
+        } catch { /* createBufferSource shouldn't fail; ignore if it does */ }
+
         el.srcObject = playbackDest.stream;
-        // .play() may reject without a user gesture — that's fine; the next
-        // enqueueChunk call (which happens after the user clicked Start) will
-        // re-trigger via the autoplay attribute once audio starts flowing.
-        el.play().catch(() => { /* gesture-pending — autoplay catches it */ });
+
+        // (2) Try play(). If it rejects (no gesture), arm a one-shot retry on
+        // the next pointerdown anywhere on the page so the user's first tap
+        // (or the next button press) wakes the element.
+        el.play().catch(() => {
+          const audioEl = el!;
+          const retry = () => {
+            void audioEl.play().catch(() => { /* still gated, give up */ });
+            window.removeEventListener("pointerdown", retry);
+            window.removeEventListener("touchstart", retry);
+          };
+          window.addEventListener("pointerdown", retry, { once: true, passive: true });
+          window.addEventListener("touchstart", retry, { once: true, passive: true });
+        });
       }
     }
     return ctx;
