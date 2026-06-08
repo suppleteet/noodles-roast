@@ -91,11 +91,14 @@ export default function ShareScreen() {
           // model fallback. Without this, the route falls back to ROAST_MODEL
           // (gemini-3.5-flash) which 503s when 3.5 is overloaded, and the
           // share UI ends up with the timestamp fallback name.
-          const roastModel = useSessionStore.getState().roastModel;
+          //
+          // experienceType drives the filename prefix — Roastie_ vs Toastie_
+          // — so a toast session's downloaded MP4 reads as Toastie_… on disk.
+          const { roastModel, experienceType } = useSessionStore.getState();
           const nameResp = await fetch("/api/name-video", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transcript, model: roastModel }),
+            body: JSON.stringify({ transcript, model: roastModel, experienceType }),
           });
           if (nameResp.ok) {
             const data = (await nameResp.json().catch(() => ({}))) as { filename?: string };
@@ -317,14 +320,9 @@ export default function ShareScreen() {
 
       {converting && (
         <div className="mb-4 w-full max-w-sm">
-          <div className="mb-2 flex items-baseline justify-between">
-            <p className="text-sm font-medium text-white/80">
-              Processing video…
-            </p>
-            <p className="text-[10px] text-white/40">
-              Buttons unlock when done
-            </p>
-          </div>
+          <p className="mb-2 text-sm font-medium text-white/80">
+            Processing video…
+          </p>
           <div className="relative h-2 w-full overflow-hidden rounded-full bg-white/10">
             <div className="absolute inset-y-0 left-0 w-1/3 animate-indeterminate-slide rounded-full bg-orange-500" />
           </div>

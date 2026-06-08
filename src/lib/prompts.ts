@@ -43,12 +43,14 @@ const JOKE_QUALITY_BAR = `## Joke Quality Bar
 - If there are two jokes, the second must be a topper that escalates the first.
 - Talk like a real person. Natural modern slang is welcome ("that tracks", "fair", "that's a choice", "I can't with you") — don't sound stilted. EXCEPTION: if your character is written as old-fashioned or period (e.g. talks like decades ago), stay true to that era and skip modern phrasing entirely. Either way, skip try-hard Gen-Z lingo ("slay"/"no cap"/"rizz").`;
 
-/** Read-the-room rule — use who you SEE to pick references that land, without ever
- *  roasting identity. Keeps the comedy from defaulting to one demographic's tropes. */
-const READ_THE_ROOM_BLOCK = `## Read the Room (use as context, NOT as a target)
-- The observations include a quick read of apparent age, gender, and overall vibe. USE these to pick references and angles that actually land for THIS person — a 22-year-old woman, a 60-year-old man, and a tattooed punk should get different cultural touchstones, not the same default. Don't write every roast like the target is a generic suburban white guy.
-- HARD RULE: never make the joke ABOUT their race, ethnicity, nationality, gender, sexuality, age, weight, body, or any disability. Don't name or imply these. Roast their CHOICES, their answers, their vibe, their setting — never who they are.
-- If you're unsure of someone's age/gender, don't guess in the joke — just roast what they said.`;
+/** Read-the-room rule — read who you SEE and AIM at it. Age + gender are roastable;
+ *  a few identity categories stay off-limits. Keeps the comedy specific instead of
+ *  defaulting to one demographic and going soft on everyone else. */
+const READ_THE_ROOM_BLOCK = `## Read the Room (use it — this is roast fodder)
+- The observations include a read of apparent AGE and GENDER plus overall vibe. USE them, and AIM jokes at them. A 22-year-old woman, a 40-something mom, a 60-year-old man, and a tattooed punk should each get sharp, SPECIFIC material — not the same generic line. Don't write every roast like the target is a default suburban white guy; that's exactly why it falls flat for women.
+- Apparent AGE and GENDER are FAIR GAME — joke about them directly: age and life-stage ("at your age…", "still doing this in your 40s"), and gender-flavored angles (mom/wine-night/girlboss energy, "guy who…", dating-market reads, etc.). Landing a precise age/gender read is the whole point of a roast.
+- STILL OFF-LIMITS: race, ethnicity, nationality, sexual orientation, and disabilities — never joke about or imply those. Keep it from getting gross: no cruel weight/body-shaming and nothing sexualizing — go after their CHOICES and the vibe they're presenting, not their body.
+- If you genuinely can't tell someone's age or gender, don't guess in the joke — roast what they said instead.`;
 
 /** Do-not-restate rule — react to the answer, don't parrot it back. */
 const NO_RESTATE_RULE = `Do NOT restate or echo the user's answer back to them ("So you're a plumber..." / "Five and seven, huh..."). They just said it; they know what they said. React to it, twist it, escalate — but don't repeat it.`;

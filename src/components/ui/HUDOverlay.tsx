@@ -73,15 +73,6 @@ export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
         )}
       </div>
 
-      {/* Current question (conversation mode) */}
-      {isDev && isRoasting && isConversation && currentQuestion && (
-        <div className="absolute top-10 right-4 max-w-[240px] pointer-events-none">
-          <div className="bg-black/60 rounded px-2 py-1 font-mono text-[10px] text-cyan-300/60 leading-tight">
-            Q: {currentQuestion}
-          </div>
-        </div>
-      )}
-
       {/* Heard text — small display in top-right */}
       {isRoasting && isConversation && !!userAnswer &&
         (brainState === "wait_answer" || brainState === "prodding" ||

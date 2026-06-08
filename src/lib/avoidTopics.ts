@@ -30,7 +30,7 @@ export const GLOBAL_AVOID_TOPICS: string[] = [
   "Age clichés that apply to everyone: no 'back in my day' or 'kids today' — roast the specific person, not a generation",
 
   // ── Already-prohibited (reinforced here for clarity) ────────────────────────
-  "Race, ethnicity, religion, gender identity, sexual orientation, or disability — these are off limits, full stop",
+  "Race, ethnicity, religion, sexual orientation, or disability — off limits, full stop. (Apparent GENDER and AGE are fine to roast — see Read the Room — but never mock someone's gender IDENTITY or anyone for being trans/nonbinary.)",
   "Anything that implies violence or genuine threat, even as hyperbole",
   "Suicide, self-harm, or death wishes — NEVER, not even as exaggeration. No 'suicide note', 'kill yourself', 'end it all', or anything adjacent. This is a hard line.",
 ];
