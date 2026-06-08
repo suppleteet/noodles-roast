@@ -51,6 +51,10 @@ interface Props {
   compositorStream: MediaStream | null;
   mediaStream?: MediaStream | null;
   prefetchedTokenPromise?: Promise<string> | null;
+  /** Comedian chat session pre-created at button press (page.tsx) so its cold
+   *  latency overlaps the permission grant. Resolves to the sessionId, or null
+   *  on failure — in which case the connect effect creates one itself. */
+  prefetchedComedianSessionPromise?: Promise<string | null> | null;
   /** Parallel vision + greeting jokes started in page.tsx as soon as the camera stream exists (before roasting). */
   warmupGreetingPrefetch?: Promise<JokeResponse | null> | null;
   /** Audio chunks already streaming in for the greeting joke — saves the
@@ -65,6 +69,7 @@ export default function LiveSessionController({
   compositorStream,
   mediaStream,
   prefetchedTokenPromise,
+  prefetchedComedianSessionPromise,
   warmupGreetingPrefetch,
   warmupGreetingAudio,
   mockMode = false,
@@ -882,6 +887,20 @@ export default function LiveSessionController({
   // dropping us. After this many failures in a 30s window, give up.
   const reconnectAttemptsRef = useRef<number[]>([]);
 
+  // A pre-minted Gemini ephemeral token kept warm OFF the critical path, so a
+  // reconnect (unexpected drop) or scheduled rotation doesn't have to wait on a
+  // /api/live-token round-trip — the dominant cost when the socket drops early.
+  // Consumed by rotateSession and immediately refilled. openSession's built-in
+  // `fetchToken()` fallback covers the case where the spare is missing/expired.
+  const spareTokenRef = useRef<Promise<string> | null>(null);
+  function mintSpareToken() {
+    // Hold the in-flight promise so a near-instant drop can await it rather than
+    // starting a second fetch. Rejections are handled by openSession's fallback.
+    spareTokenRef.current = fetchToken();
+    // Swallow unhandled-rejection noise; the value is only consumed via openSession.
+    spareTokenRef.current.catch(() => {});
+  }
+
   async function rotateSession() {
     if (!isRunningRef.current) return;
     if (rotatingRef.current) return;
@@ -892,7 +911,13 @@ export default function LiveSessionController({
 
     try {
       const oldSession = sessionRef.current;
-      const newSession = await openSession();
+      // Reconnect with the warm spare token if we have one (skips the live-token
+      // round-trip on the critical path); openSession falls back to fetchToken if
+      // it's null/expired. Refill the spare immediately for the next time.
+      const tokenPromise = spareTokenRef.current;
+      spareTokenRef.current = null;
+      const newSession = await openSession(tokenPromise);
+      mintSpareToken();
       sessionRef.current = newSession;
       useSessionStore.getState().endSpan(rotateSpanId);
       try { oldSession?.close(); } catch { /* may be closed */ }
@@ -1206,24 +1231,37 @@ export default function LiveSessionController({
         brainRef.current?.setMicAvailable(false);
       });
 
-      // Create comedian chat session in parallel (non-blocking — falls back to stateless if it fails)
+      // Comedian chat session: prefer the one pre-created at button press (its
+      // cold latency overlapped the permission grant). Fall back to creating it
+      // here if the prefetch is missing or resolved null. Non-blocking either
+      // way — the brain falls back to stateless if no sessionId ever lands.
       const store = useSessionStore.getState();
-      fetch("/api/comedian-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          persona: store.activePersona,
-          burnIntensity: store.burnIntensity,
-          contentMode: store.contentMode,
-          model: store.roastModel,
-          experienceType: store.experienceType,
-        }),
-      })
-        .then((r) => r.json())
-        .then((data: { sessionId?: string }) => {
-          if (data.sessionId && isRunningRef.current) {
-            comedianSessionIdRef.current = data.sessionId;
-            useSessionStore.getState().logTiming(`live: comedian chat session ready (${data.sessionId}) model=${store.roastModel} experience=${store.experienceType}`);
+      const createComedianSession = (): Promise<string | null> =>
+        fetch("/api/comedian-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            persona: store.activePersona,
+            burnIntensity: store.burnIntensity,
+            contentMode: store.contentMode,
+            model: store.roastModel,
+            experienceType: store.experienceType,
+          }),
+        })
+          .then((r) => r.json())
+          .then((data: { sessionId?: string }) => data.sessionId ?? null)
+          .catch(() => null);
+
+      (prefetchedComedianSessionPromise ?? createComedianSession())
+        .then((sessionId) => {
+          // Prefetch may resolve null (failed) — create one here as a fallback.
+          if (!sessionId && prefetchedComedianSessionPromise) return createComedianSession();
+          return sessionId;
+        })
+        .then((sessionId) => {
+          if (sessionId && isRunningRef.current) {
+            comedianSessionIdRef.current = sessionId;
+            useSessionStore.getState().logTiming(`live: comedian chat session ready (${sessionId}) model=${store.roastModel} experience=${store.experienceType}`);
           }
         })
         .catch(() => { /* stateless fallback — no action needed */ });
@@ -1294,6 +1332,9 @@ export default function LiveSessionController({
 
       startWebcamSend();
       scheduleRotation();
+      // Warm a spare token now so the first rotation / an early unexpected drop
+      // reconnects without a token round-trip on the critical path.
+      mintSpareToken();
       scheduleWrapup();
       startVisionSend();
     } catch (err) {
@@ -1338,6 +1379,7 @@ export default function LiveSessionController({
 
     try { sessionRef.current?.close(); } catch { /* may be closed */ }
     sessionRef.current = null;
+    spareTokenRef.current = null; // drop any warm spare; it'll expire on its own
 
     // Clean up comedian chat session (fire-and-forget)
     if (comedianSessionIdRef.current) {

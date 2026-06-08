@@ -41,7 +41,7 @@ const JOKE_QUALITY_BAR = `## Joke Quality Bar
 - Specificity beats volume. Name one concrete detail or answer, then twist it.
 - Avoid generic insult openers unless the comparison is genuinely specific.
 - If there are two jokes, the second must be a topper that escalates the first.
-- Talk like a real person today. Natural modern slang is welcome ("that tracks", "fair", "that's a choice", "I can't with you") — don't sound stilted or stuck decades ago. (Just skip try-hard Gen-Z internet lingo like "slay"/"no cap"/"rizz".)`;
+- Talk like a real person. Natural modern slang is welcome ("that tracks", "fair", "that's a choice", "I can't with you") — don't sound stilted. EXCEPTION: if your character is written as old-fashioned or period (e.g. talks like decades ago), stay true to that era and skip modern phrasing entirely. Either way, skip try-hard Gen-Z lingo ("slay"/"no cap"/"rizz").`;
 
 /** Read-the-room rule — use who you SEE to pick references that land, without ever
  *  roasting identity. Keeps the comedy from defaulting to one demographic's tropes. */

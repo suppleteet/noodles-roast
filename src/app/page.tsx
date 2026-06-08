@@ -106,6 +106,10 @@ function MainApp() {
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
   // Pre-fetched Live API token — may start on idle (conversation) so connect is faster after permission
   const tokenPromiseRef = useRef<Promise<string> | null>(null);
+  // Pre-created comedian chat session — the longest-cold start path. Fired at
+  // button press (settings are locked by then) so its latency overlaps the
+  // permission dialog instead of stacking after it. Consumed by LiveSessionController.
+  const comedianSessionPromiseRef = useRef<Promise<string | null> | null>(null);
   /** Vision analyze + greeting joke — starts as soon as we have a MediaStream, before phase is roasting */
   const warmupGreetingPromiseRef = useRef<Promise<JokeResponse | null> | null>(null);
   const warmupGreetingAudioRef = useRef<Promise<TtsChunkBuffer | null> | null>(null);
@@ -142,6 +146,38 @@ function MainApp() {
         console.warn("[token-prefetch] failed:", e);
         tokenPromiseRef.current = null;
         throw e;
+      });
+  }
+
+  /** Pre-create the comedian chat session at button press — settings are locked
+   *  once the user taps Start, and this is the longest cold path, so firing it
+   *  here overlaps it with the permission grant. Resolves to null on failure;
+   *  LiveSessionController then falls back to creating one itself (or stateless). */
+  function ensureComedianSessionPrefetch(): void {
+    if (sessionMode !== "conversation" || mockModeRef.current) return;
+    if (comedianSessionPromiseRef.current) return;
+    const s = useSessionStore.getState();
+    comedianSessionPromiseRef.current = fetch("/api/comedian-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        persona: s.activePersona,
+        burnIntensity: s.burnIntensity,
+        contentMode: s.contentMode,
+        model: s.roastModel,
+        experienceType: s.experienceType,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d: { sessionId?: string }) => {
+        if (!d.sessionId) return null;
+        logTiming("prefetch: comedian session ready");
+        return d.sessionId;
+      })
+      .catch((e) => {
+        console.warn("[comedian-session-prefetch] failed:", e);
+        comedianSessionPromiseRef.current = null;
+        return null;
       });
   }
 
@@ -295,6 +331,7 @@ function MainApp() {
     if (enteredIdleFromSession) {
       tokenPromiseRef.current = null;
       warmupGreetingPromiseRef.current = null;
+      comedianSessionPromiseRef.current = null;
     }
     if (sessionMode === "conversation" && !mockMode) {
       ensureLiveTokenPrefetch();
@@ -306,6 +343,9 @@ function MainApp() {
     if (phase !== "requesting-permissions") return;
 
     ensureLiveTokenPrefetch();
+    // Kick off the longest cold path now (settings locked at button press) so it
+    // overlaps the permission dialog rather than stacking after the session mounts.
+    ensureComedianSessionPrefetch();
 
     const liveVideoTracks = webcamStream
       ?.getVideoTracks()
@@ -594,6 +634,7 @@ function MainApp() {
           compositorStream={compositorHandle.current.stream}
           mediaStream={webcamStream}
           prefetchedTokenPromise={tokenPromiseRef.current}
+          prefetchedComedianSessionPromise={comedianSessionPromiseRef.current}
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
           warmupGreetingAudio={warmupGreetingAudioRef.current}
           mockMode={mockMode}

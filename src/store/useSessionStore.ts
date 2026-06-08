@@ -139,8 +139,9 @@ interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
   flowMode: FlowMode;
-  /** Dev experiment: when true, the LLM generates every question (simple/closed
-   *  style, aware of what's already been answered) instead of the fixed bank. */
+  /** When true (default), the LLM generates every question (simple/closed style,
+   *  aware of what's already been answered) instead of the fixed bank. Dev toggle
+   *  on the landing screen can turn it off to compare against the bank. */
   llmQuestions: boolean;
   experienceType: ExperienceType;
   burnIntensity: BurnIntensity;
@@ -279,7 +280,7 @@ const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
   flowMode: "original" as FlowMode,
-  llmQuestions: false,
+  llmQuestions: true,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,

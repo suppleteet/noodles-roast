@@ -315,6 +315,22 @@ export default function ShareScreen() {
         </div>
       </div>
 
+      {converting && (
+        <div className="mb-4 w-full max-w-sm">
+          <div className="mb-2 flex items-baseline justify-between">
+            <p className="text-sm font-medium text-white/80">
+              Processing video…
+            </p>
+            <p className="text-[10px] text-white/40">
+              Buttons unlock when done
+            </p>
+          </div>
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-white/10">
+            <div className="absolute inset-y-0 left-0 w-1/3 animate-indeterminate-slide rounded-full bg-orange-500" />
+          </div>
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap justify-center gap-3">
         {hasNativeShare && (
           <button
@@ -342,9 +358,7 @@ export default function ShareScreen() {
         </button>
       </div>
 
-      {converting ? (
-        <p className="mb-4 text-xs text-white/40">Processing video...</p>
-      ) : recordingMissing ? (
+      {!converting && recordingMissing ? (
         <p className="mb-4 max-w-sm text-xs text-red-300/80">
           Recording did not produce a video. The session log will show recorder start/stop details.
         </p>

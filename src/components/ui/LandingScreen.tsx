@@ -56,6 +56,31 @@ export default function LandingScreen() {
     return data;
   }
 
+  // ── Cold-start prewarm ──────────────────────────────────────────────────────
+  // Warm the slow startup paths WHILE the user is still reading the Roast/Toast
+  // buttons, so the first session doesn't eat the latency (a cold first session
+  // pushed time-to-first-speech to ~28s in one log). Fire-and-forget; each call
+  // is harmless on its own and the post-permission warmup still runs as backstop.
+  useEffect(() => {
+    // EL DNS/TLS handshake (host-level — covers both Roast and Toast voices).
+    // Cheap (open+close, no synthesis), so it's safe to run for every visitor.
+    fetch("/api/prewarm-tts", { method: "POST" }).catch(() => {});
+
+    // In dev, first-hit route compilation is the dominant cold cost (the
+    // live-token route alone took ~15s cold in the log). Ping the heaviest
+    // routes so Next compiles them before the user clicks. Dev-only: in prod
+    // these would mint a throwaway Gemini token / burn vision quota on every
+    // landing impression (including bounces), which isn't worth it — prod
+    // lambdas are cheap to warm and the token fetch is ~300ms there.
+    if (process.env.NODE_ENV !== "production") {
+      fetch("/api/live-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     if (!PAYMENTS_ENABLED) return;
     let cancelled = false;

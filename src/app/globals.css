@@ -22,3 +22,15 @@ body {
 .font-display {
   font-family: var(--font-display);
 }
+
+/* Indeterminate progress bar — a chunk slides L→R across the track on a loop.
+ * Used by ShareScreen's video-processing indicator. Width 35% means the chunk
+ * is visible for most of the cycle without ever fully filling the track. */
+@keyframes indeterminate-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.animate-indeterminate-slide {
+  animation: indeterminate-slide 1.4s ease-in-out infinite;
+}
