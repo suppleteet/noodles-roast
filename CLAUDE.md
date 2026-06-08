@@ -61,6 +61,16 @@ The app supports two session modes (controlled by `sessionMode` in the store):
 - **`"monologue"`**: Original mode. Discrete cycle: capture frame → Gemini vision analysis → ElevenLabs TTS → play. No mic.
 - **`"conversation"`** (default): **Comedian Brain** mode. Gemini Live API is used for STT/VAD only. All speech is controlled by `ComedianBrain` state machine via `/api/generate-joke` + ElevenLabs TTS. Structured show: greeting → vision jokes → Q&A cycles → vision interrupts.
 
+## Session Startup / Prewarm (cold-start resilience)
+
+The slow startup paths are kicked off as early as their inputs exist, so a cold first session doesn't stack latencies (one log hit ~28s time-to-first-speech):
+
+- **Live token** — prefetched on `idle` (`page.tsx:ensureLiveTokenPrefetch`), overlapping the permission dialog.
+- **Comedian chat session** — prefetched at **button press** (`requesting-permissions`, `page.tsx:ensureComedianSessionPrefetch`), passed into `LiveSessionController` as `prefetchedComedianSessionPromise`; the controller consumes it (or creates one itself as fallback). Its cold latency overlaps the camera/mic grant.
+- **Warm spare token** — `LiveSessionController` keeps a pre-minted ephemeral token (`spareTokenRef`/`mintSpareToken`) off the critical path, consumed + refilled by `rotateSession`, so an unexpected-drop reconnect or scheduled rotation skips the `/api/live-token` round-trip (`openSession` falls back to `fetchToken` if the spare is missing/expired).
+- **Landing-screen prewarm** — `LandingScreen` mount fires `/api/prewarm-tts` (always; warms EL DNS/TLS host-level for both voices) and `/api/live-token` (dev only — compiles the cold route; gated to avoid minting throwaway tokens for every prod visitor).
+- **Greeting + vision** — run in parallel post-permission (they need the camera frame); greeting TTS is chained the instant the joke text lands.
+
 ## Comedian Brain Architecture (conversation mode)
 
 ```
