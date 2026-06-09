@@ -331,15 +331,26 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       // post-AGC sit around RMS 0.005-0.02 — barely audible next to the puppet's full-
       // loudness TTS. STT gets a 3× boost inside useMicCapture.ts (manual MIC_GAIN), but
       // the recording sees the raw stream; without this gain, users sound far away in
-      // the saved video. 2.5× is the safe ceiling — high enough to match speaking
-      // levels in the recording without clipping when the user shouts.
-      const RECORDING_MIC_GAIN = 2.5;
+      // the saved video. The compressor below acts as a safety limiter, so the boost
+      // can sit at speaking-level match (3×) without shouts clipping the AAC encoder
+      // — clipped transients were the dominant "bad mic audio" artifact in saved videos.
+      const RECORDING_MIC_GAIN = 3.0;
       const gain = ctx.createGain();
       gain.gain.value = RECORDING_MIC_GAIN;
+      // Soft-knee limiter: transparent at conversation level, compresses the top
+      // ~12 dB hard enough that a shout lands loud-but-clean instead of square-waving.
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -12;
+      limiter.knee.value = 10;
+      limiter.ratio.value = 8;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
       // Route to recording destination ONLY — not speakers — to avoid feedback.
       source.connect(gain);
-      gain.connect(recordingDestRef.current!);
+      gain.connect(limiter);
+      limiter.connect(recordingDestRef.current!);
       return () => {
+        try { limiter.disconnect(); } catch { /* ignore */ }
         try { gain.disconnect(); } catch { /* ignore */ }
         try { source.disconnect(); } catch { /* ignore */ }
       };
