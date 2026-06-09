@@ -23,9 +23,10 @@ function resampleLinear(input: Float32Array, fromRate: number, toRate: number): 
 }
 
 export interface PcmPlaybackHandle {
-  enqueueChunk(base64Pcm: string): void;
+  /** `gain` (≤ 1.0) ducks this chunk for per-line volume direction (e.g. conspiratorial lean-in). */
+  enqueueChunk(base64Pcm: string, gain?: number): void;
   /** Decode a raw MP3/AAC ArrayBuffer and schedule it for playback. */
-  decodeAndEnqueue(arrayBuffer: ArrayBuffer): Promise<void>;
+  decodeAndEnqueue(arrayBuffer: ArrayBuffer, gain?: number): Promise<void>;
   flush(): void;
   getDestinationStream(): MediaStream | null;
   getAudioContext(): AudioContext | null;
@@ -199,20 +200,33 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     return () => cancelAnimationFrame(rafRef.current);
   }, [pollAmplitude]);
 
-  /** Schedule an already-decoded AudioBuffer for gapless playback. */
-  const scheduleBuffer = useCallback((buffer: AudioBuffer) => {
+  /** Schedule an already-decoded AudioBuffer for gapless playback.
+   *  `gain` ducks the line pre-analyser so volume direction lands in both the
+   *  speakers and the recording. Duck-only by contract (see gainForMotion). */
+  const scheduleBuffer = useCallback((buffer: AudioBuffer, gain = 1) => {
     const ctx = getOrCreateContext();
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(analyserRef.current!);
+    if (gain !== 1) {
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      src.connect(g);
+      g.connect(analyserRef.current!);
+      src.onended = () => {
+        sourcesRef.current.delete(src);
+        try { g.disconnect(); } catch { /* already gone */ }
+      };
+    } else {
+      src.connect(analyserRef.current!);
+      src.onended = () => sourcesRef.current.delete(src);
+    }
     const startTime = Math.max(ctx.currentTime, queueEndRef.current);
     src.start(startTime);
     queueEndRef.current = startTime + buffer.duration;
     sourcesRef.current.add(src);
-    src.onended = () => sourcesRef.current.delete(src);
   }, []);
 
-  const enqueueChunk = useCallback((base64Pcm: string) => {
+  const enqueueChunk = useCallback((base64Pcm: string, gain = 1) => {
     const ctx = getOrCreateContext();
     if (ctx.state === "suspended") ctx.resume();
 
@@ -231,14 +245,14 @@ export function usePcmPlayback(): PcmPlaybackHandle {
 
     const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
     buffer.getChannelData(0).set(samples);
-    scheduleBuffer(buffer);
+    scheduleBuffer(buffer, gain);
   }, [scheduleBuffer]);
 
-  const decodeAndEnqueue = useCallback(async (arrayBuffer: ArrayBuffer): Promise<void> => {
+  const decodeAndEnqueue = useCallback(async (arrayBuffer: ArrayBuffer, gain = 1): Promise<void> => {
     const ctx = getOrCreateContext();
     if (ctx.state === "suspended") await ctx.resume();
     const buffer = await ctx.decodeAudioData(arrayBuffer);
-    scheduleBuffer(buffer);
+    scheduleBuffer(buffer, gain);
   }, [scheduleBuffer]);
 
   /** Flush all queued/playing audio — called on barge-in interrupt. */

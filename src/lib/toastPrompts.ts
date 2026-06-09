@@ -140,8 +140,8 @@ const SCHEMA_BLOCK = `Return ONLY valid JSON (no markdown, no explanation) in th
 
 STREAMING REQUIREMENT — In every joke object (including "callback"), emit fields in this exact order: "motion" first, then "intensity", then "text", then "score". Downstream TTS streaming depends on having motion+intensity available before text characters arrive. Do NOT reorder these fields.
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
-Preferred motions: conspiratorial, emphasis, laugh (warm tipsy body language — favor
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Preferred motions: conspiratorial, sarcastic, emphasis, laugh (warm tipsy body language — favor
 intimate/leaning-in over big-and-manic; use "energetic" sparingly, not as the default).
 intensity: keep it mostly 0.4-0.7 — she's drunk-warm and slurry, not hyped. Reserve 0.8+
 for a rare genuine big swing.

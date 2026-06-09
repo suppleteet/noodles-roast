@@ -62,6 +62,28 @@ export const MOTION_STATE_CONFIGS: Record<MotionState, MotionStateConfig> = {
     oscFreq: 0.2,
     oscAmp: 0.01,
   },
+  // Slow exaggerated head tilt — mock sincerity, milking the line.
+  sarcastic: {
+    stiffness: 25,
+    damping: 13,
+    headPitch: -0.08,
+    headYaw: -0.12,
+    headRoll: 0.18,
+    bodyBob: 0,
+    oscFreq: 0.25,
+    oscAmp: 0.015,
+  },
+  // Nearly frozen, level stare — the stillness IS the punchline.
+  deadpan: {
+    stiffness: 60,
+    damping: 20,
+    headPitch: 0,
+    headYaw: 0,
+    headRoll: 0,
+    bodyBob: 0,
+    oscFreq: 0.1,
+    oscAmp: 0.003,
+  },
   conspiratorial: {
     stiffness: 50,
     damping: 12,

@@ -5,6 +5,8 @@ export type MotionState =
   | "laugh"
   | "energetic"
   | "smug"
+  | "sarcastic"
+  | "deadpan"
   | "conspiratorial"
   | "shocked"
   | "emphasis"
@@ -14,8 +16,8 @@ export type MotionState =
 
 /** All motion states — used to build the any-to-any transition map. */
 const ALL_MOTION_STATES: readonly MotionState[] = [
-  "idle", "laugh", "energetic", "smug", "conspiratorial",
-  "shocked", "emphasis", "thinking", "listening", "sleeping",
+  "idle", "laugh", "energetic", "smug", "sarcastic", "deadpan",
+  "conspiratorial", "shocked", "emphasis", "thinking", "listening", "sleeping",
 ] as const;
 
 /**

@@ -91,7 +91,8 @@ Return ONLY a valid JSON object in exactly this shape:
   ]
 }
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Vary the delivery between jokes — a sarcastic drawl, a deadpan flatline, and a shocked spike hit harder than the same energy twice in a row.
 Preferred motions for your character: ${p.motionPreferences.join(", ")}
 intensity: 0.0 = minimal, 1.0 = maximum`;
 }
@@ -148,7 +149,8 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
 
 STREAMING REQUIREMENT — In every joke object (including "callback"), emit fields in this exact order: "motion" first, then "intensity", then "text", then "score". Downstream TTS streaming depends on having motion+intensity available before text characters arrive. Do NOT reorder these fields.
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Vary the delivery between jokes — a sarcastic drawl, a deadpan flatline, and a shocked spike hit harder than the same energy twice in a row.
 Preferred motions for your character: ${p.motionPreferences.join(", ")}
 score: 1-10 self-assessed funniness (8 = stage-ready, 10 = rare killer line; do not inflate weak jokes)`;
 
@@ -435,7 +437,8 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
 
 STREAMING REQUIREMENT — In every joke object (including "callback"), emit fields in this exact order: "motion" first, then "intensity", then "text", then "score". Downstream TTS streaming depends on having motion+intensity available before text characters arrive. Do NOT reorder these fields.
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Vary the delivery between jokes — a sarcastic drawl, a deadpan flatline, and a shocked spike hit harder than the same energy twice in a row.
 Preferred motions for your character: ${p.motionPreferences.join(", ")}
 score: 1-10 self-assessed funniness (8 = stage-ready, 10 = rare killer line; do not inflate weak jokes)`;
 
@@ -522,7 +525,8 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
 
 The keys MUST match the answer strings EXACTLY as provided in the user message (lowercase, same spelling).
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Vary the delivery between jokes — a sarcastic drawl, a deadpan flatline, and a shocked spike hit harder than the same energy twice in a row.
 Preferred motions for your character: ${p.motionPreferences.join(", ")}`;
 }
 
@@ -574,7 +578,8 @@ Return ONLY a valid JSON object in exactly this shape:
   ]
 }
 
-motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
+motion_state must be one of: idle, laugh, energetic, smug, sarcastic, deadpan, conspiratorial, shocked, emphasis, thinking
+Vary the delivery between jokes — a sarcastic drawl, a deadpan flatline, and a shocked spike hit harder than the same energy twice in a row.
 Preferred motions for your character: ${p.motionPreferences.join(", ")}
 intensity: 0.0 = minimal, 1.0 = maximum`;
 }

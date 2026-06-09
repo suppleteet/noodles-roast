@@ -25,7 +25,7 @@ import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
-import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import { voiceSettingsForMotion, gainForMotion } from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 
 /**
@@ -221,7 +221,7 @@ export default function LiveSessionController({
       useSessionStore.getState().logTiming(
         `tts: "${text.trim().slice(0, 60)}" prev="${prevTail}"`,
       );
-      await scheduleFromPrefetch(audioBuffer, gen);
+      await scheduleFromPrefetch(audioBuffer, gen, gainForMotion(motion, intensity));
     });
   }
 
@@ -271,7 +271,7 @@ export default function LiveSessionController({
         `tts-stream: motion=${motion} intensity=${intensity.toFixed(2)}`,
       );
       try {
-        await scheduleFromPrefetch(audio, gen);
+        await scheduleFromPrefetch(audio, gen, gainForMotion(motion, intensity));
       } finally {
         endSpan();
       }
@@ -349,7 +349,7 @@ export default function LiveSessionController({
       useSessionStore.getState().logTiming(
         `tts-prefetched: "${text.trim().slice(0, 60)}" chunks=${buffer.chunks.length} done=${buffer.done} prev="${prevTail}"`,
       );
-      await scheduleFromPrefetch(buffer, gen);
+      await scheduleFromPrefetch(buffer, gen, gainForMotion(motion, intensity));
     });
   }
 
@@ -464,6 +464,7 @@ export default function LiveSessionController({
   async function scheduleFromPrefetch(
     audio: TtsChunkBuffer,
     gen: number,
+    gain = 1,
   ): Promise<void> {
     let cursor = 0;
     let queuedAny = false;
@@ -484,7 +485,7 @@ export default function LiveSessionController({
           );
           if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
         }
-        playback.enqueueChunk(audio.chunks[cursor]);
+        playback.enqueueChunk(audio.chunks[cursor], gain);
         cursor++;
         if (!queuedAny) {
           queuedAny = true;

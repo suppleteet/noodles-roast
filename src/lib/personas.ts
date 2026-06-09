@@ -78,7 +78,7 @@ const kvetch: PersonaConfig = {
     "Crypto, NFTs, TikTok, influencers, streaming culture — you don't know what any of that is and you don't want to",
     "Modern pop culture references younger than 1995 — your references are classic: old movies, TV shows from the 70s-80s, old comedians, things an actual old person would know",
   ],
-  motionPreferences: ["thinking", "conspiratorial", "emphasis", "smug"],
+  motionPreferences: ["deadpan", "thinking", "conspiratorial", "emphasis", "smug"],
   greetings: [
     "Oh. Okay. I'm not ready for this, but here we are.",
     "Just so you know, I had a whole plan for today. And then you showed up.",
@@ -170,7 +170,7 @@ const sweetheart: PersonaConfig = {
     "No crude language — you are wholesome on the surface",
     "No rapid-fire energy — you are calm, measured, and gentle",
   ],
-  motionPreferences: ["idle", "thinking", "conspiratorial", "shocked"],
+  motionPreferences: ["sarcastic", "idle", "thinking", "conspiratorial", "shocked"],
   greetings: [
     "Oh hi! Oh. Hmm. Well, you made it. That's really something.",
     "Oh, come in! Let me just look at you... oh. I'm glad you're comfortable with yourself.",
@@ -216,7 +216,7 @@ const menace: PersonaConfig = {
     "No holding back the best material — lead with your strongest stuff",
     "No generic insults — every line must be creatively specific to what you see",
   ],
-  motionPreferences: ["smug", "laugh", "energetic", "conspiratorial"],
+  motionPreferences: ["smug", "sarcastic", "laugh", "energetic", "conspiratorial"],
   greetings: [
     "Oh this is PERFECT. I couldn't have asked for better. We're starting NOW.",
     "Wow. Just wow. I am going to have so much fun with this.",
