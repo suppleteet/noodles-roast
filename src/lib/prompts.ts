@@ -426,12 +426,14 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
 {
   "relevant": boolean,
   "jokes": [
-    { "text": "spoken words only", "motion": "<motion_state>", "intensity": <0.0-1.0>, "score": <1-10> }
+    { "motion": "<motion_state>", "intensity": <0.0-1.0>, "text": "spoken words only", "score": <1-10> }
   ],
   "redirect": "optional witty redirect if relevant=false or omit",
-  "callback": { "text": "...", "motion": "...", "intensity": 0.7 } or omit,
+  "callback": { "motion": "...", "intensity": 0.7, "text": "..." } or omit,
   "tags": ["name:Mike", "job:dentist"] or omit
 }
+
+STREAMING REQUIREMENT — In every joke object (including "callback"), emit fields in this exact order: "motion" first, then "intensity", then "text", then "score". Downstream TTS streaming depends on having motion+intensity available before text characters arrive. Do NOT reorder these fields.
 
 motion_state must be one of: idle, laugh, energetic, smug, conspiratorial, shocked, emphasis, thinking
 Preferred motions for your character: ${p.motionPreferences.join(", ")}

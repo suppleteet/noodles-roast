@@ -4,6 +4,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import type { ContentMode, FlowMode, RoastModelId } from "@/store/useSessionStore";
 import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monetizationCatalog";
 import { useDevUnlock } from "@/lib/devUnlock";
+import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
 
 const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
@@ -82,6 +83,16 @@ export default function LandingScreen() {
   }, []);
 
   useEffect(() => {
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(() => preloadLiveExperienceModules(), { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+
+    const id = setTimeout(() => preloadLiveExperienceModules(), 1200);
+    return () => clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
     if (!PAYMENTS_ENABLED) return;
     let cancelled = false;
 
@@ -103,6 +114,7 @@ export default function LandingScreen() {
   }, []);
 
   async function handleStart() {
+    preloadLiveExperienceModules();
     setError(null);
     if (PAYMENTS_ENABLED) {
       const status = paymentStatus ?? await refreshPaymentStatus();

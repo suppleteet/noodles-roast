@@ -110,6 +110,8 @@ export default function LiveSessionController({
 
   // Mic → recording mix (disconnect function returned by addInputToRecording)
   const micRecordingDisconnectRef = useRef<(() => void) | null>(null);
+  const pendingVadStreamRef = useRef<MediaStream | null>(null);
+  const vadStartRequestedRef = useRef(false);
 
   // Timeline span IDs
   const userSpeakingSpanRef = useRef<string | null>(null);
@@ -523,7 +525,29 @@ export default function LiveSessionController({
       useSessionStore.getState().setTimeToFirstSpeechMs(ttfs);
       useSessionStore.getState().logTiming(`brain: TTFS ${ttfs}ms`);
       useSessionStore.getState().setHasSpokenThisSession(true);
+      startVadWhenSafe();
     }
+  }
+
+  function startVadWhenSafe(): void {
+    const micStream = pendingVadStreamRef.current;
+    if (!micStream || vadStartRequestedRef.current || !isRunningRef.current) return;
+    if (!firstSpeechRecordedRef.current) return;
+
+    vadStartRequestedRef.current = true;
+    window.setTimeout(() => {
+      const stream = pendingVadStreamRef.current;
+      if (!stream || !isRunningRef.current || !brainRef.current) return;
+      vad.start(stream)
+        .then(() => {
+          useSessionStore.getState().logTiming("vad: ready");
+          brainRef.current?.setVadAvailable(true);
+        })
+        .catch((e) => {
+          brainRef.current?.setVadAvailable(false);
+          console.warn("[live] VAD start failed (falling back to silence timer):", e);
+        });
+    }, 500);
   }
 
   // ─── TTS drain detection via rAF ─────────────────────────────────────────────
@@ -599,55 +623,65 @@ export default function LiveSessionController({
   }
 
   async function openSession(tokenPromise?: Promise<string> | null): Promise<Session> {
-    const token = tokenPromise ? await tokenPromise.catch(() => fetchToken()) : await fetchToken();
-    const ai = new GoogleGenAI({
-      apiKey: token,
-      httpOptions: { apiVersion: "v1alpha" },
-    });
+    const connectWithToken = async (token: string): Promise<Session> => {
+      const ai = new GoogleGenAI({
+        apiKey: token,
+        httpOptions: { apiVersion: "v1alpha" },
+      });
 
-    // Mutable handler boxes: we need the session reference inside onclose to
-    // tell expected closes (rotation/stop) from unexpected ones, but the
-    // session doesn't exist until ai.live.connect resolves. Set after.
-    const onCloseRef: { run: () => void } = { run: () => {} };
+      // Mutable handler boxes: we need the session reference inside onclose to
+      // tell expected closes (rotation/stop) from unexpected ones, but the
+      // session doesn't exist until ai.live.connect resolves. Set after.
+      const onCloseRef: { run: () => void } = { run: () => {} };
 
-    const session = await ai.live.connect({
-      model: LIVE_MODEL,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: LIVE_VOICE_NAME } },
+      const session = await ai.live.connect({
+        model: LIVE_MODEL,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: LIVE_VOICE_NAME } },
+          },
+          systemInstruction: getLiveTranscriptionPrompt(),
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         },
-        systemInstruction: getLiveTranscriptionPrompt(),
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-      },
-      callbacks: {
-        onopen: () => {
-          useSessionStore.getState().logTiming("live: session opened");
-          useSessionStore.getState().setIsListening(true);
+        callbacks: {
+          onopen: () => {
+            useSessionStore.getState().logTiming("live: session opened");
+            useSessionStore.getState().setIsListening(true);
+          },
+          onmessage: handleMessage,
+          onerror: (e) => {
+            const msg = e instanceof ErrorEvent ? e.message : String(e);
+            console.error("[live] WebSocket error:", msg);
+            useSessionStore.getState().logTiming(`live: error — ${msg}`);
+          },
+          onclose: () => onCloseRef.run(),
         },
-        onmessage: handleMessage,
-        onerror: (e) => {
-          const msg = e instanceof ErrorEvent ? e.message : String(e);
-          console.error("[live] WebSocket error:", msg);
-          useSessionStore.getState().logTiming(`live: error — ${msg}`);
-        },
-        onclose: () => onCloseRef.run(),
-      },
-    });
+      });
 
-    onCloseRef.run = () => {
-      useSessionStore.getState().logTiming("live: session closed");
-      useSessionStore.getState().setIsListening(false);
-      // If the still-active session is THIS one, the close was unexpected
-      // (server-initiated drop). Rotation swaps sessionRef BEFORE closing the
-      // old session, so legitimate rotation/stop closes won't match here.
-      if (sessionRef.current === session) {
-        reconnectAfterUnexpectedClose();
-      }
+      onCloseRef.run = () => {
+        useSessionStore.getState().logTiming("live: session closed");
+        useSessionStore.getState().setIsListening(false);
+        // If the still-active session is THIS one, the close was unexpected
+        // (server-initiated drop). Rotation swaps sessionRef BEFORE closing the
+        // old session, so legitimate rotation/stop closes won't match here.
+        if (sessionRef.current === session) {
+          reconnectAfterUnexpectedClose();
+        }
+      };
+
+      return session;
     };
 
-    return session;
+    const token = tokenPromise ? await tokenPromise.catch(() => fetchToken()) : await fetchToken();
+    try {
+      return await connectWithToken(token);
+    } catch (e) {
+      if (!tokenPromise) throw e;
+      useSessionStore.getState().logTiming("live: prefetched token rejected — retrying fresh");
+      return connectWithToken(await fetchToken());
+    }
   }
 
   // ─── Message handler ──────────────────────────────────────────────────────────
@@ -1097,6 +1131,8 @@ export default function LiveSessionController({
     micChunkLoggedRef.current = false;
     micSentLoggedRef.current = false;
     micBlockedLoggedRef.current = false;
+    pendingVadStreamRef.current = null;
+    vadStartRequestedRef.current = false;
     useSessionStore.getState().setError(null); // clear any prior quota/session error
     useSessionStore.getState().clearTimingLog();
     useSessionStore.getState().clearLlmLog();
@@ -1313,12 +1349,9 @@ export default function LiveSessionController({
             `mic: stream ready (${micStream.getAudioTracks().length} audio tracks)`,
           );
           micRecordingDisconnectRef.current = playback.addInputToRecording(micStream);
-          vad.start(micStream)
-            .then(() => brainRef.current?.setVadAvailable(true))
-            .catch((e) => {
-              brainRef.current?.setVadAvailable(false);
-              console.warn("[live] VAD start failed (falling back to silence timer):", e);
-            });
+          pendingVadStreamRef.current = micStream;
+          useSessionStore.getState().logTiming("vad: waiting until first speech");
+          startVadWhenSafe();
         } else {
           brainRef.current?.setVadAvailable(false);
         }
@@ -1373,6 +1406,8 @@ export default function LiveSessionController({
     cancelSpeech();
     micRecordingDisconnectRef.current?.();
     micRecordingDisconnectRef.current = null;
+    pendingVadStreamRef.current = null;
+    vadStartRequestedRef.current = false;
     vad.stop();
     mic.stop();
     playback.flush();

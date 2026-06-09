@@ -1223,14 +1223,16 @@ export class ComedianBrain {
     ]).then(([response, audioBuffer]) => queueGreeting(response, audioBuffer));
     this.greetingVisionTimeout = setTimeout(() => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
-      this.deps.logTiming("brain: greeting prefetch slow — generating fast fallback");
-      const observations = this.deps.getObservations();
-      const greetingContext = this._isRapidFireFlow() ? "rapid_fire_greeting" : "greeting";
-      this._generateJoke({
-        context: greetingContext,
-        model: VISION_MODEL,
-        observations,
-      }).then((response) => queueGreeting(response, null));
+      this.deps.logTiming("brain: greeting prefetch slow — using instant fallback");
+      queueGreeting({
+        relevant: true,
+        jokes: [{
+          motion: "energetic",
+          intensity: 0.8,
+          text: GREETING_FALLBACK,
+          score: 6,
+        }],
+      }, null);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 

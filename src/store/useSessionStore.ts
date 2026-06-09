@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { MotionState } from "@/lib/stateMachine";
 import type { BurnIntensity } from "@/lib/prompts";
-import { DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
+import { DEFAULT_PERSONA, type PersonaId } from "@/lib/personaMetadata";
 import type { BrainState } from "@/lib/stateMachine";
 import {
   transition,

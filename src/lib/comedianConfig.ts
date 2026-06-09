@@ -14,8 +14,8 @@ const defaults = {
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   visionIntervalMs: 5000,        // how often vision analyze fires
-  greetingVisionTimeoutMs: 5500, // max wait for prefetched vision greeting before a fast generated fallback
-  firstSpeechBeatMs: 700,        // reveal puppet, hold silent for this long, THEN start TTS — fade-in (~500ms) finishes plus a beat of "him sitting there" before he talks
+  greetingVisionTimeoutMs: 2000, // max wait for prefetched vision greeting before speaking an instant fallback
+  firstSpeechBeatMs: 250,        // brief reveal beat before first TTS; keep TTFS low while avoiding an abrupt entrance
 
   // Behavior
   maxProds: 2,                            // prods before skipping question

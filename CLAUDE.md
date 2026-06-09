@@ -61,6 +61,16 @@ The app supports two session modes (controlled by `sessionMode` in the store):
 - **`"monologue"`**: Original mode. Discrete cycle: capture frame → Gemini vision analysis → ElevenLabs TTS → play. No mic.
 - **`"conversation"`** (default): **Comedian Brain** mode. Gemini Live API is used for STT/VAD only. All speech is controlled by `ComedianBrain` state machine via `/api/generate-joke` + ElevenLabs TTS. Structured show: greeting → vision jokes → Q&A cycles → vision interrupts.
 
+## Personas & Experiences
+
+The comedian's character is the **persona** — `activePersona: PersonaId` in the store (default `kvetch`, set via `setActivePersona`). Four personas ship: `kvetch` (old/grizzled/Rickles), `hype` (explosive arena energy), `sweetheart` (kill-shots disguised as kindness), `menace` (gleeful escalating savagery). The id selects the character block injected into every prompt build in `src/lib/prompts.ts` (`getPersona(id)`).
+
+Two-file split — **import the lightweight one from client/store code**:
+- `src/lib/personaMetadata.ts` — client-safe: `PersonaId`, `PERSONA_IDS`, `DEFAULT_PERSONA`, `PERSONA_NAMES`, `PERSONA_GREETINGS`. No heavy prompt strings. `constants.ts`, `useSessionStore.ts`, and other client code import from here so the multi-KB persona prompt bodies don't get bundled into the client.
+- `src/lib/personas.ts` — full `PersonaConfig` (comedyApproach, roastTechniques, antiPatterns, avoidTopics, motionPreferences…) used at prompt-build time. Re-exports the metadata symbols for convenience, but **don't import this from client code** — it pulls in all the prompt text.
+
+Orthogonal to persona: `flowMode` (`"original"` LLM-personalized vs `"rapid_fire"`) and the **experience** (Roast vs Toast). In the **Toast** experience the persona is ignored (one fixed drunk-wedding-toast character; see `toastPrompts.ts`) and `voiceIdForExperience()` picks the voice.
+
 ## Session Startup / Prewarm (cold-start resilience)
 
 The slow startup paths are kicked off as early as their inputs exist, so a cold first session doesn't stack latencies (one log hit ~28s time-to-first-speech):
@@ -69,7 +79,8 @@ The slow startup paths are kicked off as early as their inputs exist, so a cold 
 - **Comedian chat session** — prefetched at **button press** (`requesting-permissions`, `page.tsx:ensureComedianSessionPrefetch`), passed into `LiveSessionController` as `prefetchedComedianSessionPromise`; the controller consumes it (or creates one itself as fallback). Its cold latency overlaps the camera/mic grant.
 - **Warm spare token** — `LiveSessionController` keeps a pre-minted ephemeral token (`spareTokenRef`/`mintSpareToken`) off the critical path, consumed + refilled by `rotateSession`, so an unexpected-drop reconnect or scheduled rotation skips the `/api/live-token` round-trip (`openSession` falls back to `fetchToken` if the spare is missing/expired).
 - **Landing-screen prewarm** — `LandingScreen` mount fires `/api/prewarm-tts` (always; warms EL DNS/TLS host-level for both voices) and `/api/live-token` (dev only — compiles the cold route; gated to avoid minting throwaway tokens for every prod visitor).
-- **Greeting + vision** — run in parallel post-permission (they need the camera frame); greeting TTS is chained the instant the joke text lands.
+- **Greeting + vision** — run in parallel post-permission (they need the camera frame); greeting TTS is chained the instant the joke text lands. The prefetch lives in `src/lib/greetingPrefetch.ts` (direct-image joke + vision in parallel, with TTS chunks buffered via `TtsChunkBuffer`). `enterGreeting()` consumes the prefetch but races it against a 2s timeout (`comedianBrain.ts`) — if the prefetch is slow it generates a fast fallback, and if that fails too it falls back to a short canned line, so a slow prefetch cascades into worst-case TTFS.
+- **Module preload** — `preloadLiveExperienceModules()` warms the heavy dynamic-import chunks (puppet scene, session controllers, share screen) from the landing/idle path. VAD runtime/model startup is deferred until after first speech so Silero assets cannot compete with TTFS.
 
 ## Comedian Brain Architecture (conversation mode)
 
@@ -117,7 +128,7 @@ src/components/session/ SessionController (monologue), LiveSessionController (co
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, FeedbackBox, DebugTranscript)
-src/lib/               Pure utilities, constants, prompts, personas, audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets, ttsChunkBuffer, llmClient, scriptLines (all canned spoken lines)
+src/lib/               Pure utilities, constants, prompts, personas + personaMetadata (client-safe split), preloadLiveExperience (module warmup), greetingPrefetch (greeting joke+TTS prefetch), audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets (motion → voice_settings deltas), ttsChunkBuffer, llmClient, scriptLines (all canned spoken lines), toastPrompts + toastQuestionBank (Toast experience), mediaRecorderSupport (recording mimeType/bitrates), liveConstants (MIC_SAMPLE_RATE 16k, OUTPUT_SAMPLE_RATE 24k)
 src/lib/stateMachine/      State machine types, transitions, and configs (SessionPhase, BrainState, MotionState)
 src/lib/comedianBrain.ts   State machine class (conversation mode)
 src/lib/comedianBrainConfig.ts  Declarative STATE_CONFIG map
@@ -156,8 +167,8 @@ src/puppet/            Paper-thin puppet-specific layer
 6. **LiveSessionController uses getState()**: All store access in WebSocket callbacks and long-lived closures must use `useSessionStore.getState()` to avoid stale closures. Only `phase` is subscribed via selector (for lifecycle).
 7. **ComedianBrain controls all speech**: In conversation mode, DO NOT route Gemini output to TTS. The brain calls `queueSpeak()` directly. Gemini Live is STT/VAD only.
 8. **Mic gating**: `useMicCapture` callback checks `brain.isAudioActive()` before sending audio. Mic is `"passive"` (keeps Gemini VAD warm) in most states; only `"off"` during `greeting` and `vision_jokes`. `"listening"` in `wait_answer`, `prodding`, `pre_generate`.
-10. **LLM-generated greetings**: `enterGreeting()` fires `_generateJoke({ context: "greeting" })` immediately with the webcam frame — no vision wait. Always LLM-generated, never canned strings. The `.then()` callback guards against stale state with `if (this.state !== "greeting") return`. `_maybeAdvanceFromGreeting` requires both `greetingSpeechQueued` and `greetingTtsDrained` before advancing to `ask_question`.
 9. **TTS drain detection**: LiveSessionController uses `playback.isQueueEmpty()` in a rAF loop to detect when speech finishes, then calls `brain.onTtsQueueDrained()`.
+10. **LLM-generated greetings**: `enterGreeting()` fires `_generateJoke({ context: "greeting" })` immediately with the webcam frame — no vision wait. Always LLM-generated, never canned strings. The `.then()` callback guards against stale state with `if (this.state !== "greeting") return`. `_maybeAdvanceFromGreeting` requires both `greetingSpeechQueued` and `greetingTtsDrained` before advancing to `ask_question`.
 11. **Engine signals abstraction**: Rig components (JawFlap, HeadMotion) NEVER read from `useSessionStore` directly. They read from `TickContext.signals: Record<string, number>`. In session mode the consumer populates this from the store; in edit mode it comes from `RigEditStore.previewSignals`. Component signal declarations (`SignalDef[]`) auto-generate the preview sliders.
 12. **No per-frame allocations in engine**: Inside `tick()` callbacks, NEVER use `new THREE.Vector3()` / `new THREE.Quaternion()` / `new THREE.Matrix4()`. All scratch objects must be pre-allocated as class fields and mutated via `.set()` / `.copy()`.
 
@@ -193,6 +204,10 @@ npm run test:e2e      # Playwright (requires dev server on :3000)
 # Catches prompt-rule violations and repeat-question / flow bugs that mocks miss.
 RUN_INTEGRATION_TEST=1 npx playwright test e2e/integration-roast-run.spec.ts
 ```
+
+## Debugging Sessions
+
+`.debug/last-session.json` holds the timing log + transcript of the most recent local session — check it first when debugging TTFS, turn-taking, or flow issues. Lines like `brain: TTFS 18097ms`, `tts: first audio 6813ms`, and `brain: greeting prefetch slow — generating fast fallback` pinpoint where startup time went.
 
 ## Path Alias
 

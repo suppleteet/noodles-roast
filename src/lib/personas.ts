@@ -1,6 +1,7 @@
 import type { MotionState } from "@/lib/motionStates";
+import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personaMetadata";
 
-export type PersonaId = "kvetch" | "hype" | "sweetheart" | "menace";
+export { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personaMetadata";
 
 export interface PersonaConfig {
   id: PersonaId;
@@ -236,10 +237,6 @@ export const PERSONAS: Record<PersonaId, PersonaConfig> = {
   sweetheart,
   menace,
 };
-
-export const PERSONA_IDS: readonly PersonaId[] = ["kvetch", "hype", "sweetheart", "menace"];
-
-export const DEFAULT_PERSONA: PersonaId = "kvetch";
 
 export function getPersona(id: PersonaId): PersonaConfig {
   return PERSONAS[id];

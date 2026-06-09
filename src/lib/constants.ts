@@ -1,4 +1,4 @@
-import { getPersona, type PersonaId } from "@/lib/personas";
+import { PERSONA_GREETINGS, type PersonaId } from "@/lib/personaMetadata";
 
 export const FRAME_INTERVAL_MS = 8000; // how often to grab a webcam frame for vision
 
@@ -29,6 +29,6 @@ export const SPRING_DAMPING = 20;
 
 /** Pick a random canned greeting for the given persona. */
 export function getCannedGreeting(personaId: PersonaId): string {
-  const greetings = getPersona(personaId).greetings;
+  const greetings = PERSONA_GREETINGS[personaId];
   return greetings[Math.floor(Math.random() * greetings.length)];
 }

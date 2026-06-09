@@ -1,30 +1,34 @@
 "use client";
 import { useRef, useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useSessionStore } from "@/store/useSessionStore";
 import LandingScreen from "@/components/ui/LandingScreen";
 import ConsentScreen from "@/components/ui/ConsentScreen";
 import HUDOverlay from "@/components/ui/HUDOverlay";
-import ShareScreen from "@/components/ui/ShareScreen";
-import DebugTimeline from "@/components/ui/DebugTimeline";
-import DebugTranscript from "@/components/ui/DebugTranscript";
-import LlmLogPanel from "@/components/ui/LlmLogPanel";
-import PuppetScene from "@/components/puppet/PuppetScene";
 import WebcamCapture, { type WebcamCaptureHandle } from "@/components/session/WebcamCapture";
 import AudioPlayer, { type AudioPlayerHandle } from "@/components/audio/AudioPlayer";
 import VideoRecorder, { type VideoRecorderHandle } from "@/components/recording/VideoRecorder";
-import SessionController from "@/components/session/SessionController";
-import LiveSessionController from "@/components/session/LiveSessionController";
 import { useCompositor } from "@/components/recording/useCompositor";
-import { PERSONA_IDS, PERSONAS } from "@/lib/personas";
+import { PERSONA_IDS, PERSONA_NAMES } from "@/lib/personaMetadata";
 import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
-import { prefetchParallelVisionAndGreeting, prefetchGreetingAudio } from "@/lib/greetingPrefetch";
 import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
-import RigEditMode from "@/engine/ui/RigEditMode";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
 import { useDevUnlock, toggleDevUnlock } from "@/lib/devUnlock";
+import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
+
+const ShareScreen = dynamic(() => import("@/components/ui/ShareScreen"), { ssr: false });
+const DebugTimeline = dynamic(() => import("@/components/ui/DebugTimeline"), { ssr: false });
+const DebugTranscript = dynamic(() => import("@/components/ui/DebugTranscript"), { ssr: false });
+const LlmLogPanel = dynamic(() => import("@/components/ui/LlmLogPanel"), { ssr: false });
+const PuppetScene = dynamic(() => import("@/components/puppet/PuppetScene"), { ssr: false });
+const SessionController = dynamic(() => import("@/components/session/SessionController"), { ssr: false });
+const LiveSessionController = dynamic(() => import("@/components/session/LiveSessionController"), { ssr: false });
+const RigEditMode = dynamic(() => import("@/engine/ui/RigEditMode"), { ssr: false });
+
+const LIVE_TOKEN_PREFETCH_MAX_AGE_MS = 2 * 60 * 1000;
 
 interface DebugUsageSnapshot {
   llm: {
@@ -106,6 +110,7 @@ function MainApp() {
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
   // Pre-fetched Live API token — may start on idle (conversation) so connect is faster after permission
   const tokenPromiseRef = useRef<Promise<string> | null>(null);
+  const tokenPrefetchStartedAtRef = useRef<number | null>(null);
   // Pre-created comedian chat session — the longest-cold start path. Fired at
   // button press (settings are locked by then) so its latency overlaps the
   // permission dialog instead of stacking after it. Consumed by LiveSessionController.
@@ -129,8 +134,9 @@ function MainApp() {
   /** Gemini Live ephemeral token (~5 min TTL); safe to prefetch on idle before the user taps Roast. */
   function ensureLiveTokenPrefetch(): void {
     if (sessionMode !== "conversation" || mockModeRef.current) return;
-    if (tokenPromiseRef.current) return;
+    if (getFreshLiveTokenPromise()) return;
     const { burnIntensity: bi, activePersona: ap } = useSessionStore.getState();
+    tokenPrefetchStartedAtRef.current = Date.now();
     tokenPromiseRef.current = fetch("/api/live-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -145,8 +151,21 @@ function MainApp() {
       .catch((e) => {
         console.warn("[token-prefetch] failed:", e);
         tokenPromiseRef.current = null;
+        tokenPrefetchStartedAtRef.current = null;
         throw e;
       });
+  }
+
+  function getFreshLiveTokenPromise(): Promise<string> | null {
+    const promise = tokenPromiseRef.current;
+    const startedAt = tokenPrefetchStartedAtRef.current;
+    if (!promise || startedAt === null) return null;
+    if (Date.now() - startedAt > LIVE_TOKEN_PREFETCH_MAX_AGE_MS) {
+      tokenPromiseRef.current = null;
+      tokenPrefetchStartedAtRef.current = null;
+      return null;
+    }
+    return promise;
   }
 
   /** Pre-create the comedian chat session at button press — settings are locked
@@ -203,8 +222,10 @@ function MainApp() {
     // this Node process. Failure is harmless; the real TTS call falls back
     // to a cold handshake.
     fetch("/api/prewarm-tts", { method: "POST" }).catch(() => {});
+    const greetingPrefetchModulePromise = import("@/lib/greetingPrefetch");
 
     warmupGreetingPromiseRef.current = (async () => {
+      const { prefetchParallelVisionAndGreeting } = await greetingPrefetchModulePromise;
       const frame = await captureSquareJpegFromStream(stream);
       const s = useSessionStore.getState();
       return prefetchParallelVisionAndGreeting(frame, {
@@ -219,8 +240,11 @@ function MainApp() {
 
     // As soon as the joke text lands, fire EL TTS so audio chunks start
     // streaming into a buffer the brain will pick up at enterGreeting.
-    warmupGreetingAudioRef.current = warmupGreetingPromiseRef.current
-      .then((response) => {
+    warmupGreetingAudioRef.current = Promise.all([
+      warmupGreetingPromiseRef.current,
+      greetingPrefetchModulePromise,
+    ])
+      .then(([response, { prefetchGreetingAudio }]) => {
         if (!response?.jokes.length) return null;
         const joke = response.jokes[0];
         const s = useSessionStore.getState();
@@ -236,6 +260,7 @@ function MainApp() {
   }
 
   const handleStartSession = async () => {
+    preloadLiveExperienceModules();
     // MP4-only flow — block the session if MediaRecorder can't produce MP4.
     // No fallback to WebM since the server can't convert it (Vercel Hobby tier
     // has no ffmpeg). Surface a clear message so the user knows to switch
@@ -330,6 +355,7 @@ function MainApp() {
     const enteredIdleFromSession = prev !== null && prev !== "idle";
     if (enteredIdleFromSession) {
       tokenPromiseRef.current = null;
+      tokenPrefetchStartedAtRef.current = null;
       warmupGreetingPromiseRef.current = null;
       comedianSessionPromiseRef.current = null;
     }
@@ -633,7 +659,7 @@ function MainApp() {
           videoRecorderRef={videoRecorderRef}
           compositorStream={compositorHandle.current.stream}
           mediaStream={webcamStream}
-          prefetchedTokenPromise={tokenPromiseRef.current}
+          prefetchedTokenPromise={getFreshLiveTokenPromise()}
           prefetchedComedianSessionPromise={comedianSessionPromiseRef.current}
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
           warmupGreetingAudio={warmupGreetingAudioRef.current}
@@ -706,7 +732,7 @@ function MainApp() {
               className="bg-black/60 border border-purple-400/30 rounded text-purple-200 text-[10px] w-full px-1 py-0.5 cursor-pointer"
             >
               {PERSONA_IDS.map((id) => (
-                <option key={id} value={id}>{PERSONAS[id].name} ({id})</option>
+                <option key={id} value={id}>{PERSONA_NAMES[id]} ({id})</option>
               ))}
             </select>
           </div>
