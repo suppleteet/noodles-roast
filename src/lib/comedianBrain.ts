@@ -2280,7 +2280,7 @@ export class ComedianBrain {
         maxJokes: COMEDIAN_CONFIG.singleJokeMode ? 1 : undefined,
       },
       // onJoke — fires immediately as each joke streams in
-      (joke) => {
+      (joke, sinkOpened) => {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         const isFirstJoke = jokesQueued === 0;
@@ -2308,9 +2308,11 @@ export class ComedianBrain {
         const appendToPrev = jokesQueued > 0;
         // Streaming-TTS path: audio is already in flight via the server's EL WS,
         // and the brain's SSE handler already finalized the sink with this text.
-        // Skip the legacy TTS fetch in that case.
+        // Skip the legacy TTS fetch ONLY when a sink actually opened — if the
+        // server never sent joke-meta (EL WS failure), no audio exists for this
+        // joke and skipping queueSpeak strands the show in `delivering`.
         const streamingTtsActive = !!this.deps.openJokeStream;
-        if (!streamingTtsActive) {
+        if (!streamingTtsActive || !sinkOpened) {
           this.deps.queueSpeak(
             deliveredJoke.text,
             deliveredJoke.motion as import("@/lib/motionStates").MotionState,
@@ -2577,15 +2579,16 @@ export class ComedianBrain {
         knownFacts: this._getThrowbackContext(),
         maxJokes: 1,
       },
-      (joke) => {
+      (joke, sinkOpened) => {
         if (this.deliveryGeneration !== gen) return;
         if (this.state !== "generating" && this.state !== "delivering") return;
         if (this.state === "generating") {
           this._transition("delivering");
           this.deps.setMotion("energetic", 0.8);
         }
-        // Streaming-TTS path: audio already in flight via the SSE pipeline.
-        if (!this.deps.openJokeStream) {
+        // Streaming-TTS path: audio already in flight via the SSE pipeline —
+        // but only if a sink actually opened (see _generateAndDeliver).
+        if (!this.deps.openJokeStream || !sinkOpened) {
           this.deps.queueSpeak(joke.text, joke.motion as import("@/lib/motionStates").MotionState, joke.intensity);
         }
         this.pipelinePreviousJokes.push(joke.text);
@@ -3687,7 +3690,7 @@ export class ComedianBrain {
       maxJokes?: number;
       imageBase64?: string;
     },
-    onJoke: (joke: JokeItem) => void,
+    onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
     onMeta: (meta: {
       relevant: boolean;
       redirect?: string;
@@ -3808,14 +3811,21 @@ export class ComedianBrain {
             // Streaming path: record transcript now (LLM has all the text),
             // but DO NOT close the audio buffer — EL is still synthesizing.
             // The buffer is closed by the `audio-end` event above.
+            let sinkOpened = false;
             if (streamingTtsEnabled) {
               const idx = joke.index ?? jokesSeen;
               const sink = jokeSinks.get(idx);
-              if (sink) sink.finalize(joke.text);
+              if (sink) {
+                sink.finalize(joke.text);
+                sinkOpened = true;
+              }
             }
             // Either path: still notify the caller so brain bookkeeping
-            // (jokesAlreadyDelivered, ledger, etc.) runs.
-            onJoke(joke);
+            // (jokesAlreadyDelivered, ledger, etc.) runs. sinkOpened=false tells
+            // the caller no audio is in flight for this joke (server never sent
+            // joke-meta — e.g. EL WS failed to open) so it must queueSpeak the
+            // text itself or the show hangs in `delivering` with a silent joke.
+            onJoke(joke, sinkOpened);
             jokesSeen++;
           } else if (event.type === "error" && event.error === "quota_exceeded") {
             const provider = (event.provider as string) ?? "unknown";

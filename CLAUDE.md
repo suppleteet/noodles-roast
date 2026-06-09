@@ -105,7 +105,11 @@ ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
 
 **Question selection**: All questions come from `QUESTION_BANK` (`src/lib/questionBank.ts`). The joke LLM is told NOT to emit follow-up questions — its job is jokes + tags + redirect/callback only. Personalization happens at delivery time via `/api/rephrase-question`, which gets `knownFacts` from the ledger and is told to use the user's name once if known (e.g., "Alright — what's your name?" → "So Tyler, what's your job?"). This makes the conversation feel responsive without letting the LLM go off-script and accidentally repeat topics.
 
-**End-of-speech detection**: Silero VAD (`useVad`) is the primary detector (~200ms). The brain's `answerSilenceMs` timer (300ms) is a fallback if VAD fails to load or misses.
+**End-of-speech detection**: Silero VAD (`useVad`) is the primary detector (~300ms redemption). The brain's `answerSilenceMs` timer (300ms) is a fallback if VAD fails to load or misses. VAD end-of-speech defers to the length-aware silence timer (`_answerNeedsMoreStt`) whenever the transcript reads as unfinished, so breath pauses don't commit partial answers.
+
+**Repeat guard**: every joke generation call (answer_roast, vision_react, hopper, pipeline) carries `jokesAlreadyDelivered` — the last 10 delivered joke texts from the ledger — as a hard do-not-repeat list. `conversationSoFar` only holds the last 6 ledger entries, so this is what keeps older angles from being reused. Canned fallback save-lines are also deduped per session (`usedFallbackLines`).
+
+**Streaming-TTS sink rule**: when `generate-speak` streams with TTS, the brain only skips `queueSpeak` for a joke if a sink was actually opened (`joke-meta` arrived). If the server never opened the EL WS for that joke, the brain falls back to `queueSpeak` — otherwise the joke is silent and the show hangs in `delivering` (no drain edge ever fires).
 
 ## Brain State Machine
 

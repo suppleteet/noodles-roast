@@ -241,6 +241,9 @@ test.describe("Comedian Brain — TTS-WS Route", () => {
     await startRoasting(page, driver);
 
     await driver.waitForBrainState("wait_answer", 10000);
+    // Mocked TTS drains in ~50ms so `delivering` is transient — MutationObserver
+    // tracking is required to catch it (current-state polling misses it).
+    await driver.startStateTracking();
     driver.clearTtsRequests();
 
     driver.mockJokeResponse({
@@ -251,10 +254,10 @@ test.describe("Comedian Brain — TTS-WS Route", () => {
     await driver.simulateAnswer("I work in marketing");
     await driver.waitForStateVisited("delivering", 5000);
 
-    const reqs = driver.getTtsRequests();
-    // At least the joke delivery should have gone through TTS
-    const jokeReq = reqs.find((r) => r.text.includes("participation trophy") || r.text.length > 0);
-    expect(jokeReq).toBeTruthy();
+    // The route interception lands a beat after the page issues the fetch —
+    // wait for it rather than reading the capture array synchronously.
+    const jokeReq = await driver.waitForTtsRequest(3000);
+    expect(jokeReq.text).toBeTruthy();
   });
 });
 
