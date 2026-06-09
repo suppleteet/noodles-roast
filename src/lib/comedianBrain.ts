@@ -425,6 +425,7 @@ export class ComedianBrain {
   private visionReadyForGreeting = false;
   private greetingTtsDrained = false;
   private greetingSpeechQueued = false; // true once greeting generation resolves and speech is queued
+  private greetingFallbackSpoken = false; // true once the instant canned fallback fired — late prefetch chains instead of being discarded
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
 
@@ -1124,6 +1125,7 @@ export class ComedianBrain {
     this.micMode = "off";
     this.greetingTtsDrained = false;
     this.greetingSpeechQueued = false;
+    this.greetingFallbackSpoken = false;
     this.visionReadyForGreeting = true;
 
     this.deps.setMotion("thinking", 0.6);
@@ -1220,10 +1222,17 @@ export class ComedianBrain {
     Promise.all([
       this.visionJokePrefetch,
       this.deps.prefetchedGreetingAudio ?? Promise.resolve(null),
-    ]).then(([response, audioBuffer]) => queueGreeting(response, audioBuffer));
+    ]).then(([response, audioBuffer]) => {
+      if (this.greetingFallbackSpoken) {
+        this._handleLateGreeting(response);
+        return;
+      }
+      queueGreeting(response, audioBuffer);
+    });
     this.greetingVisionTimeout = setTimeout(() => {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
-      this.deps.logTiming("brain: greeting prefetch slow — using instant fallback");
+      this.greetingFallbackSpoken = true;
+      this.deps.logTiming("brain: greeting prefetch slow — speaking instant fallback, real greeting will chain");
       queueGreeting({
         relevant: true,
         jokes: [{
@@ -1234,6 +1243,31 @@ export class ComedianBrain {
         }],
       }, null);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
+  }
+
+  /**
+   * The instant canned fallback already played because the greeting prefetch missed
+   * the timeout. Don't waste the real joke when it finally lands: chain it after the
+   * fallback if we're still in greeting, otherwise drop it in the hopper so it gets
+   * delivered after the current beat. (Toast has no hopper — discard there.)
+   */
+  private _handleLateGreeting(response: JokeResponse | null): void {
+    if (!response || response.jokes.length === 0) return;
+    const joke = response.jokes[0];
+    const text = compactGreetingText(joke.text);
+    const motion = joke.motion as import("@/lib/motionStates").MotionState;
+    if (this.state === "greeting") {
+      this.deps.logTiming("brain: late greeting arrived — chaining after fallback");
+      this.deps.queueSpeak(text, joke.motion, joke.intensity);
+      this._addLedger("joke", text, response.tags ?? []);
+      this.lastJokeMotion = motion;
+      this.lastJokeIntensity = joke.intensity;
+      return;
+    }
+    if (this._isToast()) return;
+    this.deps.logTiming("brain: late greeting arrived post-advance — adding to hopper");
+    // Ledger entry happens at delivery time when the hopper joke is popped.
+    this._addToHopper(text, motion, joke.intensity, joke.score ?? 8);
   }
 
   private _maybeAdvanceFromGreeting(): void {
