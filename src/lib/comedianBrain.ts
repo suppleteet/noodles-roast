@@ -46,6 +46,7 @@ import {
   WRAPUP_BRIDGES,
   TECHNICAL_DIFFICULTIES_LINES,
   TOAST_FILLER_LINES,
+  TOAST_GREETINGS,
   TOAST_TECHNICAL_DIFFICULTIES_LINES,
   TOAST_ANSWER_FALLBACK_ROASTS,
   CONTEXTUAL_QUESTION_PRODS,
@@ -1182,7 +1183,7 @@ export class ComedianBrain {
         this.greetingVisionTimeout = null;
       }
       if (!response || response.jokes.length === 0) {
-        const fallback = GREETING_FALLBACK;
+        const fallback = this._greetingFallbackLine();
         this.deps.logTiming("brain: greeting failed — using short fallback");
         this.deps.queueSpeak(fallback, "energetic", 0.8);
         this._addLedger("joke", fallback, []);
@@ -1238,11 +1239,19 @@ export class ComedianBrain {
         jokes: [{
           motion: "energetic",
           intensity: 0.8,
-          text: GREETING_FALLBACK,
+          text: this._greetingFallbackLine(),
           score: 6,
         }],
       }, null);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
+  }
+
+  /** Canned greeting line matched to the experience — Toast must never open in the roast voice. */
+  private _greetingFallbackLine(): string {
+    if (this._isToast()) {
+      return TOAST_GREETINGS[Math.floor(Math.random() * TOAST_GREETINGS.length)];
+    }
+    return GREETING_FALLBACK;
   }
 
   /**
