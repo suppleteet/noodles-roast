@@ -211,6 +211,30 @@ export const TOAST_TECHNICAL_DIFFICULTIES_LINES = [
   "Wait — what — okay no, I am done. I am DONE. *clink* — call me later, I'm serious.",
 ];
 
+/** Toast's confirm echo — drunk repeat-back of what she half-heard. */
+export const TOAST_CONFIRM_ECHO_TEMPLATES = [
+  "Wait — {answer}?",
+  "{answer}. {answer}. Okay. {answer}.",
+  "Hold on, hold on — {answer}?",
+  "Oh my GOD — {answer}?",
+];
+
+/** Toast's skeptical beat after the confirm echo — drunk processing time. */
+export const TOAST_CONFIRM_TAIL_FILLERS = [
+  "Right?",
+  "…yeah?",
+  "Wait — yeah?",
+  "Okay. Okay okay okay.",
+];
+
+/** Toast's can't-hear-you redo lines — blames the champagne, not the user. */
+export const TOAST_REJECT_TEMPLATES = [
+  "Wait, what? Say that again, sweetie.",
+  "No no no, hold on — one more time for me.",
+  "Sorry, I — that's the champagne. Again?",
+  "What? Honey, louder, it's LOUD in here.",
+];
+
 /** Toast's answer-fallback roasts — generic save-the-moment lines used
  *  only when the LLM returns nothing for an answer cycle. Loud, drunk-supportive. */
 export const TOAST_ANSWER_FALLBACK_ROASTS = [

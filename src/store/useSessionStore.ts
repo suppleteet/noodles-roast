@@ -81,7 +81,7 @@ export const TOAST_VOICE_SETTINGS: VoiceSettings = {
   stability: 0.4,           // LOW = drunk/loose/slurry (was wrongly raised to 0.85)
   similarity_boost: 0.7,
   style: 0.5,               // expressive but not the maxed-out 1.0 that read as loud
-  speed: 0.9,               // drunk drawl — slower than the 1.0 default
+  speed: 0.8,               // drunk drawl — 0.9 read as barely-slower-than-sober; 0.8 is audibly wasted (EL floor 0.7, motion deltas clamp there)
   use_speaker_boost: false, // EL speaker-boost raises output level → hot/clipping. Off for Toast.
 };
 

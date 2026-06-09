@@ -47,6 +47,9 @@ import {
   TECHNICAL_DIFFICULTIES_LINES,
   TOAST_FILLER_LINES,
   TOAST_GREETINGS,
+  TOAST_CONFIRM_ECHO_TEMPLATES,
+  TOAST_CONFIRM_TAIL_FILLERS,
+  TOAST_REJECT_TEMPLATES,
   TOAST_TECHNICAL_DIFFICULTIES_LINES,
   TOAST_ANSWER_FALLBACK_ROASTS,
   CONTEXTUAL_QUESTION_PRODS,
@@ -1610,7 +1613,8 @@ export class ComedianBrain {
         this.deps.logTiming(`brain: reject transcript (confidence=${confidence.toFixed(2)}) — "${answer}"`);
         this.answerBuffer = "";
         this.deps.setUserAnswer("");
-        const line = REJECT_TEMPLATES[Math.floor(Math.random() * REJECT_TEMPLATES.length)];
+        const rejectPool = this._isToast() ? TOAST_REJECT_TEMPLATES : REJECT_TEMPLATES;
+        const line = rejectPool[Math.floor(Math.random() * rejectPool.length)];
         this.deps.queueSpeak(line, "conspiratorial", 0.5);
         this._cancelSpeculative();
         this._transition("ask_question");
@@ -1641,12 +1645,14 @@ export class ComedianBrain {
 
     // Echo what we think we heard, then a short absurdist “mis-hear” filler — no “did you say?”
     // Silence after both play (confirmTimeoutMs) = implicit yes and we roast the echoed answer.
-    const templates = this.currentQuestion?.confirmTemplates ?? DEFAULT_CONFIRM_ECHO_TEMPLATES;
+    const templates =
+      this.currentQuestion?.confirmTemplates ??
+      (this._isToast() ? TOAST_CONFIRM_ECHO_TEMPLATES : DEFAULT_CONFIRM_ECHO_TEMPLATES);
     const echoTemplate = templates[Math.floor(Math.random() * templates.length)];
     const echoAnswer = normalized.length > 140 ? `${normalized.slice(0, 137)}...` : normalized;
     const echoLine = echoTemplate.replaceAll("{answer}", echoAnswer);
-    const tail =
-      CONFIRM_TAIL_FILLERS[Math.floor(Math.random() * CONFIRM_TAIL_FILLERS.length)];
+    const tailPool = this._isToast() ? TOAST_CONFIRM_TAIL_FILLERS : CONFIRM_TAIL_FILLERS;
+    const tail = tailPool[Math.floor(Math.random() * tailPool.length)];
 
     this.deps.queueSpeak(echoLine, "conspiratorial", 0.65);
     this.deps.queueSpeak(tail, "thinking", 0.55);
