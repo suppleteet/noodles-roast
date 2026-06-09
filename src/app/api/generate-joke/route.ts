@@ -84,7 +84,7 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
     );
   }
   if (body.jokesAlreadyDelivered?.length)
-    contextLines.push(`JOKES ALREADY DELIVERED THIS CYCLE:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
+    contextLines.push(`JOKES ALREADY TOLD THIS SESSION — do NOT repeat, rephrase, or reuse the angle of any of these:\n${body.jokesAlreadyDelivered.map((j, i) => `${i + 1}. "${j}"`).join("\n")}`);
   if (body.observations?.length)
     contextLines.push(`CURRENT OBSERVATIONS: ${trimObservations(body.observations, body.setting).join("; ")}`);
   if (body.setting)

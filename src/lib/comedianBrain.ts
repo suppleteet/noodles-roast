@@ -361,6 +361,8 @@ export class ComedianBrain {
   // Hopper
   private jokeHopper: ScoredJoke[] = [];
   private hopperAbort: AbortController | null = null;
+  /** Canned save lines already spoken this session — _pickFallbackRoast avoids repeats. */
+  private usedFallbackLines = new Set<string>();
 
   // Ledger
   private ledger: LedgerEntry[] = [];
@@ -484,6 +486,7 @@ export class ComedianBrain {
     this.askedQuestionIds = new Set();
     this.ledger = [];
     this.jokeHopper = [];
+    this.usedFallbackLines.clear();
     this.rapidFireBurst = [];
     this.knownName = null;
     this.rapidFireOpenerIsNameAsk = false;
@@ -949,8 +952,17 @@ export class ComedianBrain {
   } {
     // Toast's fallback "save" line is warmer + drunker than the roast version.
     const pool = this._isToast() ? TOAST_ANSWER_FALLBACK_ROASTS : ANSWER_FALLBACK_ROASTS;
+    // Never repeat a canned save line within a session — pick from the unused
+    // ones first, and only recycle once the whole pool has been heard.
+    let candidates = pool.filter((line) => !this.usedFallbackLines.has(line));
+    if (candidates.length === 0) {
+      this.usedFallbackLines.clear();
+      candidates = [...pool];
+    }
+    const text = candidates[Math.floor(Math.random() * candidates.length)];
+    this.usedFallbackLines.add(text);
     return {
-      text: pool[Math.floor(Math.random() * pool.length)],
+      text,
       motion: this._isToast() ? "energetic" : "smug",
       intensity: this._isToast() ? 0.7 : 0.6,
     };
@@ -2256,6 +2268,7 @@ export class ComedianBrain {
         question: q?.question,
         userAnswer: answer,
         fillerAlreadySaid,
+        jokesAlreadyDelivered: this._getDeliveredJokeTexts(),
         conversationSoFar,
         knownFacts: this._getThrowbackContext(),
         maxJokes: COMEDIAN_CONFIG.singleJokeMode ? 1 : undefined,
@@ -2544,9 +2557,9 @@ export class ComedianBrain {
     const conversationSoFar = this._getLedgerContext();
     const gen = this.deliveryGeneration;
 
-    const alreadyDelivered = this.pipelinePreviousJokes.length > 0
-      ? [...this.pipelinePreviousJokes]
-      : undefined;
+    const alreadyDelivered = [
+      ...new Set([...this._getDeliveredJokeTexts(), ...this.pipelinePreviousJokes]),
+    ];
 
     this._generateJokeStream(
       {
@@ -2917,9 +2930,9 @@ export class ComedianBrain {
 
     const answer = this.pipelineAnswer;
     const q = this.currentQuestion;
-    const alreadyDelivered = this.pipelinePreviousJokes.length > 0
-      ? [...this.pipelinePreviousJokes]
-      : undefined;
+    const alreadyDelivered = [
+      ...new Set([...this._getDeliveredJokeTexts(), ...this.pipelinePreviousJokes]),
+    ];
 
     this.deps.logTiming("brain: prefetching next pipeline joke while current plays");
 
@@ -3141,6 +3154,7 @@ export class ComedianBrain {
       context: "vision_react",
       observations: currentObs,
       previousObservations: oldObs,
+      jokesAlreadyDelivered: this._getDeliveredJokeTexts(),
       knownFacts: this._getThrowbackContext(),
       imageBase64: frame,
     }).then((response) => {
@@ -3345,6 +3359,7 @@ export class ComedianBrain {
         context: "hopper",
         observations: observations ?? this.deps.getObservations(),
         userAnswer: answer,
+        jokesAlreadyDelivered: this._getDeliveredJokeTexts(),
         conversationSoFar,
         knownFacts: this._getThrowbackContext(),
       },
@@ -3497,6 +3512,18 @@ export class ComedianBrain {
     return this.ledger.slice(-6).map(
       (e) => `[${e.type}] ${e.text}${e.tags.length ? ` (${e.tags.join(", ")})` : ""}`
     );
+  }
+
+  /** Last N delivered joke texts across the whole session — sent as a hard
+   *  do-not-repeat list. conversationSoFar only carries the last 6 ledger
+   *  entries, so without this the LLM loses sight of jokes told a few cycles
+   *  back and re-uses the same angles. */
+  private _getDeliveredJokeTexts(limit = 10): string[] {
+    const jokes: string[] = [];
+    for (const e of this.ledger) {
+      if (e.type === "joke") jokes.push(e.text);
+    }
+    return jokes.slice(-limit);
   }
 
   /** Resolve the experience type with a safe default. The dep is optional so
