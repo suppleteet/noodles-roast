@@ -61,7 +61,7 @@ export function useVad({ onSpeechStart, onSpeechEnd }: VadOptions): VadHandle {
       // Sensitivity tuning — biased toward fast detection
       positiveSpeechThreshold: 0.5,
       negativeSpeechThreshold: 0.35,
-      redemptionMs: 200,    // grace period before confirming silence (default 300)
+      redemptionMs: 300,    // grace period before confirming silence — 200 fired on mid-sentence breaths and cut answers short; transcript-based early endpointing keeps snappy cases fast
       minSpeechMs: 150,     // ignore very short bursts (coughs, clicks)
       preSpeechPadMs: 0,    // we don't need captured audio, just the signal
 

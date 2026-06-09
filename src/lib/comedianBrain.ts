@@ -622,11 +622,13 @@ export class ComedianBrain {
     if (!answer) return; // no transcript yet — let the silence timer handle it
 
     // Silero often fires on a mid-sentence breath before Gemini marks the segment final.
-    // Completing here queues the generating filler and cuts the user off. For multi-word
-    // answers, wait for authoritative STT (`finished`) or the silence fallback timer.
+    // Completing here queues the generating filler and cuts the user off. Defer to the
+    // (length-aware) silence timer whenever the transcript reads as unfinished — multi-word
+    // answers, and short danglers like "yes but" that the old >=3-word check committed
+    // instantly. Viable short answers (names, yes/no) still complete immediately.
     if (
-      wordCount(answer) >= 3 &&
-      !this.sttHadFinalSegment
+      !this.sttHadFinalSegment &&
+      (wordCount(answer) >= 3 || this._answerNeedsMoreStt())
     ) {
       this.deps.logTiming(
         `brain: VAD speech-end deferred (no final STT yet) — "${answer.slice(0, 48)}"`,
