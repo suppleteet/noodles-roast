@@ -1125,17 +1125,20 @@ export class ComedianBrain {
     // in the background and feeds the vision jokes later.
     if (this._useCannedIntro()) {
       const vulgar = this.deps.getContentMode() === "vulgar";
-      const intros = PERSONAS[this.deps.getPersona()].cannedIntros;
-      const opener = pickCannedIntro(intros, new Date().getHours(), vulgar);
+      const persona = PERSONAS[this.deps.getPersona()];
+      const opener = pickCannedIntro(persona.cannedIntros, new Date().getHours(), vulgar);
       const nameQ = this.shuffledQuestions.find((q) => q.id === "name") ?? this.shuffledQuestions[0];
       if (nameQ) {
         this.currentQuestion = nameQ;
         this.askedQuestionIds.add(nameQ.id);
       }
-      this.deps.queueSpeak(opener, "energetic", 0.8);
+      // Deliver the opener in the persona's own register — Kvetch opens deadpan,
+      // Hype opens energetic (see _openerRegister).
+      const [openerMotion, openerIntensity] = this._openerRegister();
+      this.deps.queueSpeak(opener, openerMotion, openerIntensity);
       this.deps.setCurrentQuestion(opener);
       this._addLedger("question", opener, []);
-      this.deps.setMotion("energetic", 0.8);
+      this.deps.setMotion(openerMotion, openerIntensity);
       this.greetingSpeechQueued = true;
       this.openerIsNameAsk = true; // opener already asked the name → go to wait_answer
       this.deps.logTiming("brain: canned intro opener (no LLM, no vision wait)");
@@ -1171,8 +1174,9 @@ export class ComedianBrain {
       }
       if (!response || response.jokes.length === 0) {
         const fallback = this._greetingFallbackLine();
+        const [fbMotion, fbIntensity] = this._openerRegister();
         this.deps.logTiming("brain: greeting failed — using short fallback");
-        this.deps.queueSpeak(fallback, "energetic", 0.8);
+        this.deps.queueSpeak(fallback, fbMotion, fbIntensity);
         this._addLedger("joke", fallback, []);
       } else {
         const joke = response.jokes[0];
@@ -1221,16 +1225,26 @@ export class ComedianBrain {
       if (this.state !== "greeting" || this.greetingSpeechQueued) return;
       this.greetingFallbackSpoken = true;
       this.deps.logTiming("brain: greeting prefetch slow — speaking instant fallback, real greeting will chain");
+      const [fbMotion, fbIntensity] = this._openerRegister();
       queueGreeting({
         relevant: true,
         jokes: [{
-          motion: "energetic",
-          intensity: 0.8,
+          motion: fbMotion,
+          intensity: fbIntensity,
           text: this._greetingFallbackLine(),
           score: 6,
         }],
       }, null);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
+  }
+
+  /** Motion + intensity for scripted opening lines, in the persona's register —
+   *  a hardcoded "energetic" 0.8 pushed every persona's first line hot (the
+   *  style-maxed base voice + energetic delta reads screechy). Toast keeps the
+   *  loud drunk energy; Roast personas open on their top motion preference. */
+  private _openerRegister(): [MotionState, number] {
+    if (this._isToast()) return ["energetic", 0.8];
+    return [PERSONAS[this.deps.getPersona()].motionPreferences[0] ?? "emphasis", 0.6];
   }
 
   /** Canned greeting line matched to the experience — Toast must never open in the roast voice. */

@@ -128,9 +128,12 @@ export interface RoastSentence {
 interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
-  /** Latency experiment: when true, the session opens with an instant canned
+  /** When true (DEFAULT — mobile networks made the LLM greeting too flaky:
+   *  a missed 1.5s prefetch race opens the show with the canned "hazard pay"
+   *  fallback), the session opens with an instant per-persona canned
    *  video-call intro (no LLM greeting) that also asks who the user is —
-   *  see CANNED_INTROS in scriptLines.ts. Roast experience only. */
+   *  banks live in src/lib/comedians/*.ts. Roast experience only; dev
+   *  checkbox on the landing screen can turn it off to compare. */
   cannedIntro: boolean;
   /** When true (default), the LLM generates every question (simple/closed style,
    *  aware of what's already been answered) instead of the fixed bank. Dev toggle
@@ -272,7 +275,7 @@ interface SessionState {
 const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
-  cannedIntro: false,
+  cannedIntro: true,
   llmQuestions: true,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
