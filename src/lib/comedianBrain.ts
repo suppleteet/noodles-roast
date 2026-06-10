@@ -461,6 +461,7 @@ export class ComedianBrain {
     this.ledger = [];
     this.jokeHopper = [];
     this.usedFallbackLines.clear();
+    this.watchdogFires = 0;
     this.knownName = null;
     this.openerIsNameAsk = false;
     this.transitionCount = 0;

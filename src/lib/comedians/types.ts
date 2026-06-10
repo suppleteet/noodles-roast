@@ -64,5 +64,11 @@ export function pickCannedIntro(
   if (timed && timed.length > 0 && rand() < 0.5) {
     return timed[Math.floor(rand() * timed.length)];
   }
-  return bank.anytime[Math.floor(rand() * bank.anytime.length)];
+  // Pools should never be empty (test-enforced per persona), but a new persona
+  // with a sparse bank must not crash the instant-opener path — fall back to
+  // the other buckets, then to a neutral line. The opener MUST still end with
+  // a who-are-you ask (it doubles as the name question).
+  const pool = bank.anytime.length > 0 ? bank.anytime : [...bank.early, ...bank.late];
+  if (pool.length === 0) return "Well, look at that — it connected. Who am I talking to?";
+  return pool[Math.floor(rand() * pool.length)];
 }

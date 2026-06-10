@@ -65,7 +65,7 @@ const defaults = {
   // spiked the attack on the word after it. The pump waits this long, then queues the filler.
   fillerBreathMs: 240,
   // Cap is also the user-facing dead-air budget when the LLM hangs: at ~2-3s per filler,
-  // a stack of 4 ≈ 10s of fillers before the 13s generationTimeoutMs watchdog fires. Lower
+  // a stack of 4 ≈ 10s of fillers before the 10s generationTimeoutMs watchdog fires. Lower
   // is snappier on hangs but risks a real audible pause for slow-but-healthy generations.
   fillerMaxStack: 4,
 
