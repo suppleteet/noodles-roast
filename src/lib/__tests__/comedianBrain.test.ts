@@ -240,25 +240,40 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
-  it("watchdog gracefully ends the session when generation hangs", async () => {
+  it("watchdog: first hang skips the joke and continues; second hang ends the session", async () => {
     vi.useFakeTimers();
     const onSessionEnd = vi.fn();
     const deps = makeDeps({ onSessionEnd });
     const brain = new ComedianBrain(deps);
     await driveToWaitAnswer(brain);
-    // generate-speak hangs forever (simulates Gemini / server stall — the exact
-    // failure seen in the 2026-06-01 session: 6 fillers then permanent silence).
+    // generate-speak hangs forever (simulates a Gemini / server stall — a real
+    // session died 37s in because its FIRST answer-joke generation hung).
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     brain.onInputTranscription("My name is Mike Johnson plumber");
     vi.advanceTimersByTime(1600); // commit answer → generating
     expect(getStates(deps)).toContain("generating");
     (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
-    // Watchdog fires at generationTimeoutMs (13s) — aborts the hang, speaks a
-    // persona-flavored "technical difficulties" line, then ends the session
-    // on TTS drain (rather than grinding through more canned fallbacks).
-    await vi.advanceTimersByTimeAsync(13_000);
+
+    // Fire #1 (generationTimeoutMs): transient hang — canned save line, show
+    // continues to the next question instead of ending the session.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(getStates(deps)).toContain("delivering");
+    expect(getStates(deps)).not.toContain("wrapup");
+    expect(deps.queueSpeak).toHaveBeenCalled(); // canned save line was spoken
+    expect(onSessionEnd).not.toHaveBeenCalled();
+
+    // Save line drains → check_vision → ask_question; let the rephrase race
+    // (450ms) resolve so the next question gets queued, then drain it.
+    brain.onTtsQueueDrained();
+    await vi.advanceTimersByTimeAsync(600);
+    brain.onTtsQueueDrained();
+    expect(getStates(deps)).toContain("wait_answer");
+
+    // Second answer — generation hangs again → fire #2 = LLM is down → graceful exit.
+    brain.onInputTranscription("I am a plumber from Ohio");
+    vi.advanceTimersByTime(1600);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(getStates(deps)).toContain("wrapup");
-    expect(deps.queueSpeak).toHaveBeenCalled(); // tech-difficulties line was spoken
     brain.onTtsQueueDrained();
     expect(onSessionEnd).toHaveBeenCalled();
   });

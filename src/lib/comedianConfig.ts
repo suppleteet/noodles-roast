@@ -70,11 +70,12 @@ const defaults = {
   fillerMaxStack: 4,
 
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
-  // within this window, abort it and deliver a canned fallback roast so the puppet never
-  // strands the user in dead silence. Sized to fire just as the filler stack (~12.5s for 6
-  // fillers) exhausts, so the fallback lands with minimal dead air. A healthy generation
-  // delivers its first joke in 1-4s, well inside this window — so it never false-fires.
-  generationTimeoutMs: 13_000,
+  // within this window, abort it. Fire #1 in a session = skip the joke (canned save line,
+  // move on to the next question); fire #2 = the LLM is actually down → in-character
+  // technical-difficulties exit. Sized to fire as the 4-filler stack (~10s) exhausts, so
+  // the save line lands with minimal dead air. A healthy generation delivers its first
+  // joke in 1-4s, well inside this window — so it never false-fires.
+  generationTimeoutMs: 10_000,
 };
 
 const windowOverride =
