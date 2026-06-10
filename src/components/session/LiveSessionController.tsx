@@ -887,7 +887,10 @@ export default function LiveSessionController({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageBase64: frame, burnIntensity: bi, mode: "vision", persona: ap }),
-      signal: AbortSignal.timeout(10_000),
+      // Healthy /api/analyze round-trips run 5-9s on mobile prod (Gemini vision
+      // + Vercel); 10s aborted real in-flight calls and spammed "signal timed
+      // out" in session logs.
+      signal: AbortSignal.timeout(15_000),
     })
       .then((r) => r.json())
       .then((d) => {

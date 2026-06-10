@@ -2086,11 +2086,23 @@ export class ComedianBrain {
     // Toast: capture the real name for the running wrong-name bit (every later
     // question gets a confidently-wrong near-miss appended — "got any kids, Toby?").
     // Overwrite on re-entry so a confirm-flow correction wins.
-    if (this._isToast() && this.currentQuestion?.id === "name") {
-      const name = ComedianBrain._extractName(answer);
-      if (name) {
-        this.knownName = name;
-        this.deps.logTiming(`brain: toast captured name "${name}" for wrong-name bit`);
+    if (this._isToast()) {
+      if (this.currentQuestion?.id === "name") {
+        const name =
+          ComedianBrain._extractName(answer) ?? ComedianBrain._extractNameViaIntro(answer);
+        if (name) {
+          this.knownName = name;
+          this.deps.logTiming(`brain: toast captured name "${name}" for wrong-name bit`);
+        }
+      } else if (/\bname\b/i.test(answer)) {
+        // Mid-show correction ("that isn't my name. It's Tyler.") — the user is
+        // pushing back on the wrong-name bit with their REAL name; update it so
+        // the near-misses orbit the right name from here on.
+        const corrected = ComedianBrain._extractNameViaIntro(answer);
+        if (corrected && corrected !== this.knownName) {
+          this.knownName = corrected;
+          this.deps.logTiming(`brain: toast name corrected to "${corrected}"`);
+        }
       }
     }
 
@@ -2156,6 +2168,18 @@ export class ComedianBrain {
     }
   }
 
+  /** Words that can start a non-name answer to "what's your name?" — a real
+   *  production session captured the name "Is" from "Is that a question? I'm so
+   *  confused.", then called the user "Izzy" for the rest of the show. */
+  private static readonly NAME_STOPWORDS = new Set([
+    "is", "are", "was", "were", "am", "be", "it", "its", "that", "this", "the",
+    "a", "an", "i", "im", "ive", "id", "what", "who", "why", "how", "when",
+    "where", "which", "yes", "yeah", "yep", "no", "nope", "not", "none",
+    "nothing", "ok", "okay", "um", "uh", "huh", "oh", "so", "hey", "hi",
+    "hello", "sorry", "wait", "just", "really", "seriously", "confused",
+    "do", "does", "did", "dont", "cant", "stop", "come", "excuse",
+  ]);
+
   /** Pull a usable first name out of a freeform answer ("My name's Tyler" → "Tyler").
    *  Returns null if nothing name-shaped is found. */
   private static _extractName(answer: string): string | null {
@@ -2171,7 +2195,22 @@ export class ComedianBrain {
     if (!/^[A-Za-z][A-Za-z'’-]{1,19}$/.test(name)) return null;
     // ...and contain at least 2 actual letters (rejects "O'" / "A-" / punctuation runs).
     if (name.replace(/[^A-Za-z]/g, "").length < 2) return null;
+    // ...and not be a sentence-starter that slipped past the lead-in strip.
+    if (ComedianBrain.NAME_STOPWORDS.has(name.toLowerCase().replace(/[^a-z]/g, ""))) return null;
     return name;
+  }
+
+  /** Find a name ANYWHERE in the answer via an intro phrase — handles mid-show
+   *  corrections like "[Izzy] isn't my name. It's Tyler." where the name isn't
+   *  the first token. Scans every intro match ("I'm so drunk... it's Tyler"
+   *  must not give up at "so") and reuses _extractName's validation. */
+  private static _extractNameViaIntro(answer: string): string | null {
+    const re = /(?:my name'?s?(?:\s+is)?|name\s+is|it'?s|i'?m|i am|call me)\s+([A-Za-z][A-Za-z'’-]{1,19})/gi;
+    for (const m of answer.matchAll(re)) {
+      const name = ComedianBrain._extractName(m[1]);
+      if (name) return name;
+    }
+    return null;
   }
 
   /** Toast's running bit: she asked the name once, got it, and now confidently

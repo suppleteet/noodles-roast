@@ -70,11 +70,14 @@ export function drunkWrongName(name: string): string {
 export const TOAST_QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "name",
+    // Keep this one SHORT — it gates the user's first chance to talk. The
+    // greeting already chained two long lines in front of it; a 40-word ramble
+    // here pushed first-listen to ~26s in a real session.
     question:
-      "And THAT, THAT is the kind of person they are. Just — JUST incredible. Truly. *sip* — and I have known them for — hold on. Hold ON. Oh my GOD, I'm so sorry, I am SO drunk — what's your name? What's your name again, baby?",
+      "And THAT is the kind of person they are. Truly. *sip* — oh my GOD, I'm so sorry, I am SO drunk — what's your name, baby?",
     vulgarQuestions: [
-      "…and I LOVE that for them. I LOVE it. *sip* — okay, hold on hold on, wait — fuck, what's your name? Shit. I should know this. I'm SO sorry.",
-      "And that is why we are HERE TODAY, for this absolute fucking LEGEND, who is — *sip* — oh shit, what's your name, gorgeous? Don't, don't look at me like that.",
+      "…and I LOVE that for them. *sip* — okay wait — fuck, what's your name? I should know this.",
+      "We are HERE TODAY for this absolute fucking LEGEND, who is — *sip* — oh shit, what's your name, gorgeous?",
     ],
     jokeContext:
       "She just got the user's name after pretending she knew them all along. Open the joke with a recover-and-continue beat that includes a drunk over-celebration of finally hearing it — 'Oh OKAY, so {name} — wait — {name}, yes' or '{name}! {name}, {name}, {name}, of COURSE' — then roll into a toast riff that stacks one or two confident drunk ASSUMPTIONS on top of the name (what the name implies about their personality, who you assume they are). Warm, sloppy-affectionate, NEVER cruel.",
