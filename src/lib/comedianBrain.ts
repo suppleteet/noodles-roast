@@ -30,7 +30,7 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { RAPID_FIRE_QUESTION_BANK } from "@/lib/rapidFireQuestionBank";
-import { TOAST_QUESTION_BANK } from "@/lib/toastQuestionBank";
+import { TOAST_QUESTION_BANK, drunkWrongName } from "@/lib/toastQuestionBank";
 import {
   NONWORD_FILLERS,
   ECHO_FILLER_TEMPLATES,
@@ -2067,6 +2067,17 @@ export class ComedianBrain {
       return;
     }
 
+    // Toast: capture the real name for the running wrong-name bit (every later
+    // question gets a confidently-wrong near-miss appended — "got any kids, Toby?").
+    // Overwrite on re-entry so a confirm-flow correction wins.
+    if (this._isToast() && this.currentQuestion?.id === "name") {
+      const name = ComedianBrain._extractName(answer);
+      if (name) {
+        this.knownName = name;
+        this.deps.logTiming(`brain: toast captured name "${name}" for wrong-name bit`);
+      }
+    }
+
     this._transition("generating");
     this.deliveryGeneration++;
     this.deps.setMotion("thinking", 0.7);
@@ -2244,6 +2255,17 @@ export class ComedianBrain {
     // ...and contain at least 2 actual letters (rejects "O'" / "A-" / punctuation runs).
     if (name.replace(/[^A-Za-z]/g, "").length < 2) return null;
     return name;
+  }
+
+  /** Toast's running bit: she asked the name once, got it, and now confidently
+   *  gets it WRONG on every subsequent question ("got any kids, Toby?").
+   *  No-op until the name is known (i.e. for the name question itself). */
+  private _toastInjectWrongName(text: string): string {
+    if (!this.knownName) return text;
+    const wrong = drunkWrongName(this.knownName);
+    if (/\?\s*$/.test(text)) return text.replace(/\s*\?+\s*$/, `, ${wrong}?`);
+    if (/[.!]\s*$/.test(text)) return text.replace(/\s*[.!]+\s*$/, `, ${wrong}.`);
+    return `${text}, ${wrong}`;
   }
 
   /** Rapid Fire: occasionally personalize a question with the user's name
@@ -2690,9 +2712,10 @@ export class ComedianBrain {
     // line ("So, what is your name anyway?"). Deliver the authored bank question
     // verbatim instead.
     if (this._isToast()) {
-      this.deps.queueSpeak(questionText, "emphasis", 0.6);
-      this.deps.setCurrentQuestion(questionText);
-      this._addLedger("question", questionText, []);
+      const withName = this._toastInjectWrongName(questionText);
+      this.deps.queueSpeak(withName, "emphasis", 0.6);
+      this.deps.setCurrentQuestion(withName);
+      this._addLedger("question", withName, []);
       this.deps.logTiming("brain: toast — verbatim bank question (no rephrase)");
       return;
     }
@@ -2871,7 +2894,7 @@ export class ComedianBrain {
     // Toast: skip rephrase entirely (see _queueQuestionWithBridge) — stash the
     // authored bank question verbatim so enterAskQuestion speaks it as written.
     if (this._isToast()) {
-      this.preQueuedRephrasedText = questionText;
+      this.preQueuedRephrasedText = this._toastInjectWrongName(questionText);
       this.deps.logTiming("brain: toast pre-queue — verbatim bank question (no rephrase)");
       return;
     }

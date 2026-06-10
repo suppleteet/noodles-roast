@@ -23,6 +23,52 @@
 
 import type { ComedyQuestion } from "@/lib/questionBank";
 
+/** Same-first-letter near-miss names for the drunk wrong-name bit. */
+const WRONG_NAME_POOL: Record<string, string[]> = {
+  a: ["Aaron", "Abby", "Andy"],
+  b: ["Brad", "Becca", "Benny"],
+  c: ["Chad", "Carrie", "Carl"],
+  d: ["Dave", "Donna", "Dougie"],
+  e: ["Eddie", "Elaine", "Ernie"],
+  f: ["Frank", "Fiona", "Freddy"],
+  g: ["Gary", "Gail", "Gus"],
+  h: ["Hank", "Heather", "Howie"],
+  i: ["Ian", "Irene", "Izzy"],
+  j: ["Jeff", "Janet", "Jimbo"],
+  k: ["Kyle", "Karen", "Kenny"],
+  l: ["Larry", "Linda", "Lenny"],
+  m: ["Mark", "Marcia", "Marty"],
+  n: ["Nate", "Nancy", "Norm"],
+  o: ["Owen", "Olga", "Ozzie"],
+  p: ["Pete", "Pam", "Paulie"],
+  q: ["Quinn", "Quincy"],
+  r: ["Rob", "Rhonda", "Randy"],
+  s: ["Steve", "Sandra", "Scotty"],
+  t: ["Toby", "Tammy", "Teddy"],
+  u: ["Ulysses", "Uma"],
+  v: ["Vince", "Vera", "Victor"],
+  w: ["Walt", "Wanda", "Wesley"],
+  x: ["Xander", "Ximena"],
+  y: ["Yuri", "Yolanda"],
+  z: ["Zach", "Zelda"],
+};
+
+/**
+ * A confidently-wrong near-miss of the user's name ("Tyler" → "Toby") for
+ * Toast's running bit: she asked the name once, and from then on she keeps
+ * getting it wrong — same first letter so it reads as a drunk near-miss, not
+ * a random stranger's name. Falls back to a clipped diminutive ("Ty").
+ */
+export function drunkWrongName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return name;
+  const pool = (WRONG_NAME_POOL[trimmed[0].toLowerCase()] ?? []).filter(
+    (n) => n.toLowerCase() !== trimmed.toLowerCase(),
+  );
+  if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+  return trimmed.slice(0, Math.max(2, Math.ceil(trimmed.length / 2)));
+}
+
 export const TOAST_QUESTION_BANK: ComedyQuestion[] = [
   {
     id: "name",
@@ -110,17 +156,17 @@ export const TOAST_QUESTION_BANK: ComedyQuestion[] = [
     ],
   },
   {
-    id: "embarrassing",
+    id: "dancer",
     question:
-      "And the STORIES — oh, the STORIES we could tell — *sip* — okay no, I don't actually have one, you give me one. Tell me. The most embarrassing thing you've ever done. GO.",
+      "And LATER — when the music starts — oh, I have SEEN this one move — *sip* — wait, no I haven't. Can you dance? Yes or no. Be honest with me.",
     vulgarQuestions: [
-      "The STORIES — the stories I could tell about this one — okay I have none, zero — *sip* — so YOU tell me: what's the most embarrassing shit you've ever done? I won't tell anyone. I'll tell everyone.",
+      "And when the DJ gets going, this one is going to — *sip* — okay wait, can you actually dance? Yes or no. Do not lie to me, I will find out.",
     ],
     jokeContext:
-      "She just got an embarrassing story from the user. Open with 'OH MY GOD' or 'OH NO' or 'YES, YES, I love this' — then toast around it: stack a confident drunk assumption about what this story says about their character, and celebrate the chaos. Keep it warm — she's CELEBRATING the embarrassment, not mocking it.",
+      "She just learned whether the user can dance. Open with a confident recover ('Of COURSE you can' / 'Of COURSE you can't, look at you') — then stack one or two drunk assumptions: if yes, riff on what kind of dancer they obviously are; if no, celebrate the stiff polite sway they'll be doing later. Warm.",
     prodLines: [
-      "Embarrassing thing. Hit me.",
-      "Give me dirt, sweetie.",
+      "Dancing. Yes or no, sweetie.",
+      "Can you dance? It's one word.",
     ],
   },
   {

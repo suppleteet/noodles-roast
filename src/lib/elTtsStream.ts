@@ -61,6 +61,16 @@ function getChunkLengthSchedule(): number[] {
 }
 
 /**
+ * Normalize text at the synthesis boundary. ElevenLabs renders "..." as an
+ * actual spoken beat, but reads em/en-dashes as flat micro-pauses (or ignores
+ * them) — and LLMs love em-dashes. Replacing here catches every path: LLM
+ * output, canned script lines, and prefetched greetings.
+ */
+export function normalizeTtsText(text: string): string {
+  return text.replace(/\s*[—–]+\s*/g, "... ");
+}
+
+/**
  * Open an ElevenLabs WebSocket, send text, stream audio back.
  * Returns a cleanup function that closes the connection.
  */
@@ -109,7 +119,7 @@ export function streamElTts({
       }),
     );
 
-    ws.send(JSON.stringify({ text, flush: true }));
+    ws.send(JSON.stringify({ text: normalizeTtsText(text), flush: true }));
     ws.send(JSON.stringify({ text: "" }));
   });
 
@@ -271,7 +281,7 @@ export function openElTtsStream({
     );
 
     if (pendingText) {
-      ws.send(JSON.stringify({ text: pendingText }));
+      ws.send(JSON.stringify({ text: normalizeTtsText(pendingText) }));
       pendingText = "";
     }
     if (endRequested) {
@@ -328,7 +338,8 @@ export function openElTtsStream({
         pendingText += delta;
         return;
       }
-      ws.send(JSON.stringify({ text: delta }));
+      // Em-dash is a single char, so per-delta normalization can't split one.
+      ws.send(JSON.stringify({ text: normalizeTtsText(delta) }));
     },
     end() {
       if (closed) return;

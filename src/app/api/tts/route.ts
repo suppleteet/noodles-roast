@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { ELEVENLABS_VOICE_ID, voiceIdForExperience } from "@/lib/constants";
-import { getElevenLabsModelId } from "@/lib/elTtsStream";
+import { getElevenLabsModelId, normalizeTtsText } from "@/lib/elTtsStream";
 import { recordTtsUsage } from "@/lib/usageTracker";
 
 export async function POST(req: NextRequest) {
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
           Accept: "audio/mpeg",
         },
         body: JSON.stringify({
-          text,
+          text: normalizeTtsText(String(text)),
           model_id: modelId,
           voice_settings: voiceSettings,
           ...(Array.isArray(previousRequestIds) && previousRequestIds.length > 0
