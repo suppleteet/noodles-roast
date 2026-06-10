@@ -45,6 +45,8 @@ import {
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
   TECHNICAL_DIFFICULTIES_LINES,
+  NOISE_ANSWER_LINES,
+  TOAST_NOISE_ANSWER_LINES,
   TOAST_FILLER_LINES,
   TOAST_GREETINGS,
   TOAST_CONFIRM_ECHO_TEMPLATES,
@@ -1566,11 +1568,37 @@ export class ComedianBrain {
     this.deps.queueSpeak(prodLine, "conspiratorial", 0.5);
   }
 
+  /** Matches a buffer made up ONLY of Gemini's non-speech tokens (<noise>) plus punctuation. */
+  private static readonly NOISE_ONLY_RE = /^[\s.,!?-]*(?:<\s*noise\s*>[\s.,!?-]*)+$/i;
+
   private _onAnswerComplete(): void {
-    const answer = this.answerBuffer.trim();
-    if (!answer) {
+    const rawAnswer = this.answerBuffer.trim();
+    if (!rawAnswer) {
       this.enterProdding();
       return;
+    }
+
+    // Gemini emits literal "<noise>" tokens for non-speech audio. A noise-only
+    // buffer means the user is somewhere loud — blame the environment and
+    // re-listen instead of handing "<noise>" to the joke LLM (which roasted a
+    // user for "grunting like a caveman" when he was just in a loud building).
+    if (ComedianBrain.NOISE_ONLY_RE.test(rawAnswer)) {
+      this.deps.logTiming(`brain: noise-only transcript — asking to speak up`);
+      this.answerBuffer = "";
+      this.deps.setUserAnswer("");
+      const pool = this._isToast() ? TOAST_NOISE_ANSWER_LINES : NOISE_ANSWER_LINES;
+      const line = pool[Math.floor(Math.random() * pool.length)];
+      this.deps.queueSpeak(line, "emphasis", 0.6);
+      this._cancelSpeculative();
+      this._transition("ask_question");
+      return;
+    }
+
+    // Mixed speech + noise ("I <noise> work in tech") — drop the tokens, keep the words.
+    const answer = rawAnswer.replace(/<\s*noise\s*>/gi, " ").replace(/\s+/g, " ").trim();
+    if (answer !== rawAnswer) {
+      this.answerBuffer = answer;
+      this.deps.setUserAnswer(answer);
     }
 
     // STT often captures the puppet's last roast line (e.g. "you poor bastard" → user "Poor bastard.")
@@ -2745,7 +2773,8 @@ export class ComedianBrain {
         persona: this.deps.getPersona(),
         observations,
         setting: this.deps.getVisionSetting(),
-        knownFacts: this._getThrowbackContext(),
+        // Uncapped — re-asking a volunteered fact reads as not listening.
+        knownFacts: this._getAllKnownFacts(),
         conversationSoFar: this._getLedgerContext(),
         previousQuestions: this._getPreviousQuestionTexts(),
         style: this.deps.getLlmQuestions?.() ? "simple" : "open",
@@ -2895,7 +2924,8 @@ export class ComedianBrain {
         persona: this.deps.getPersona(),
         observations,
         setting: this.deps.getVisionSetting(),
-        knownFacts: this._getThrowbackContext(),
+        // Uncapped — re-asking a volunteered fact reads as not listening.
+        knownFacts: this._getAllKnownFacts(),
         conversationSoFar: this._getLedgerContext(),
         previousQuestions: this._getPreviousQuestionTexts(),
         style: this.deps.getLlmQuestions?.() ? "simple" : "open",
@@ -3521,6 +3551,25 @@ export class ComedianBrain {
     return this.ledger.slice(-6).map(
       (e) => `[${e.type}] ${e.text}${e.tags.length ? ` (${e.tags.join(", ")})` : ""}`
     );
+  }
+
+  /** UNCAPPED fact list for question generation. Asking about something the user
+   *  already volunteered reads as not listening ("You got any kids?" right after
+   *  "I have two kids and a lovely wife"). _getThrowbackContext caps at 2 facts
+   *  for joke-style reasons and untagged facts live only in raw answers — so
+   *  question generation gets every tag plus the recent answers verbatim. */
+  private _getAllKnownFacts(): string[] {
+    const facts: string[] = [];
+    for (const entry of this.ledger) {
+      for (const tag of entry.tags) {
+        if (!facts.includes(tag)) facts.push(tag);
+      }
+    }
+    const answers = this.ledger
+      .filter((e) => e.type === "answer")
+      .slice(-10)
+      .map((e) => `they said: "${e.text.slice(0, 80)}"`);
+    return [...facts, ...answers];
   }
 
   /** Last N delivered joke texts across the whole session — sent as a hard

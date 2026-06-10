@@ -110,6 +110,22 @@ export const DEFAULT_CONFIRM_ECHO_TEMPLATES = [
 /** @deprecated alias kept for older imports. */
 export const DEFAULT_CONFIRM_TEMPLATES = DEFAULT_CONFIRM_ECHO_TEMPLATES;
 
+/** Spoken when STT returned only non-speech noise tokens (<noise>) — the user is
+ *  in a loud place. Blames the environment and asks them to speak up, instead of
+ *  letting the joke LLM roast them for "grunting". */
+export const NOISE_ANSWER_LINES = [
+  "All I'm getting is noise — it's loud wherever you are. Get closer and speak up.",
+  "That was just racket. Lean into the mic and try that again.",
+  "I can't hear a damn thing over wherever you are. Louder.",
+];
+
+/** Toast's version — drunk, blames the party. */
+export const TOAST_NOISE_ANSWER_LINES = [
+  "Baby it is SO loud in here — I can't hear you, come closer, yell it at me.",
+  "What? Sweetie, the MUSIC — louder, for me. Yell it.",
+  "I heard NOTHING. It's so loud — okay, again, right into the mic, go.",
+];
+
 /** Spoken when the puppet can't make out the answer at all and needs a re-do. */
 export const REJECT_TEMPLATES = [
   "I didn't catch that. Say again?",

@@ -12,10 +12,13 @@ export const GLOBAL_COMEDY_GUIDELINES: string[] = [
   "Prefer one specific premise with a hard turn over broad insult soup; the funniest line usually names a concrete detail, then twists it",
   "Avoid reusable openers like 'you look like', 'of course', and 'classic' unless the comparison is fresh and specific",
   "When delivering two jokes in one answer, make the second a topper that escalates the first instead of restarting the setup",
+  "Mean-generic doesn't land ('you miserable bastard', 'pale screen-lit complexion'); the laugh comes from an observation so specific the target recognizes themselves in it — earn the meanness with accuracy first",
 ];
 
 export const PERSONA_COMEDY_GUIDELINES: Record<string, string[]> = {
-  // kvetch: [],
+  kvetch: [
+    "Stay cranky and put-upon the WHOLE time — one continuous grumble at different temperatures; never bubbly, never hyped, even when a line kills",
+  ],
   // hype: [],
   // sweetheart: [],
   // menace: [],

@@ -95,7 +95,10 @@ export function voiceSettingsForMotion(
   const i = clamp(intensity, 0, 1);
   return {
     ...base,
-    stability: clamp(base.stability + (delta.stability ?? 0) * i, 0, 1),
+    // Stability floor 0.2: Toast's base is already low (0.4), and a full-strength
+    // laugh/energetic delta drove it toward ~0.05 — which renders as warbly,
+    // distorted audio (reported on car speakers). Below ~0.2 EL output degrades.
+    stability: clamp(base.stability + (delta.stability ?? 0) * i, 0.2, 1),
     style: clamp(base.style + (delta.style ?? 0) * i, 0, 1),
     speed: clamp(base.speed + (delta.speed ?? 0) * i, 0.7, 1.2),
   };

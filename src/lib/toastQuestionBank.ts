@@ -114,7 +114,7 @@ export const TOAST_QUESTION_BANK: ComedyQuestion[] = [
     question:
       "And the STORIES — oh, the STORIES we could tell — *sip* — okay no, I don't actually have one, you give me one. Tell me. The most embarrassing thing you've ever done. GO.",
     vulgarQuestions: [
-      "The shit we've been through — except we haven't, we have not — *sip* — fuck it, give me your worst thing. I won't tell anyone. I'll tell everyone.",
+      "The STORIES — the stories I could tell about this one — okay I have none, zero — *sip* — so YOU tell me: what's the most embarrassing shit you've ever done? I won't tell anyone. I'll tell everyone.",
     ],
     jokeContext:
       "She just got an embarrassing story from the user. Open with 'OH MY GOD' or 'OH NO' or 'YES, YES, I love this' — then toast around it: stack a confident drunk assumption about what this story says about their character, and celebrate the chaos. Keep it warm — she's CELEBRATING the embarrassment, not mocking it.",
