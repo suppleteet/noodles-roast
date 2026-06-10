@@ -360,6 +360,23 @@ export default function LiveSessionController({
     const previousText = lastSpokenTextRef.current;
     lastSpokenTextRef.current = text.trim();
 
+    // Watchdog: a prefetched buffer that never receives audio (hung /api/tts-ws,
+    // EL WS that silently dies before the first chunk) leaves scheduleFromPrefetch
+    // parked on waitForUpdate forever — the show opens on dead silence with no
+    // drain edge to advance it (a real local session sat mute for 10s until the
+    // user gave up). If nothing has arrived in time, kill the buffer (unblocks
+    // the chain) and re-synthesize the same text through legacy queueSpeak.
+    const PREFETCH_AUDIO_WATCHDOG_MS = 2_500;
+    setTimeout(() => {
+      if (!isRunningRef.current || ttsGenerationRef.current !== gen) return;
+      if (buffer.chunks.length > 0) return; // audio arrived (or is playing) — healthy
+      useSessionStore.getState().logTiming(
+        `tts-prefetched: no audio after ${PREFETCH_AUDIO_WATCHDOG_MS}ms (done=${buffer.done} failed=${buffer.failed}) — re-synthesizing via queueSpeak`,
+      );
+      if (!buffer.done) buffer.finish(true); // release scheduleFromPrefetch
+      queueSpeak(text, motion, intensity, appendToPrev);
+    }, PREFETCH_AUDIO_WATCHDOG_MS);
+
     ttsChainRef.current = ttsChainRef.current.then(async () => {
       if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
       if (motion) useSessionStore.getState().setActiveMotionState(motion, intensity ?? 0.7);

@@ -256,6 +256,10 @@ export function prefetchGreetingAudio(
           voiceSettings: mergedVoice,
           experienceType,
         }),
+        // A hung route (cold compile, EL WS that never opens) must not hold this
+        // buffer open forever — downstream playback waits on it. Abort → finish(true)
+        // via the catch, which flips the buffer to failed so consumers fall back.
+        signal: AbortSignal.timeout(10_000),
       });
 
       if (!resp.ok || !resp.body) {
