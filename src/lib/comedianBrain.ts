@@ -30,11 +30,11 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { TOAST_QUESTION_BANK, drunkWrongName } from "@/lib/toastQuestionBank";
-import { pickCannedIntro } from "@/lib/comedians/types";
 import {
   NONWORD_FILLERS,
   ECHO_FILLER_TEMPLATES,
   ECHO_FILLER_PROBABILITY,
+  pickCannedIntro,
   QUESTION_BRIDGES,
   CONFIRM_DENIED_LINE,
   ANSWER_FALLBACK_ROASTS,
@@ -55,6 +55,7 @@ import {
   CONTEXTUAL_FALLBACK_QUESTION,
   CONTEXTUAL_FALLBACK_PRODS,
   RHETORICAL_QUESTIONS,
+  DEFAULT_GREETING,
 } from "@/lib/scriptLines";
 import { transcriptConfidence, CONFIDENCE_THRESHOLDS } from "@/lib/transcriptConfidence";
 import { diffObservations } from "@/lib/visionDiff";
@@ -1119,13 +1120,11 @@ export class ComedianBrain {
     // Canned intro (latency toggle): skip the vision-dependent LLM greeting entirely.
     // Speak an INSTANT canned video-call opener that doubles as the name question —
     // no LLM, no waiting on the camera — so TTFS is just the TTS round-trip (~1s
-    // instead of ~10s). Persona-voiced (banks live in src/lib/comedians/*.ts) and
-    // time-of-day flavored by the user's local clock. Vision analysis keeps running
-    // in the background and feeds the vision jokes later.
+    // instead of ~10s). Time-of-day flavored by the user's local clock. Vision
+    // analysis keeps running in the background and feeds the vision jokes later.
     if (this._useCannedIntro()) {
       const vulgar = this.deps.getContentMode() === "vulgar";
-      const intros = PERSONAS[this.deps.getPersona()].cannedIntros;
-      const opener = pickCannedIntro(intros, new Date().getHours(), vulgar);
+      const opener = pickCannedIntro(new Date().getHours(), vulgar);
       const nameQ = this.shuffledQuestions.find((q) => q.id === "name") ?? this.shuffledQuestions[0];
       if (nameQ) {
         this.currentQuestion = nameQ;
@@ -3425,6 +3424,10 @@ export class ComedianBrain {
     // cancel any pending breath so a deferred filler can't fire after we've moved on.
     this.fillerPumpActive = false;
     if (this.pumpTimer) { clearTimeout(this.pumpTimer); this.pumpTimer = null; }
+  }
+
+  private _getPersonaGreetings(): string[] {
+    return PERSONAS[this.deps.getPersona()]?.greetings ?? [DEFAULT_GREETING];
   }
 
   private _rhetoricalVersion(question: string): string {
