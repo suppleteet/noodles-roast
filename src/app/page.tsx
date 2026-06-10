@@ -224,6 +224,17 @@ function MainApp() {
     fetch("/api/prewarm-tts", { method: "POST" }).catch(() => {});
     const greetingPrefetchModulePromise = import("@/lib/greetingPrefetch");
 
+    // Canned intro (roast only): the brain opens with an instant canned line, so a
+    // prefetched LLM greeting would just be discarded — skip the wasted call.
+    {
+      const s = useSessionStore.getState();
+      if (s.cannedIntro && s.experienceType === "roast") {
+        warmupGreetingPromiseRef.current = null;
+        warmupGreetingAudioRef.current = null;
+        return;
+      }
+    }
+
     warmupGreetingPromiseRef.current = (async () => {
       const { prefetchParallelVisionAndGreeting } = await greetingPrefetchModulePromise;
       const frame = await captureSquareJpegFromStream(stream);
@@ -232,7 +243,6 @@ function MainApp() {
         activePersona: s.activePersona,
         burnIntensity: s.burnIntensity,
         contentMode: s.contentMode,
-        flowMode: s.flowMode,
         visionModel: s.visionModel,
         experienceType: s.experienceType,
       });

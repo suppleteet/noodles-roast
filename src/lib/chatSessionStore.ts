@@ -438,16 +438,6 @@ Keep it tight: quick opener + ONE comprehensive roast line that combines multipl
 Use at least 3 concrete observations when available.
 Set "relevant": true. Generate exactly 1 joke.`,
 
-    rapid_fire_greeting: `TASK: Rapid Fire opening — ONE charismatic WELCOME line. This is the ONE line in the
-whole show that is NOT a roast. OVERRIDE your roast intensity for this line only — you are
-a warm, quick-witted HOST right now (late-night-host energy), not a roast comedian.
-- ONE sentence, max 18 words. Warm, playful, a little cheeky — genuinely glad they're here.
-- A LIGHT friendly nod to what you see / the time of day / weather is fine — a compliment-shaped
-  tease at most, NEVER a put-down. ZERO insults, zero burns, nothing mean.
-- Then pivot into the game with energy (signal quick questions are coming). End upbeat, not on a punchline.
-- If unsure whether a line is mean, it is — soften it. The roasting starts on the NEXT turn, not now.
-Set "relevant": true. Generate exactly 1 joke whose text IS this welcome line.`,
-
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.
 Max 20 words, punchline at the end. Set "relevant": true. Generate exactly 1 joke.`,
 

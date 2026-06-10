@@ -13,13 +13,12 @@ import type { PersonaId } from "@/lib/personas";
  * the user just said before it's spoken (e.g. "Tyler, you say.").
  *
  * ── WHERE THE REST OF THE SPOKEN CONTENT LIVES (not in this file) ───────────
- *   • Questions, Original flow ........ src/lib/questionBank.ts
- *   • Questions, Rapid Fire flow ...... src/lib/rapidFireQuestionBank.ts
+ *   • Questions ....................... src/lib/questionBank.ts
  *       (each question also carries its own prod lines + vulgar variants)
  *   • Per-persona opening greetings ... src/lib/personas.ts   (greetings: [...])
  *   • Per-persona fallback roasts ..... src/lib/fallbackRoasts.ts
  *   • The actual JOKES ................ written live by the LLM — never canned.
- *   • Cadence knobs (burst size, etc.). src/lib/comedianConfig.ts
+ *   • Timing / cadence knobs .......... src/lib/comedianConfig.ts
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -54,33 +53,116 @@ export const ECHO_FILLER_TEMPLATES = [
 /** Chance (0-1) of using an echo filler instead of a non-word filler when eligible. */
 export const ECHO_FILLER_PROBABILITY = 0.35;
 
-// ─── Quick acks between Rapid Fire questions ────────────────────────────────
-// In Rapid Fire the puppet collects a few answers behind these one-word acks,
-// THEN drops one combined joke burst. Keep them short and upbeat.
-export const RAPID_FIRE_ACKS = [
-  "Got it.", "Okay.", "Nice.", "Mm-hm.", "Right.", "Sure.", "Noted.", "Alright.", "Love it.",
-];
+// ─── Canned intros (instant opener — doubles as the "name" question) ────────
+// Spoken the INSTANT the session starts when the cannedIntro toggle is on — no
+// LLM, no waiting on the camera — so TTFS is just the TTS round-trip. Framed as
+// the puppet answering an unexpected VIDEO CALL. Every line ends by asking who
+// they're talking to, so the first answer is treated as the user's name. Vision
+// analysis runs in the background meanwhile, feeding later vision jokes.
+//
+// `early` / `late` buckets add time-of-day flavor (picked by the user's local
+// clock); `anytime` is the main pool.
+export interface CannedIntroBank {
+  anytime: string[];
+  early: string[];
+  late: string[];
+}
 
-// ─── Rapid Fire instant opener (doubles as the "name" question) ─────────────
-// Spoken the INSTANT the session starts — no LLM, no waiting on the camera — so
-// there's basically no dead air at the top. It both greets AND asks who they are,
-// so the first answer is treated as their name. Vision analysis runs in the
-// background meanwhile, feeding the vision jokes that come later.
-export const RAPID_FIRE_OPENERS = [
-  "Well, hello there. Who am I talking to over here?",
-  "Oh, look who it is. So who are you, then?",
-  "Alright, alright. Who is this?",
-  "Hello, hello. And who do we have here?",
-  "There you are. So who am I dealing with?",
-];
+export const CANNED_INTROS: CannedIntroBank = {
+  anytime: [
+    "Well, would you look at that — it connected. Who am I talking to here?",
+    "Oh good, the camera works. Now who is this?",
+    "There's a face on my screen and nobody warned me. Who are you?",
+    "You know, nobody calls me just to say hi anymore. Who is this?",
+    "Alright, I picked up. That's already more than you deserve. Who am I talking to?",
+    "Look who decided to video call. Okay. Who are you, then?",
+    "Oh, we're doing this. Fine. Who am I looking at?",
+    "I was having a perfectly fine day until this call. Who is this?",
+    "Hold on, let me get my glasses — nope, still confusing. Who is this?",
+    "Every time the phone rings it's something like you. Who am I talking to?",
+    "Okay, connection's good, lighting's terrible. Who are you?",
+    "You called ME, remember that. So who is this?",
+    "Well. The screen turned on and there you were. Who am I dealing with?",
+    "I've answered a lot of calls in my life. This one's already in the bottom ten. Who are you?",
+    "Oh terrific, a surprise video call. My favorite thing. Who is this?",
+    "Let me guess — wrong number. No? Then who am I talking to?",
+    "The camera's on, unfortunately for both of us. Who are you?",
+    "What is this, a video call? Who even does that anymore? Who is this?",
+    "Nobody ever calls me with good news. Who is this?",
+    "Alright, alright, I'm here. Who do we have?",
+  ],
+  early: [
+    "Why are you calling me this early? The sun barely made it up. Who is this?",
+    "It is way too early for whatever this is. Who am I talking to?",
+    "I haven't even had my coffee and there's already a face on my screen. Who are you?",
+    "Calling at this hour. Unbelievable. Okay — who is this?",
+    "The birds aren't even up and you're video calling me. Who are you?",
+  ],
+  late: [
+    "It's the middle of the night and you're calling me. This better be good. Who is this?",
+    "Do you know what time it is? Of course you don't. Who am I talking to?",
+    "Normal people are asleep right now. Not us, apparently. Who is this?",
+    "Calling me at this hour — somebody's got nothing going on. Who are you?",
+    "It's late, I'm cranky, and now there's a face on my screen. Who am I talking to?",
+  ],
+};
 
-export const RAPID_FIRE_OPENERS_VULGAR = [
-  "Well hello there. Who the hell is this I'm talking to?",
-  "Oh good. So who the hell are you, then?",
-  "Alright, who the hell am I talking to over there?",
-  "Well, look at this. Who the hell is this?",
-  "There you are. So who the hell are you?",
-];
+export const CANNED_INTROS_VULGAR: CannedIntroBank = {
+  anytime: [
+    "Well, what the fuck am I looking at here? Who am I talking to?",
+    "Oh great, the camera works. Who the hell is this?",
+    "There's a face on my screen and nobody warned me. Who the hell are you?",
+    "You called ME, pal. So who the hell is this?",
+    "I was having a perfectly fine day until this shit. Who am I talking to?",
+    "Hold on — let me get my glasses. Nope, still a mess. Who the hell are you?",
+    "Oh, we're doing this? Fine. Who the fuck am I looking at?",
+    "Every damn time the phone rings, it's something like you. Who is this?",
+    "Look who decided to video call. Alright, who the hell are you?",
+    "The screen turned on and there you were. Lucky me. Who the hell is this?",
+    "I've answered a lot of calls. This one's already in the shitter. Who are you?",
+    "A surprise video call. Fan-fucking-tastic. Who is this?",
+    "Let me guess — wrong number. No? Then who the hell am I talking to?",
+    "The camera's on, unfortunately for both of us. Who the hell are you?",
+    "Alright, I picked up, that's more than you deserve. Who the fuck is this?",
+    "Connection's good, lighting's shit. Who are you?",
+    "Nobody calls me with good news. Who the hell is this?",
+    "What fresh hell is this on my screen? Who am I talking to?",
+    "Oh good, you found the camera button. Who the hell are you?",
+    "Well well well. Somebody's got my number. Who the fuck is this?",
+  ],
+  early: [
+    "Hey there — why are you calling me so goddamn early? Who is this?",
+    "It's ass o'clock in the morning and you're video calling me. Who the hell are you?",
+    "I haven't had my coffee and there's already a face on my screen. Who the hell is this?",
+    "The sun's barely up and you're already bothering me. Who the fuck is this?",
+    "Calling at this hour. Unbelievable. Who the hell am I talking to?",
+  ],
+  late: [
+    "It's the middle of the damn night. This better be good. Who is this?",
+    "Do you know what time it is? Of course you don't. Who the hell are you?",
+    "Normal people are asleep right now, you maniac. Who is this?",
+    "Calling me at this hour — somebody's got fuck-all going on. Who are you?",
+    "It's late, I'm cranky, and now there's your face. Who the hell am I talking to?",
+  ],
+};
+
+/** Pick a canned intro for the user's local hour. When an early-morning (5-9)
+ *  or late-night (22-4) bucket applies, there's a 50% chance of using a
+ *  time-flavored line; otherwise (and the other 50%) it's the anytime pool.
+ *  `rand` is injectable for tests. */
+export function pickCannedIntro(
+  hour: number,
+  vulgar: boolean,
+  rand: () => number = Math.random,
+): string {
+  const bank = vulgar ? CANNED_INTROS_VULGAR : CANNED_INTROS;
+  const timed =
+    hour >= 5 && hour < 10 ? bank.early : hour >= 22 || hour < 5 ? bank.late : null;
+  if (timed && timed.length > 0 && rand() < 0.5) {
+    return timed[Math.floor(rand() * timed.length)];
+  }
+  return bank.anytime[Math.floor(rand() * bank.anytime.length)];
+}
 
 // ─── Bridges into the next question ─────────────────────────────────────────
 // A short lead-in spoken before a question so it doesn't feel abrupt.

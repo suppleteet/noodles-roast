@@ -69,16 +69,6 @@ const defaults = {
   // is snappier on hangs but risks a real audible pause for slow-but-healthy generations.
   fillerMaxStack: 4,
 
-  // Rapid Fire burst — ask this many short questions back-to-back (each with only a quick
-  // one-word ack), THEN drop one joke burst that ties all the answers together. This is what
-  // makes Rapid Fire feel distinct from the original question→joke→question cadence.
-  // 2 = a joke after every couple questions (snappy); raise it for longer question runs.
-  rapidFireBurstSize: 2,
-
-  // Chance (0-1) that a Rapid Fire question drops the user's name in once it's known
-  // ("Are you single, Tyler?"). 0 = never, 1 = every question.
-  rapidFireNameInjectionChance: 0.45,
-
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
   // within this window, abort it and deliver a canned fallback roast so the puppet never
   // strands the user in dead silence. Sized to fire just as the filler stack (~12.5s for 6

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
-import type { ContentMode, FlowMode, RoastModelId } from "@/store/useSessionStore";
+import type { ContentMode, RoastModelId } from "@/store/useSessionStore";
 import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monetizationCatalog";
 import { useDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
@@ -13,11 +13,6 @@ const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
   { id: "gpt-4o", label: "GPT-4o" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-];
-
-const FLOW_OPTIONS: { id: FlowMode; label: string }[] = [
-  { id: "original", label: "Original — vision + Q&A + callbacks" },
-  { id: "rapid_fire", label: "Rapid Fire — quick Q&A → 2-joke bursts" },
 ];
 
 const PAYMENTS_ENABLED = process.env.NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED === "true";
@@ -40,8 +35,8 @@ export default function LandingScreen() {
   const setLocationConsent = useSessionStore((s) => s.setLocationConsent);
   const roastModel = useSessionStore((s) => s.roastModel);
   const setRoastModel = useSessionStore((s) => s.setRoastModel);
-  const flowMode = useSessionStore((s) => s.flowMode);
-  const setFlowMode = useSessionStore((s) => s.setFlowMode);
+  const cannedIntro = useSessionStore((s) => s.cannedIntro);
+  const setCannedIntro = useSessionStore((s) => s.setCannedIntro);
   const llmQuestions = useSessionStore((s) => s.llmQuestions);
   const setLlmQuestions = useSessionStore((s) => s.setLlmQuestions);
   const setExperienceType = useSessionStore((s) => s.setExperienceType);
@@ -187,17 +182,15 @@ export default function LandingScreen() {
                 </option>
               ))}
             </select>
-            <select
-              value={flowMode}
-              onChange={(e) => setFlowMode(e.target.value as FlowMode)}
-              className="mb-5 w-full rounded-xl border border-purple-300/25 bg-white/10 px-3 py-2 font-mono text-sm text-purple-200 outline-none transition-colors hover:border-purple-300/50"
-            >
-              {FLOW_OPTIONS.map((f) => (
-                <option key={f.id} value={f.id} className="bg-gray-950 text-white">
-                  {f.label}
-                </option>
-              ))}
-            </select>
+            <label className="mb-2 flex cursor-pointer items-center gap-2 font-mono text-sm text-purple-200">
+              <input
+                type="checkbox"
+                checked={cannedIntro}
+                onChange={(e) => setCannedIntro(e.target.checked)}
+                className="h-4 w-4 accent-purple-400 cursor-pointer"
+              />
+              Canned intro (instant video-call opener, no LLM greeting)
+            </label>
             <label className="mb-5 flex cursor-pointer items-center gap-2 font-mono text-sm text-purple-200">
               <input
                 type="checkbox"

@@ -14,8 +14,6 @@
  * this bank uniformly via the same `ComedyQuestion` shape as the Roast bank.
  *
  * Notes:
- * - No `expectedAnswers` — Toast has no Rapid Fire variant (no speculative
- *   pre-gen by expected answer).
  * - "name" is asked first (brain pins it). Everything else shuffles.
  * - Vulgar variants stay in voice (warm-drunk profanity, not bitter-roast
  *   profanity).

@@ -218,10 +218,6 @@ frame for one quick warm assumption-shaped observation, then signal you're start
 toast. NOT a roast. NOT mean. Warm. One sentence, max 22 words. End on energy.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
 
-    rapid_fire_greeting: `TASK: Toast does not use Rapid Fire — but if this context is somehow requested,
-treat it identically to "greeting": one warm mid-thought opener pivoting to the toast.${vulgarSuffix}
-Set "relevant": true. Generate exactly 1 joke.`,
-
     vision_opening: `TASK: First post-greeting observation. Use what you SEE to land one toast-shaped
 beat about the user — confident drunk-assumption energy. Max 22 words. End on energy.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,

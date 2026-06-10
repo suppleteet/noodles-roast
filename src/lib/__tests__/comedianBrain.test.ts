@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
-import { NONWORD_FILLERS } from "@/lib/scriptLines";
+import { NONWORD_FILLERS, CANNED_INTROS, CANNED_INTROS_VULGAR } from "@/lib/scriptLines";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
@@ -64,7 +64,7 @@ function makeDeps(overrides?: Partial<ComedianBrainDeps>): ComedianBrainDeps {
     getBurnIntensity: vi.fn().mockReturnValue(3),
     getContentMode: vi.fn().mockReturnValue("clean"),
     getRoastModel: vi.fn().mockReturnValue("gemini-3.5-flash"),
-    getFlowMode: vi.fn().mockReturnValue("original"),
+    getCannedIntro: vi.fn().mockReturnValue(false),
     getInputAmplitude: vi.fn().mockReturnValue(0.1),
     getObservations: vi.fn().mockReturnValue([]),
     getVisionSetting: vi.fn().mockReturnValue(null),
@@ -277,61 +277,55 @@ describe("ComedianBrain — Q&A cycle", () => {
   });
 });
 
-// ─── Rapid Fire burst cadence ──────────────────────────────────────────────────
+// ─── Canned intro (instant opener) ─────────────────────────────────────────────
 
-describe("ComedianBrain — Rapid Fire burst", () => {
-  /** Commit one answer, then drain the ack + next-question TTS so we land back in wait_answer. */
-  async function rapidAnswer(brain: ComedianBrain, text: string): Promise<void> {
-    brain.onInputTranscription(text);
-    await vi.advanceTimersByTimeAsync(1600); // silence commits the answer
-    brain.onTtsQueueDrained();               // ack + next question drained → wait_answer
-  }
-
-  // Distinct multi-word answers so each commits cleanly (avoids confirm/echo paths).
-  const BURST_ANSWERS = [
-    "My name is Tyler",
-    "Nope I am single",
-    "I live in Seattle",
-    "I am a plumber",
-    "About forty years old",
+describe("ComedianBrain — canned intro", () => {
+  const ALL_CLEAN_INTROS = [
+    ...CANNED_INTROS.anytime,
+    ...CANNED_INTROS.early,
+    ...CANNED_INTROS.late,
   ];
 
-  it("acks and advances instead of joking until the burst is full", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
-    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+  it("speaks an instant canned opener instead of generating an LLM greeting", () => {
+    const fetchMock = mockFetchResponse(DEFAULT_JOKE_RESPONSE);
+    vi.stubGlobal("fetch", fetchMock);
+    const deps = makeDeps({ getCannedIntro: vi.fn().mockReturnValue(true) });
     const brain = new ComedianBrain(deps);
-    await driveToWaitAnswer(brain);
+    brain.start();
 
-    // Every answer EXCEPT the burst-filling one → quick ack + next question, NO generation.
-    const acksBeforeBurst = COMEDIAN_CONFIG.rapidFireBurstSize - 1;
-    for (let i = 0; i < acksBeforeBurst; i++) {
-      await rapidAnswer(brain, BURST_ANSWERS[i]);
-    }
-
-    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
-    // Should have looped back through ask_question for the next burst question.
-    expect(getStates(deps)).toContain("ask_question");
+    const spoken = (deps.queueSpeak as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(ALL_CLEAN_INTROS).toContain(spoken);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fires a joke burst once rapidFireBurstSize answers are collected", async () => {
-    vi.useFakeTimers();
+  it("treats the opener as the name question and advances straight to wait_answer", () => {
     vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
-    const deps = makeDeps({ getFlowMode: vi.fn().mockReturnValue("rapid_fire") });
+    const deps = makeDeps({ getCannedIntro: vi.fn().mockReturnValue(true) });
     const brain = new ComedianBrain(deps);
-    await driveToWaitAnswer(brain);
+    brain.start();
+    brain.onTtsQueueDrained(); // opener finished playing
 
-    const burstSize = COMEDIAN_CONFIG.rapidFireBurstSize;
-    // Answers up to (but not including) the last one just ack.
-    for (let i = 0; i < burstSize - 1; i++) {
-      await rapidAnswer(brain, BURST_ANSWERS[i]);
-    }
-    expect(getStates(deps).filter((s) => s === "generating").length).toBe(0);
+    const states = getStates(deps);
+    expect(states).toContain("wait_answer");
+    expect(states).not.toContain("ask_question"); // opener already asked the name
+  });
 
-    // The answer that fills the burst → one combined joke burst generates.
-    brain.onInputTranscription(BURST_ANSWERS[burstSize - 1]);
-    await vi.advanceTimersByTimeAsync(1600);
-    expect(getStates(deps)).toContain("generating");
+  it("uses vulgar intro lines when contentMode is vulgar", () => {
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({
+      getCannedIntro: vi.fn().mockReturnValue(true),
+      getContentMode: vi.fn().mockReturnValue("vulgar"),
+    });
+    const brain = new ComedianBrain(deps);
+    brain.start();
+
+    const spoken = (deps.queueSpeak as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    const allVulgar = [
+      ...CANNED_INTROS_VULGAR.anytime,
+      ...CANNED_INTROS_VULGAR.early,
+      ...CANNED_INTROS_VULGAR.late,
+    ];
+    expect(allVulgar).toContain(spoken);
   });
 });
 

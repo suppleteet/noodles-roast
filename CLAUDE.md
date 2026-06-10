@@ -71,7 +71,9 @@ Import split — **import the lightweight one from client/store code**:
 - `src/lib/personaMetadata.ts` — client-safe: `PersonaId`, `PERSONA_IDS`, `DEFAULT_PERSONA`, `PERSONA_NAMES`, `PERSONA_GREETINGS`. No heavy prompt strings. `constants.ts`, `useSessionStore.ts`, and other client code import from here so the multi-KB persona prompt bodies don't get bundled into the client.
 - `src/lib/personas.ts` — thin registry assembling the `src/lib/comedians/` configs into `PERSONAS`/`getPersona()`, used at prompt-build time. Re-exports the metadata symbols for convenience, but **don't import this from client code** — it pulls in all the prompt text.
 
-Orthogonal to persona: `flowMode` (`"original"` LLM-personalized vs `"rapid_fire"`) and the **experience** (Roast vs Toast). In the **Toast** experience the persona is ignored (one fixed drunk-wedding-toast character; see `toastPrompts.ts`) and `voiceIdForExperience()` picks the voice.
+Orthogonal to persona: the **experience** (Roast vs Toast). In the **Toast** experience the persona is ignored (one fixed drunk-wedding-toast character; see `toastPrompts.ts`) and `voiceIdForExperience()` picks the voice. (The old `flowMode` / Rapid Fire variant was removed June 2026.)
+
+**Canned intro toggle** (`cannedIntro` in the store, dev checkbox on the landing screen): when on (Roast only), the session opens with an instant canned video-call line ("Well, what am I looking at here? Who am I talking to?") instead of the LLM greeting — no LLM, no vision wait, TTFS ≈ the TTS round-trip. The line doubles as the name question, so the brain advances straight to `wait_answer`. Bank lives in `CANNED_INTROS` / `CANNED_INTROS_VULGAR` (`scriptLines.ts`), time-of-day flavored via `pickCannedIntro(hour, vulgar)` (early 5-9h / late 22-4h buckets). The greeting LLM prefetch is skipped when the toggle is on.
 
 ## Session Startup / Prewarm (cold-start resilience)
 
@@ -128,7 +130,7 @@ State config lives in `src/lib/comedianBrainConfig.ts`. Timing in `src/lib/comed
 ## Architecture
 
 ```
-src/app/api/           Next.js API routes (analyze, ambient-context, comedian-session, debug-prompt, debug-usage, generate-expected-jokes, generate-joke, generate-question, generate-speak, list-feedback, live-token, monetization/{checkout,redeem,status,webhook}, name-video, open-videos-folder, prewarm-tts, rephrase-question, roast, save-feedback, save-log, save-transcript, save-video, save-voice-note, serve-video, town-flavor, tts, tts-ws, upload-to-drive, vision)
+src/app/api/           Next.js API routes (analyze, ambient-context, comedian-session, debug-prompt, debug-usage, generate-joke, generate-question, generate-speak, list-feedback, live-token, monetization/{checkout,redeem,status,webhook}, name-video, open-videos-folder, prewarm-tts, rephrase-question, roast, save-feedback, save-log, save-transcript, save-video, save-voice-note, serve-video, town-flavor, tts, tts-ws, upload-to-drive, vision)
 src/components/puppet/ Three.js puppet inside R3F Canvas
 src/components/session/ SessionController (monologue), LiveSessionController (conversation)
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)

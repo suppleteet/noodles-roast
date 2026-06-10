@@ -2,7 +2,7 @@ import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
 import { VISION_MODEL } from "@/lib/constants";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
-import type { ContentMode, FlowMode, VoiceSettings } from "@/store/useSessionStore";
+import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
@@ -12,7 +12,6 @@ export interface GreetingPrefetchSnapshot {
   activePersona: PersonaId;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
-  flowMode?: FlowMode;
   /** Override the default VISION_MODEL — set when fallback was applied. */
   visionModel?: string;
   /** "roast" | "toast" — routes the greeting through the right prompt set
@@ -102,13 +101,6 @@ function rememberVisionData(visionData: VisionData | null): string[] {
   return observations;
 }
 
-function greetingContext(snapshot: GreetingPrefetchSnapshot): JokeContext {
-  // Toast always uses the "greeting" context — the Toast prompt itself
-  // handles the mid-thought-pivot beat, no separate rapid_fire variant.
-  if (snapshot.experienceType === "toast") return "greeting";
-  return snapshot.flowMode === "rapid_fire" ? "rapid_fire_greeting" : "greeting";
-}
-
 async function generateGreetingFromObservations(
   observations: string[],
   snapshot: GreetingPrefetchSnapshot,
@@ -116,7 +108,7 @@ async function generateGreetingFromObservations(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: greetingContext(snapshot),
+      context: "greeting" satisfies JokeContext,
       model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
@@ -136,7 +128,7 @@ async function generateDirectImageGreeting(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: greetingContext(snapshot),
+      context: "greeting" satisfies JokeContext,
       model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,

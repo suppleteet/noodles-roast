@@ -13,23 +13,13 @@ import {
 export type ContentMode = "clean" | "vulgar";
 
 /**
- * Conversation flow style. "original" = current behavior (LLM-personalized
- * bank questions, vision_react interrupts, single-joke-per-cycle delivery).
- * "rapid_fire" = short Q&As with binary/short-answer questions, jokes fired
- * as 2-joke bursts about the gathered info, no vision_react interrupts.
- * Dev-only toggle for now — production users always get "original".
- */
-export type FlowMode = "original" | "rapid_fire";
-
-/**
  * Top-level experience the user picks on the landing screen — two side-by-side
  * buttons, "Roast Me" (orange) vs "Toast Me" (champagne). Toast is a parallel
  * experience to the standard roast: a drunk woman at a wedding mic giving a
  * toast to the user, who she's pretending she knows. Same brain state machine,
  * different question bank, prompts, scripted lines, voice, and puppet palette.
  *
- * In "toast": persona is ignored (one character), flowMode is ignored
- * (single flow — no Rapid Fire variant).
+ * In "toast": persona is ignored (one character).
  */
 export type ExperienceType = "roast" | "toast";
 
@@ -138,7 +128,10 @@ export interface RoastSentence {
 interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
-  flowMode: FlowMode;
+  /** Latency experiment: when true, the session opens with an instant canned
+   *  video-call intro (no LLM greeting) that also asks who the user is —
+   *  see CANNED_INTROS in scriptLines.ts. Roast experience only. */
+  cannedIntro: boolean;
   /** When true (default), the LLM generates every question (simple/closed style,
    *  aware of what's already been answered) instead of the fixed bank. Dev toggle
    *  on the landing screen can turn it off to compare against the bank. */
@@ -219,7 +212,7 @@ interface SessionState {
   // actions
   setPhase: (phase: SessionPhase, trigger: SessionTrigger) => void;
   setSessionMode: (mode: SessionMode) => void;
-  setFlowMode: (mode: FlowMode) => void;
+  setCannedIntro: (v: boolean) => void;
   setLlmQuestions: (v: boolean) => void;
   setExperienceType: (type: ExperienceType) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
@@ -279,7 +272,7 @@ interface SessionState {
 const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
-  flowMode: "original" as FlowMode,
+  cannedIntro: false,
   llmQuestions: true,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
@@ -340,7 +333,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ phase });
   },
   setSessionMode: (sessionMode) => set({ sessionMode }),
-  setFlowMode: (flowMode) => set({ flowMode }),
+  setCannedIntro: (cannedIntro) => set({ cannedIntro }),
   setLlmQuestions: (llmQuestions) => set({ llmQuestions }),
   setExperienceType: (experienceType) =>
     set((s) =>

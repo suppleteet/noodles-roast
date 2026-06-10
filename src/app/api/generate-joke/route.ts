@@ -12,7 +12,6 @@ import { trimObservations } from "@/lib/visionDiff";
 
 export type JokeContext =
   | "greeting"
-  | "rapid_fire_greeting"
   | "vision_opening"
   | "answer_roast"
   | "vision_react"

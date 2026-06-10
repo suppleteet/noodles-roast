@@ -1162,7 +1162,17 @@ export default function LiveSessionController({
     };
     let greetingPrefetch: Promise<JokeResponse | null>;
 
-    if (warmupGreetingPrefetch) {
+    const cannedIntroActive = (() => {
+      const s = useSessionStore.getState();
+      return s.cannedIntro && s.experienceType === "roast";
+    })();
+
+    if (cannedIntroActive) {
+      // The brain opens with an instant canned line — an LLM greeting prefetch
+      // would just be discarded, so don't spend the call.
+      greetingPrefetch = Promise.resolve(null);
+      useSessionStore.getState().logTiming("live: canned intro on — skipping greeting prefetch");
+    } else if (warmupGreetingPrefetch) {
       greetingPrefetch = warmupGreetingPrefetch.catch(() => null);
       useSessionStore.getState().logTiming("live: using pre-roast greeting warmup");
     } else {
@@ -1174,7 +1184,6 @@ export default function LiveSessionController({
         activePersona: greetingStore.activePersona,
         burnIntensity: greetingStore.burnIntensity,
         contentMode: greetingStore.contentMode,
-        flowMode: greetingStore.flowMode,
       }).catch(() => null);
       useSessionStore.getState().logTiming("live: greeting prefetch fired (parallel vision + joke)");
     }
@@ -1192,7 +1201,7 @@ export default function LiveSessionController({
       getBurnIntensity: () => useSessionStore.getState().burnIntensity,
       getContentMode: () => useSessionStore.getState().contentMode,
       getRoastModel: () => useSessionStore.getState().roastModel,
-      getFlowMode: () => useSessionStore.getState().flowMode,
+      getCannedIntro: () => useSessionStore.getState().cannedIntro,
       getLlmQuestions: () => useSessionStore.getState().llmQuestions,
       getExperienceType: () => useSessionStore.getState().experienceType,
       getInputAmplitude: () => mic.getInputAmplitude(),
