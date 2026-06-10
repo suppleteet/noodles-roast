@@ -38,8 +38,27 @@ describe("PersonaConfig shape", () => {
         expect(p.motionPreferences.length).toBeGreaterThan(0);
       });
 
-      it("has at least 5 greetings", () => {
-        expect(p.greetings.length).toBeGreaterThanOrEqual(5);
+      it("has populated canned intro pools in both modes", () => {
+        for (const mode of ["clean", "vulgar"] as const) {
+          const bank = p.cannedIntros[mode];
+          expect(bank.anytime.length).toBeGreaterThanOrEqual(5);
+          expect(bank.early.length).toBeGreaterThanOrEqual(2);
+          expect(bank.late.length).toBeGreaterThanOrEqual(2);
+        }
+      });
+
+      it("every canned intro ends by asking who the user is", () => {
+        for (const mode of ["clean", "vulgar"] as const) {
+          const bank = p.cannedIntros[mode];
+          for (const line of [...bank.anytime, ...bank.early, ...bank.late]) {
+            // The opener doubles as the name question — it must END on a
+            // who-are-you ask ("?" or "?!"), so the first answer is the name.
+            expect(
+              /\bwho(se)?\b[^?]*\?!*$/i.test(line.trim()),
+              `doesn't end asking who they are: "${line}"`,
+            ).toBe(true);
+          }
+        }
       });
 
       it("has a valid energy level", () => {

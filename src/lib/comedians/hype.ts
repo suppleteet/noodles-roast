@@ -39,16 +39,53 @@ export const hype: PersonaConfig = {
     "No long setups — hit hard immediately in every sentence",
   ],
   motionPreferences: ["energetic", "laugh", "emphasis", "shocked"],
-  greetings: [
-    "OH! There they are! I have been WAITING and you just DELIVERED!",
-    "LOOK AT THIS! We are absolutely in business tonight!",
-    "Oh-HO! You showed your face and I am NOT okay! Let's GO!",
-    "WOW! You just made my entire day! Buckle up!",
-    "LADIES AND GENTLEMEN! We have a VOLUNTEER!",
-    "YO! The AUDACITY to show up looking like that! I RESPECT it!",
-    "OKAY OKAY OKAY! This is happening RIGHT NOW!",
-    "HA! I can't even START yet because I'm still PROCESSING this!",
-    "No no no, don't move! Stay EXACTLY like that! This is GOLD!",
-    "OH we are EATING tonight! Look what just walked in!",
-  ],
+  // Canned video-call intros — instant opener when the cannedIntro toggle is on.
+  // The call connecting is the most electrifying event of the day. Every line
+  // ends asking who they are (the opener doubles as the name question).
+  cannedIntros: {
+    clean: {
+      anytime: [
+        "OH! The screen just turned ON and there's a whole PERSON on it! Who am I talking to?!",
+        "WE ARE LIVE! You called, I answered, destiny happened! Who IS this?!",
+        "LOOK at my screen right now! LOOK at it! Who do we have?!",
+        "A video call?! For ME?! Incredible! Who am I looking at?!",
+        "YES! I pick up the phone and THIS is what I get! Who are you?!",
+        "STOP everything! There is a FACE on my screen! Whose face is this?!",
+        "Oh-HO! You found my number! Bold move! Who is this?!",
+        "The call connected and my whole DAY just changed! Who am I talking to?!",
+      ],
+      early: [
+        "It is EARLY and I am already at FULL VOLUME! Who is calling me?!",
+        "The sun JUST came up and you're already DIALING! Respect! Who is this?!",
+        "A sunrise video call?! You maniac! I LOVE it! Who are you?!",
+      ],
+      late: [
+        "It is the MIDDLE of the NIGHT and you called ME! LET'S GO! Who is this?!",
+        "Everyone's asleep and WE'RE just getting started! Who am I talking to?!",
+        "A midnight call! The AUDACITY! The COMMITMENT! Who are you?!",
+      ],
+    },
+    vulgar: {
+      anytime: [
+        "OH! A face just appeared on my screen! Tell me RIGHT NOW — who the hell are you?!",
+        "HOLY shit, the call connected and it's YOU! Who IS this?!",
+        "WE ARE LIVE, baby! Who the hell am I talking to?!",
+        "A video call?! Hell YES! Who am I looking at?!",
+        "STOP everything! There's a damn FACE on my screen! Whose face is this?!",
+        "You found my number?! Ballsy as hell! Who is this?!",
+        "I pick up the phone and THIS shit happens! Who are you?!",
+        "What the fuck, my screen just got INTERESTING! Who am I talking to?!",
+      ],
+      early: [
+        "It's ass o'clock in the morning and I am ALREADY HYPED! Who is this?!",
+        "The sun's barely up and you're already calling! Hell yes! Who are you?!",
+        "A sunrise call?! You absolute maniac! Who the hell is this?!",
+      ],
+      late: [
+        "It's the middle of the damn night and WE'RE WIDE AWAKE! Who is this?!",
+        "Everybody's asleep and you call ME?! Hell YES! Who am I talking to?!",
+        "A midnight call! The fucking AUDACITY! I love it! Who are you?!",
+      ],
+    },
+  },
 };

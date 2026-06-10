@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
-import { NONWORD_FILLERS, CANNED_INTROS, CANNED_INTROS_VULGAR } from "@/lib/scriptLines";
+import { NONWORD_FILLERS } from "@/lib/scriptLines";
+import { PERSONAS } from "@/lib/personas";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
@@ -16,17 +17,6 @@ vi.mock("@/lib/comedianConfig", async (importOriginal) => {
       skipPreGeneration: false,
       skipFiller: false,
       singleJokeMode: false,
-    },
-  };
-});
-
-vi.mock("@/lib/personas", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/personas")>();
-  return {
-    ...original,
-    PERSONAS: {
-      ...original.PERSONAS,
-      kvetch: { ...original.PERSONAS.kvetch, greetings: ["Test greeting."] },
     },
   };
 });
@@ -295,10 +285,12 @@ describe("ComedianBrain — Q&A cycle", () => {
 // ─── Canned intro (instant opener) ─────────────────────────────────────────────
 
 describe("ComedianBrain — canned intro", () => {
+  // Default test persona is kvetch — the brain should pull HIS bank.
+  const KVETCH_INTROS = PERSONAS.kvetch.cannedIntros;
   const ALL_CLEAN_INTROS = [
-    ...CANNED_INTROS.anytime,
-    ...CANNED_INTROS.early,
-    ...CANNED_INTROS.late,
+    ...KVETCH_INTROS.clean.anytime,
+    ...KVETCH_INTROS.clean.early,
+    ...KVETCH_INTROS.clean.late,
   ];
 
   it("speaks an instant canned opener instead of generating an LLM greeting", () => {
@@ -336,11 +328,29 @@ describe("ComedianBrain — canned intro", () => {
 
     const spoken = (deps.queueSpeak as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     const allVulgar = [
-      ...CANNED_INTROS_VULGAR.anytime,
-      ...CANNED_INTROS_VULGAR.early,
-      ...CANNED_INTROS_VULGAR.late,
+      ...KVETCH_INTROS.vulgar.anytime,
+      ...KVETCH_INTROS.vulgar.early,
+      ...KVETCH_INTROS.vulgar.late,
     ];
     expect(allVulgar).toContain(spoken);
+  });
+
+  it("pulls the active persona's bank, not a shared one", () => {
+    vi.stubGlobal("fetch", mockFetchResponse(DEFAULT_JOKE_RESPONSE));
+    const deps = makeDeps({
+      getCannedIntro: vi.fn().mockReturnValue(true),
+      getPersona: vi.fn().mockReturnValue("hype"),
+    });
+    const brain = new ComedianBrain(deps);
+    brain.start();
+
+    const spoken = (deps.queueSpeak as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    const hypeClean = [
+      ...PERSONAS.hype.cannedIntros.clean.anytime,
+      ...PERSONAS.hype.cannedIntros.clean.early,
+      ...PERSONAS.hype.cannedIntros.clean.late,
+    ];
+    expect(hypeClean).toContain(spoken);
   });
 });
 

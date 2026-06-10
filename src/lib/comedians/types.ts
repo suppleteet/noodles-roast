@@ -12,8 +12,9 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   joke/greeting/question generation (assembled in src/lib/prompts.ts).
  * - motionPreferences → listed in the prompt as the character's preferred
  *   body language AND drives per-line voice prosody (voiceMotionPresets.ts).
- * - greetings → canned greeting pool (fallbacks only; greetings are normally
- *   LLM-generated).
+ * - cannedIntros → instant video-call opener pool, spoken (not LLM-generated)
+ *   when the cannedIntro toggle is on. Every line must END by asking who the
+ *   user is — the opener doubles as the name question.
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.
@@ -30,5 +31,38 @@ export interface PersonaConfig {
   /** Persona-specific topics to avoid, merged with GLOBAL_AVOID_TOPICS at prompt build time */
   avoidTopics?: string[];
   motionPreferences: MotionState[];
-  greetings: string[];
+  cannedIntros: CannedIntros;
+}
+
+/** One pool of canned video-call intro lines. `early` (5-9am) and `late`
+ *  (10pm-4am) add time-of-day flavor; `anytime` is the main pool. */
+export interface CannedIntroBank {
+  anytime: string[];
+  early: string[];
+  late: string[];
+}
+
+/** Per-persona canned intro pools, one per content mode. */
+export interface CannedIntros {
+  clean: CannedIntroBank;
+  vulgar: CannedIntroBank;
+}
+
+/** Pick a canned intro for the user's local hour. When an early-morning (5-9)
+ *  or late-night (22-4) bucket applies, there's a 50% chance of using a
+ *  time-flavored line; otherwise (and the other 50%) it's the anytime pool.
+ *  `rand` is injectable for tests. */
+export function pickCannedIntro(
+  intros: CannedIntros,
+  hour: number,
+  vulgar: boolean,
+  rand: () => number = Math.random,
+): string {
+  const bank = vulgar ? intros.vulgar : intros.clean;
+  const timed =
+    hour >= 5 && hour < 10 ? bank.early : hour >= 22 || hour < 5 ? bank.late : null;
+  if (timed && timed.length > 0 && rand() < 0.5) {
+    return timed[Math.floor(rand() * timed.length)];
+  }
+  return bank.anytime[Math.floor(rand() * bank.anytime.length)];
 }
