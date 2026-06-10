@@ -272,10 +272,20 @@ interface SessionState {
   reset: () => void;
 }
 
+/** E2E override for the canned-intro default: the Playwright suites drive the
+ *  LLM-greeting show (greeting → ask_question …) and inject
+ *  `window.__CANNED_INTRO_DEFAULT__ = false` before page scripts run
+ *  (comedianBrainDriver). Production default is ON — see the cannedIntro doc. */
+const cannedIntroDefault: boolean = (() => {
+  if (typeof window === "undefined") return true;
+  const flag = (window as { __CANNED_INTRO_DEFAULT__?: unknown }).__CANNED_INTRO_DEFAULT__;
+  return typeof flag === "boolean" ? flag : true;
+})();
+
 const initialState = {
   phase: "idle" as SessionPhase,
   sessionMode: "conversation" as SessionMode,
-  cannedIntro: true,
+  cannedIntro: cannedIntroDefault,
   llmQuestions: true,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,

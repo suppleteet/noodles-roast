@@ -63,6 +63,10 @@ export class ComedianBrainDriver extends LiveSessionMock {
         hopperMaxSize: 4,
         confirmationEnabled: false, // E2E tests bypass mic — skip confirmation by default
       };
+      // These specs drive the LLM-greeting show (greeting → ask_question → …);
+      // the production canned-intro default would route greeting → wait_answer
+      // and skip the flows under test.
+      (window as unknown as Record<string, unknown>).__CANNED_INTRO_DEFAULT__ = false;
     });
   }
 

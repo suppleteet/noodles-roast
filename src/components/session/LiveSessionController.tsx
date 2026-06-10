@@ -1268,6 +1268,28 @@ export default function LiveSessionController({
       },
     });
 
+    // Start the comedy show: reset per-session metrics/flags and kick the brain.
+    // Idempotent — the canned-intro path calls it BEFORE the Gemini connect,
+    // the normal path after; whichever runs first wins.
+    let brainShowStarted = false;
+    const startBrainShow = () => {
+      if (brainShowStarted || !isRunningRef.current || !brainRef.current) return;
+      brainShowStarted = true;
+      kickoffTimeRef.current = Date.now();
+      useSessionStore.getState().setTimeToFirstSpeechMs(null);
+      useSessionStore.getState().setHasSpokenThisSession(false);
+      // puppetRevealed flips on the first queued audio chunk so setup stays behind loading.
+      useSessionStore.getState().setIsEnding(false);
+      if (!webcamRef.current?.captureFrame()) brainRef.current.setCameraAvailable(false);
+      // Recording is started lazily by startVideoRecordingIfNeeded() at the
+      // moment the puppet is revealed — see scheduleFromPrefetch. This keeps
+      // greeting LLM/TTS prefetch latency out of the front of the MP4.
+      startDrainPolling();
+      brainRef.current.start();
+      kickTownFlavorFetch(); // overlaps first-joke TTS when geo already resolved
+      useSessionStore.getState().logTiming("live: brain started");
+    };
+
     const connectSpanId = useSessionStore.getState().beginSpan("session", "connect");
     try {
       const sessionPromise = openSession(prefetchedTokenPromise);
@@ -1276,6 +1298,15 @@ export default function LiveSessionController({
         useSessionStore.getState().logTiming(`live: mic failed — ${(e as Error).name || "unknown"}`);
         brainRef.current?.setMicAvailable(false);
       });
+
+      // Canned intro needs NO Gemini Live: the opener is a canned line + TTS, and
+      // the mic/STT isn't needed until wait_answer (~10s in — the WS will be open
+      // long before). Waiting for the connect added seconds of dead air on mobile
+      // before a line that's supposed to be instant.
+      if (cannedIntroActive) {
+        useSessionStore.getState().logTiming("live: canned intro — starting show before Gemini connect");
+        startBrainShow();
+      }
 
       // Comedian chat session: prefer the one pre-created at button press (its
       // cold latency overlapped the permission grant). Fall back to creating it
@@ -1326,28 +1357,11 @@ export default function LiveSessionController({
       useSessionStore.getState().endSpan(connectSpanId);
       useSessionStore.getState().logTiming("live: session ready (mic init in background)");
 
-      kickoffTimeRef.current = Date.now();
-      useSessionStore.getState().setTimeToFirstSpeechMs(null);
-      useSessionStore.getState().setHasSpokenThisSession(false);
-      // puppetRevealed flips on the first queued audio chunk so setup stays behind loading.
-      // here or the puppet would flash off mid-mount. Stop/restart paths reset elsewhere.
-      useSessionStore.getState().setIsEnding(false);
-
-      // Check camera availability
-      const frame = webcamRef.current?.captureFrame();
-      if (!frame) brainRef.current.setCameraAvailable(false);
-
-      // Recording is started lazily by startVideoRecordingIfNeeded() at the
-      // moment the puppet is revealed — see scheduleFromPrefetch. This keeps
-      // greeting LLM/TTS prefetch latency out of the front of the MP4.
-
       // Start the comedy show NOW — don't wait for mic to finish initializing.
       // Greeting + first question are TTS-only; mic isn't needed until wait_answer
-      // (~10s later). Pulls TTFS down by the mic init time (~3s).
-      startDrainPolling();
-      brainRef.current.start();
-      kickTownFlavorFetch(); // overlaps first-joke TTS when geo already resolved
-      useSessionStore.getState().logTiming("live: brain started");
+      // (~10s later). Pulls TTFS down by the mic init time (~3s). No-op when the
+      // canned-intro path already started the show before the connect.
+      startBrainShow();
 
       // Mic + VAD setup in background — won't block first speech.
       micPromise.then(() => {
@@ -1368,8 +1382,9 @@ export default function LiveSessionController({
       });
 
       // Send first webcam frame to Gemini for VAD context
-      if (frame) {
-        session.sendRealtimeInput({ video: { data: frame, mimeType: "image/jpeg" } });
+      const firstFrame = webcamRef.current?.captureFrame();
+      if (firstFrame) {
+        session.sendRealtimeInput({ video: { data: firstFrame, mimeType: "image/jpeg" } });
         useSessionStore.getState().logTiming("live: initial frame sent");
       }
 

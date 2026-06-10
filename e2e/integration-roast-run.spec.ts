@@ -67,6 +67,8 @@ test.describe("Integration Roast Run", () => {
         confirmationEnabled: false,
       };
       (window as unknown as Record<string, unknown>).__SESSION_ROTATE_MS__ = 600_000;
+      // Exercise the full LLM-greeting flow, not the canned-intro fast path.
+      (window as unknown as Record<string, unknown>).__CANNED_INTRO_DEFAULT__ = false;
     });
 
     // Forward console errors so flow-ending bugs surface in test output.

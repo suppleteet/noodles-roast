@@ -67,6 +67,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const rafRef = useRef<number>(0);
   const lastAmplitudeRef = useRef<number>(0);
+  const preRollDoneRef = useRef<boolean>(false);
 
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
@@ -78,6 +79,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       // single deterministic code path on every device.
       ctx = new AudioContext({ latencyHint: "playback" });
       ctxRef.current = ctx;
+      preRollDoneRef.current = false; // fresh context → first real buffer gets the silent pre-roll
 
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -205,6 +207,26 @@ export function usePcmPlayback(): PcmPlaybackHandle {
    *  speakers and the recording. Duck-only by contract (see gainForMotion). */
   const scheduleBuffer = useCallback((buffer: AudioBuffer, gain = 1) => {
     const ctx = getOrCreateContext();
+
+    // First real audio on this context: schedule ~200ms of silence in front of it.
+    // warmUp()'s primer only helps if the context was actually RUNNING when it
+    // played — it's called from an async effect (no user gesture), so on iOS the
+    // context can still be suspended then, and the documented first-~500ms output
+    // glitch (pitch warble + crackle) lands on the first spoken line instead.
+    // Scheduling the silence here — same resume, same queue, immediately before
+    // the first speech buffer — burns that startup window on silence
+    // deterministically. Costs 200ms of TTFS once per session.
+    if (!preRollDoneRef.current) {
+      preRollDoneRef.current = true;
+      const silence = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.2), ctx.sampleRate);
+      const silenceSrc = ctx.createBufferSource();
+      silenceSrc.buffer = silence;
+      silenceSrc.connect(analyserRef.current!);
+      const t = Math.max(ctx.currentTime, queueEndRef.current);
+      silenceSrc.start(t);
+      queueEndRef.current = t + silence.duration;
+    }
+
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     if (gain !== 1) {
