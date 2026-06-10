@@ -1,7 +1,8 @@
 import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
 import { VISION_MODEL } from "@/lib/constants";
 import type { BurnIntensity } from "@/lib/prompts";
-import type { PersonaId } from "@/lib/personas";
+import { PERSONAS, type PersonaId } from "@/lib/personas";
+import { pickCannedIntro } from "@/lib/comedians/types";
 import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
@@ -300,4 +301,39 @@ export function prefetchGreetingAudio(
   })();
 
   return buffer;
+}
+
+/** Canned opener prefetch — the line text plus its already-streaming TTS audio. */
+export interface CannedOpenerPrefetch {
+  text: string;
+  motion: MotionState;
+  intensity: number;
+  audio: TtsChunkBuffer;
+}
+
+/**
+ * Canned-intro fast path: the opener line is knowable BEFORE the session
+ * starts (no LLM involved), so pick it now and fire its TTS immediately —
+ * the EL handshake + synthesis (~0.5-2s, the dominant TTFS cost once the
+ * LLM is out of the picture) overlaps the permission/connect window instead
+ * of running after the brain enters greeting. The brain speaks `text`
+ * verbatim via playPrefetchedAudio so audio and transcript always match.
+ *
+ * Returns null when the canned intro doesn't apply (toggle off / Toast).
+ */
+export function prefetchCannedOpener(): CannedOpenerPrefetch | null {
+  const s = useSessionStore.getState();
+  if (!s.cannedIntro || s.experienceType !== "roast") return null;
+  const persona = PERSONAS[s.activePersona];
+  const text = pickCannedIntro(
+    persona.cannedIntros,
+    new Date().getHours(),
+    s.contentMode === "vulgar",
+  );
+  // Same register the brain uses for scripted opening lines (_openerRegister).
+  const motion = persona.motionPreferences[0] ?? "emphasis";
+  const intensity = 0.6;
+  const audio = prefetchGreetingAudio(text, motion, intensity, s.voiceSettings, "roast");
+  s.logTiming(`live: canned opener TTS prefetch fired — "${text.slice(0, 40)}…"`);
+  return { text, motion, intensity, audio };
 }

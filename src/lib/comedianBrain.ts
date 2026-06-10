@@ -172,6 +172,18 @@ export interface ComedianBrainDeps {
    * with this buffer instead of `queueSpeak`, saving the EL round-trip.
    */
   prefetchedGreetingAudio?: Promise<import("@/lib/ttsChunkBuffer").TtsChunkBuffer | null>;
+  /**
+   * Canned-intro opener picked + TTS-prefetched during the permission window
+   * (page.tsx → controller). When set, enterGreeting speaks THIS text (audio
+   * and transcript must match the prefetched synthesis) via playPrefetchedAudio;
+   * when absent, the brain picks a line itself and synthesizes via queueSpeak.
+   */
+  prefetchedCannedOpener?: {
+    text: string;
+    motion: MotionState;
+    intensity: number;
+    audio: import("@/lib/ttsChunkBuffer").TtsChunkBuffer | null;
+  };
   /** Play a buffer that's already being filled by a prefetched TTS call. */
   playPrefetchedAudio?: (
     text: string,
@@ -1124,24 +1136,43 @@ export class ComedianBrain {
     // time-of-day flavored by the user's local clock. Vision analysis keeps running
     // in the background and feeds the vision jokes later.
     if (this._useCannedIntro()) {
-      const vulgar = this.deps.getContentMode() === "vulgar";
-      const persona = PERSONAS[this.deps.getPersona()];
-      const opener = pickCannedIntro(persona.cannedIntros, new Date().getHours(), vulgar);
+      // Prefer the opener prefetched during the permission window — its TTS audio
+      // is already streaming in, so playback starts without the EL round-trip.
+      // The prefetched TEXT must be spoken verbatim (it's what was synthesized).
+      const pre = this.deps.prefetchedCannedOpener;
+      let opener: string;
+      let openerMotion: MotionState;
+      let openerIntensity: number;
+      if (pre) {
+        opener = pre.text;
+        openerMotion = pre.motion;
+        openerIntensity = pre.intensity;
+      } else {
+        const vulgar = this.deps.getContentMode() === "vulgar";
+        const persona = PERSONAS[this.deps.getPersona()];
+        opener = pickCannedIntro(persona.cannedIntros, new Date().getHours(), vulgar);
+        // Deliver in the persona's own register — Kvetch opens deadpan,
+        // Hype opens energetic (see _openerRegister).
+        [openerMotion, openerIntensity] = this._openerRegister();
+      }
       const nameQ = this.shuffledQuestions.find((q) => q.id === "name") ?? this.shuffledQuestions[0];
       if (nameQ) {
         this.currentQuestion = nameQ;
         this.askedQuestionIds.add(nameQ.id);
       }
-      // Deliver the opener in the persona's own register — Kvetch opens deadpan,
-      // Hype opens energetic (see _openerRegister).
-      const [openerMotion, openerIntensity] = this._openerRegister();
-      this.deps.queueSpeak(opener, openerMotion, openerIntensity);
+      if (pre?.audio && this.deps.playPrefetchedAudio) {
+        // playPrefetchedAudio falls back to queueSpeak internally if the buffer failed.
+        this.deps.playPrefetchedAudio(pre.text, pre.audio, openerMotion, openerIntensity);
+        this.deps.logTiming("brain: canned intro opener (prefetched TTS audio)");
+      } else {
+        this.deps.queueSpeak(opener, openerMotion, openerIntensity);
+        this.deps.logTiming("brain: canned intro opener (no LLM, no vision wait)");
+      }
       this.deps.setCurrentQuestion(opener);
       this._addLedger("question", opener, []);
       this.deps.setMotion(openerMotion, openerIntensity);
       this.greetingSpeechQueued = true;
       this.openerIsNameAsk = true; // opener already asked the name → go to wait_answer
-      this.deps.logTiming("brain: canned intro opener (no LLM, no vision wait)");
       this._maybeAdvanceFromGreeting();
       return;
     }

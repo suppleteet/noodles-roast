@@ -24,7 +24,11 @@ import type { MotionState } from "@/lib/motionStates";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
-import { prefetchParallelVisionAndGreeting } from "@/lib/greetingPrefetch";
+import {
+  prefetchParallelVisionAndGreeting,
+  prefetchCannedOpener,
+  type CannedOpenerPrefetch,
+} from "@/lib/greetingPrefetch";
 import { voiceSettingsForMotion, gainForMotion } from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 
@@ -60,6 +64,9 @@ interface Props {
   /** Audio chunks already streaming in for the greeting joke — saves the
    *  EL handshake/synth round-trip when the brain reaches enterGreeting. */
   warmupGreetingAudio?: Promise<TtsChunkBuffer | null> | null;
+  /** Canned-intro opener picked + TTS-prefetched in page.tsx during the
+   *  permission window. Null/absent when the canned intro doesn't apply. */
+  warmupCannedOpener?: Promise<CannedOpenerPrefetch | null> | null;
   mockMode?: boolean;
 }
 
@@ -72,6 +79,7 @@ export default function LiveSessionController({
   prefetchedComedianSessionPromise,
   warmupGreetingPrefetch,
   warmupGreetingAudio,
+  warmupCannedOpener,
   mockMode = false,
 }: Props) {
   // Only subscribe to phase + pendingDebugTranscription for lifecycle/debug.
@@ -252,6 +260,8 @@ export default function LiveSessionController({
     const gen = ttsGenerationRef.current;
     wasDrainedRef.current = false;
     const audio = new TtsChunkBuffer();
+    const sinkOpenedAt = Date.now();
+    let firstAudioLogged = false;
     const ttsSpanId = useSessionStore.getState().beginSpan("tts", `stream:${motion}`);
     let spanEnded = false;
     const endSpan = () => {
@@ -280,6 +290,14 @@ export default function LiveSessionController({
     return {
       pushAudio(b64: string) {
         if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
+        if (!firstAudioLogged) {
+          // The streamed-joke path had no audio-arrival telemetry — EL synthesis
+          // lag here is invisible in the log yet is the main mid-set pause source.
+          firstAudioLogged = true;
+          useSessionStore
+            .getState()
+            .logTiming(`tts-stream: first audio ${Date.now() - sinkOpenedAt}ms (${motion})`);
+        }
         audio.push(b64);
       },
       finalize(text: string) {
@@ -1167,11 +1185,18 @@ export default function LiveSessionController({
       return s.cannedIntro && s.experienceType === "roast";
     })();
 
+    let cannedOpener: CannedOpenerPrefetch | null = null;
     if (cannedIntroActive) {
       // The brain opens with an instant canned line — an LLM greeting prefetch
-      // would just be discarded, so don't spend the call.
+      // would just be discarded, so don't spend the call. The opener's TTS was
+      // prefetched in page.tsx during the permission window; fall back to firing
+      // it here (still ahead of brain.start) if that warmup is missing/failed.
       greetingPrefetch = Promise.resolve(null);
-      useSessionStore.getState().logTiming("live: canned intro on — skipping greeting prefetch");
+      cannedOpener = (warmupCannedOpener ? await warmupCannedOpener.catch(() => null) : null)
+        ?? prefetchCannedOpener();
+      useSessionStore.getState().logTiming(
+        `live: canned intro on — opener ${cannedOpener ? "TTS prefetched" : "unavailable (brain will pick)"}`,
+      );
     } else if (warmupGreetingPrefetch) {
       greetingPrefetch = warmupGreetingPrefetch.catch(() => null);
       useSessionStore.getState().logTiming("live: using pre-roast greeting warmup");
@@ -1231,6 +1256,7 @@ export default function LiveSessionController({
       revealSession: () => useSessionStore.getState().setHasSpokenThisSession(true),
       prefetchedGreeting: greetingPrefetch,
       prefetchedGreetingAudio: warmupGreetingAudio ?? undefined,
+      prefetchedCannedOpener: cannedOpener ?? undefined,
       playPrefetchedAudio,
       saveCritique: (text, ctx) => {
         fetch("/api/save-feedback", {

@@ -118,6 +118,12 @@ function MainApp() {
   /** Vision analyze + greeting joke — starts as soon as we have a MediaStream, before phase is roasting */
   const warmupGreetingPromiseRef = useRef<Promise<JokeResponse | null> | null>(null);
   const warmupGreetingAudioRef = useRef<Promise<TtsChunkBuffer | null> | null>(null);
+  /** Canned-intro opener (text + streaming TTS audio) — picked + fired at the same
+   *  warmup point so the EL round-trip overlaps the permission/connect window.
+   *  Promise-shaped because the greetingPrefetch module is dynamically imported. */
+  const warmupCannedOpenerRef = useRef<Promise<
+    import("@/lib/greetingPrefetch").CannedOpenerPrefetch | null
+  > | null>(null);
 
   const webcamRef = useRef<WebcamCaptureHandle>(null);
   const audioPlayerRef = useRef<AudioPlayerHandle>(null);
@@ -215,6 +221,7 @@ function MainApp() {
     if (sessionMode !== "conversation" || mockModeRef.current) {
       warmupGreetingPromiseRef.current = null;
       warmupGreetingAudioRef.current = null;
+      warmupCannedOpenerRef.current = null;
       return;
     }
 
@@ -226,14 +233,21 @@ function MainApp() {
 
     // Canned intro (roast only): the brain opens with an instant canned line, so a
     // prefetched LLM greeting would just be discarded — skip the wasted call.
+    // Instead pick the canned line NOW and stream its TTS into a buffer, so the
+    // EL handshake + synthesis overlaps the permission/connect window and the
+    // opener plays the moment the brain enters greeting.
     {
       const s = useSessionStore.getState();
       if (s.cannedIntro && s.experienceType === "roast") {
         warmupGreetingPromiseRef.current = null;
         warmupGreetingAudioRef.current = null;
+        warmupCannedOpenerRef.current = greetingPrefetchModulePromise
+          .then((m) => m.prefetchCannedOpener())
+          .catch(() => null);
         return;
       }
     }
+    warmupCannedOpenerRef.current = null;
 
     warmupGreetingPromiseRef.current = (async () => {
       const { prefetchParallelVisionAndGreeting } = await greetingPrefetchModulePromise;
@@ -613,6 +627,7 @@ function MainApp() {
       pendingModelFallbackRestartRef.current = false;
       warmupGreetingPromiseRef.current = null;
       warmupGreetingAudioRef.current = null;
+      warmupCannedOpenerRef.current = null;
       setPhase("idle", "SESSION_RESTART");
     }
   }, [phase]);
@@ -673,6 +688,7 @@ function MainApp() {
           prefetchedComedianSessionPromise={comedianSessionPromiseRef.current}
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
           warmupGreetingAudio={warmupGreetingAudioRef.current}
+          warmupCannedOpener={warmupCannedOpenerRef.current}
           mockMode={mockMode}
         />
       )}
@@ -795,6 +811,7 @@ function MainApp() {
             acceptModelFallback();
             warmupGreetingPromiseRef.current = null;
             warmupGreetingAudioRef.current = null;
+            warmupCannedOpenerRef.current = null;
             if (phase === "roasting") {
               // Bounce roasting → stopped (LiveSessionController teardown) →
               // idle (effect above lands on Landing once stop completes).
