@@ -56,6 +56,41 @@ export interface PcmPlaybackHandle {
  *  saved video keeps full headroom. */
 const MASTER_PLAYBACK_GAIN = 0.7;
 
+/** How long after an AudioContext starts RUNNING its output is untrustworthy.
+ *  iOS plays roughly the first ~500ms at the wrong rate (pitch warble +
+ *  crackle); a 200ms pre-roll field-tested as too short — the opener still
+ *  came out high-pitched. 600ms covers the documented window with margin. */
+const CTX_GLITCH_WINDOW_MS = 600;
+
+// Module-level shared context so the Start-button GESTURE can create and
+// resume it (page.tsx → warmSharedAudioContext). Resume outside a gesture is
+// best-effort on iOS; inside the gesture it's guaranteed — and by the time the
+// canned opener plays (~2s later) the glitch window has burned off on silence.
+let sharedCtx: AudioContext | null = null;
+let sharedCtxRunningSince: number | null = null;
+
+function trackCtxRunning(ctx: AudioContext): void {
+  const mark = () => {
+    if (ctx.state === "running" && sharedCtxRunningSince === null) {
+      sharedCtxRunningSince = performance.now();
+    }
+  };
+  mark();
+  ctx.addEventListener("statechange", mark);
+}
+
+/** Create + resume the playback AudioContext from a user gesture (Start button).
+ *  Safe to call repeatedly; no-op on the server. */
+export function warmSharedAudioContext(): void {
+  if (typeof window === "undefined" || typeof AudioContext === "undefined") return;
+  if (!sharedCtx || sharedCtx.state === "closed") {
+    sharedCtx = new AudioContext({ latencyHint: "playback" });
+    sharedCtxRunningSince = null;
+    trackCtxRunning(sharedCtx);
+  }
+  if (sharedCtx.state === "suspended") void sharedCtx.resume();
+}
+
 export function usePcmPlayback(): PcmPlaybackHandle {
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -72,14 +107,22 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") {
-      // Use device native sample rate (don't request 24kHz). iOS Safari sometimes
-      // honors the request, sometimes coerces silently to 48kHz, and on the latter
-      // path its built-in AudioBufferSourceNode resampler glitches the first ~500ms
-      // of audio (chipmunk effect). Resampling ourselves in enqueueChunk gives a
-      // single deterministic code path on every device.
-      ctx = new AudioContext({ latencyHint: "playback" });
+      // Prefer the gesture-warmed shared context (warmSharedAudioContext at the
+      // Start button) — it's been running since the button press, so the iOS
+      // startup glitch window has already burned off. Fall back to creating one
+      // here (device native sample rate — don't request 24kHz; iOS sometimes
+      // coerces silently to 48kHz and its implicit resampler glitches. We
+      // resample ourselves in enqueueChunk for one deterministic path).
+      if (sharedCtx && sharedCtx.state !== "closed") {
+        ctx = sharedCtx;
+      } else {
+        ctx = new AudioContext({ latencyHint: "playback" });
+        sharedCtx = ctx;
+        sharedCtxRunningSince = null;
+        trackCtxRunning(ctx);
+      }
       ctxRef.current = ctx;
-      preRollDoneRef.current = false; // fresh context → first real buffer gets the silent pre-roll
+      preRollDoneRef.current = false; // fresh context binding → first real buffer gets the silent pre-roll
 
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -208,23 +251,29 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const scheduleBuffer = useCallback((buffer: AudioBuffer, gain = 1) => {
     const ctx = getOrCreateContext();
 
-    // First real audio on this context: schedule ~200ms of silence in front of it.
-    // warmUp()'s primer only helps if the context was actually RUNNING when it
-    // played — it's called from an async effect (no user gesture), so on iOS the
-    // context can still be suspended then, and the documented first-~500ms output
-    // glitch (pitch warble + crackle) lands on the first spoken line instead.
-    // Scheduling the silence here — same resume, same queue, immediately before
-    // the first speech buffer — burns that startup window on silence
-    // deterministically. Costs 200ms of TTFS once per session.
+    // First real audio on this context binding: cover whatever remains of the
+    // startup glitch window (CTX_GLITCH_WINDOW_MS after the context started
+    // RUNNING) with silence. When the context was gesture-warmed at the Start
+    // button, it's been running for seconds and this is a no-op — zero TTFS
+    // cost. When it was created late (fallback), the full window is pre-rolled
+    // so the glitch burns on silence instead of the opener's first words.
     if (!preRollDoneRef.current) {
       preRollDoneRef.current = true;
-      const silence = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.2), ctx.sampleRate);
-      const silenceSrc = ctx.createBufferSource();
-      silenceSrc.buffer = silence;
-      silenceSrc.connect(analyserRef.current!);
-      const t = Math.max(ctx.currentTime, queueEndRef.current);
-      silenceSrc.start(t);
-      queueEndRef.current = t + silence.duration;
+      const runningMs =
+        sharedCtxRunningSince === null ? 0 : performance.now() - sharedCtxRunningSince;
+      const needMs = Math.max(0, CTX_GLITCH_WINDOW_MS - runningMs);
+      if (needMs > 0) {
+        const silence = ctx.createBuffer(1, Math.round((ctx.sampleRate * needMs) / 1000), ctx.sampleRate);
+        const silenceSrc = ctx.createBufferSource();
+        silenceSrc.buffer = silence;
+        silenceSrc.connect(analyserRef.current!);
+        const t = Math.max(ctx.currentTime, queueEndRef.current);
+        silenceSrc.start(t);
+        queueEndRef.current = t + silence.duration;
+        useSessionStore.getState().logTiming(
+          `audio: pre-roll ${Math.round(needMs)}ms silence (ctx running ${Math.round(runningMs)}ms)`,
+        );
+      }
     }
 
     const src = ctx.createBufferSource();
@@ -300,6 +349,12 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       flush();
       if (ctxRef.current?.state !== "closed") {
         ctxRef.current?.close();
+      }
+      // Release the shared singleton if it was ours — the next session's Start
+      // gesture creates and warms a fresh one.
+      if (sharedCtx === ctxRef.current) {
+        sharedCtx = null;
+        sharedCtxRunningSince = null;
       }
     };
   }, [flush]);
