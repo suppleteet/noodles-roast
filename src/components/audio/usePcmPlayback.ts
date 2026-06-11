@@ -57,15 +57,17 @@ export interface PcmPlaybackHandle {
 const MASTER_PLAYBACK_GAIN = 0.7;
 
 /** How long after an AudioContext starts RUNNING its output is untrustworthy.
- *  iOS plays roughly the first ~500ms at the wrong rate (pitch warble +
- *  crackle); a 200ms pre-roll field-tested as too short — the opener still
- *  came out high-pitched. 600ms covers the documented window with margin. */
+ *  The first ~500ms can play at the wrong rate (pitch warble + crackle) —
+ *  field-reproduced on Chrome (Windows and Android; iOS documents the same
+ *  WebKit behavior). A 200ms pre-roll tested as too short — the opener still
+ *  came out high-pitched. 600ms covers the observed window with margin. */
 const CTX_GLITCH_WINDOW_MS = 600;
 
 // Module-level shared context so the Start-button GESTURE can create and
 // resume it (page.tsx → warmSharedAudioContext). Resume outside a gesture is
-// best-effort on iOS; inside the gesture it's guaranteed — and by the time the
-// canned opener plays (~2s later) the glitch window has burned off on silence.
+// best-effort under autoplay policies; inside the gesture it's guaranteed —
+// and by the time the canned opener plays (~2s later) the glitch window has
+// burned off on silence.
 let sharedCtx: AudioContext | null = null;
 let sharedCtxRunningSince: number | null = null;
 

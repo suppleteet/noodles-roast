@@ -12,7 +12,7 @@
 | @react-three/drei | ^10.3.5 | useGLTF, etc. |
 | @types/three | ^0.175.0 | must match three version |
 | zustand | ^5.0.3 | `create<State>((set) => ...)` — NOT curried v4 form |
-| @anthropic-ai/sdk | ^0.39.0 | installed but NOT used in routes yet (Gemini is) |
+| @anthropic-ai/sdk | ^0.39.0 | Used by `llmClient.ts` for `claude-*` models |
 | @google/genai | ^1.45.0 | `new GoogleGenAI({ apiKey })` → `ai.models.generateContent()` |
 | elevenlabs | ^1.57.0 | installed but TTS uses raw fetch for streaming |
 | @ricky0123/vad-web | ^0.0.30 | Silero VAD — fast end-of-speech detection in browser |
@@ -144,6 +144,8 @@ src/lib/comedianConfig.ts  All timing/threshold tuning parameters (window-inject
 src/lib/questionBank.ts    8 questions with prod lines + confirm templates (hot-swappable)
 src/lib/transcriptConfidence.ts  Heuristic confidence scoring for STT transcriptions
 src/lib/visionDiff.ts      Observation diff + interest scoring
+src/lib/usageTracker.ts    In-memory LLM/TTS usage + cost tracking (surfaced at /api/debug-usage)
+src/lib/devUnlock.ts       Prod dev-UI unlock: tap the build stamp 5x in 2.5s → localStorage flag; IS_DEV checks consult useDevUnlock()/getDevUnlocked()
 src/store/             Zustand store (useSessionStore.ts)
 public/worklets/       AudioWorklet processors (mic-capture-processor.js)
 
@@ -180,6 +182,16 @@ src/puppet/            Paper-thin puppet-specific layer
 11. **Engine signals abstraction**: Rig components (JawFlap, HeadMotion) NEVER read from `useSessionStore` directly. They read from `TickContext.signals: Record<string, number>`. In session mode the consumer populates this from the store; in edit mode it comes from `RigEditStore.previewSignals`. Component signal declarations (`SignalDef[]`) auto-generate the preview sliders.
 12. **No per-frame allocations in engine**: Inside `tick()` callbacks, NEVER use `new THREE.Vector3()` / `new THREE.Quaternion()` / `new THREE.Matrix4()`. All scratch objects must be pre-allocated as class fields and mutated via `.set()` / `.copy()`.
 
+## Monetization (Square Roast Passes)
+
+Feature-flagged by `NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED` (off → all monetization UI/routes are inert). Flow:
+
+- **Catalog** — `src/lib/monetizationCatalog.ts` defines the SKUs (`solo-roast` 1 credit / `party-pack` 6 / `event-pack` 40) and `paymentsEnabled()`.
+- **Buyer identity** — anonymous `roastie_buyer_id` httpOnly cookie (1 year), minted by `monetizationCookies.ts`. No accounts.
+- **Checkout** — `POST /api/monetization/checkout` creates a pending ledger entry and a Square Payment Link (`squareCheckout.ts`; needs `SQUARE_ACCESS_TOKEN` + `SQUARE_LOCATION_ID`, env picked by `SQUARE_ENVIRONMENT`).
+- **Payment confirmation** — two paths: the Square webhook (`/api/monetization/webhook`, HMAC-verified when `SQUARE_WEBHOOK_SIGNATURE_KEY` is set, idempotent via `processedWebhookEvents`) AND a polling fallback — `GET /api/monetization/status` calls `monetizationSync.ts` to reconcile pending checkouts against the Square Payments API, so credits land even if the webhook never fires (e.g., local dev).
+- **Ledger** — `entitlementLedger.ts`: buyers/checkouts/credits in a JSON file (path override `ROASTIE_LEDGER_PATH`). `POST /api/monetization/redeem` consumes one credit to start a session.
+
 ## Test Config Injection
 
 Tests inject fast timing via `window.__COMEDIAN_CONFIG__`:
@@ -200,13 +212,20 @@ await page.addInitScript(() => {
 ## Commands
 
 ```bash
-npm run dev           # Next.js dev server
+npm run dev           # Next.js dev server (webpack, not turbopack)
+npm run build         # next build --webpack
 npm run typecheck     # tsc --noEmit
-npm run lint          # next lint
+npm run lint          # alias for typecheck (no separate ESLint pass)
 npm test              # vitest run (single pass)
 npm run test:watch    # vitest watch mode
 npm run test:coverage
 npm run test:e2e      # Playwright (requires dev server on :3000)
+npm run test:e2e:ui   # Playwright UI mode
+
+# Single test file / single test:
+npx vitest run src/__tests__/lib/comedianBrain.test.ts
+npx vitest run -t "name of test"
+npx playwright test e2e/comedian-brain.spec.ts
 
 # Opt-in: integration roast-run that hits real LLM APIs (costs $).
 # Catches prompt-rule violations and repeat-question / flow bugs that mocks miss.
@@ -216,6 +235,8 @@ RUN_INTEGRATION_TEST=1 npx playwright test e2e/integration-roast-run.spec.ts
 ## Debugging Sessions
 
 `.debug/last-session.json` holds the timing log + transcript of the most recent local session — check it first when debugging TTFS, turn-taking, or flow issues. Lines like `brain: TTFS 18097ms`, `tts: first audio 6813ms`, and `brain: greeting prefetch slow — generating fast fallback` pinpoint where startup time went.
+
+**Test environments**: Tyler develops on **Windows** (desktop Chrome against `localhost:3000`) and tests mobile on **Android** (Chrome, against the Vercel deploy or LAN dev server). He does NOT test on iOS/Safari — when diagnosing audio/browser bugs from his session reports, the platform is Windows or Android, never iOS. Browser-quirk comments in the audio code citing iOS are documented WebKit behaviors kept for safety, but any glitch Tyler actually *hears* happened on Chrome (Windows/Android), so don't attribute his repros to iOS-only behavior.
 
 ## Path Alias
 
@@ -228,6 +249,28 @@ GEMINI_API_KEY
 ELEVENLABS_API_KEY
 ELEVENLABS_VOICE_ID   (optional, defaults to Rachel)
 BLOB_READ_WRITE_TOKEN (Vercel Blob — feedback persistence)
+
+# Optional — multi-provider joke generation (llmClient.ts). Only needed if the
+# corresponding model family is selected in the UI; Gemini-only works without these.
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+
+# Optional — ElevenLabs tuning overrides (defaults live in code)
+ELEVENLABS_TOAST_VOICE_ID
+ELEVENLABS_MODEL_ID
+ELEVENLABS_API_HOST
+ELEVENLABS_AUTO_MODE
+ELEVENLABS_CHUNK_SCHEDULE
+
+# Optional — Square monetization (see Monetization section).
+# NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED off → everything below is unused.
+NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED
+SQUARE_ACCESS_TOKEN
+SQUARE_LOCATION_ID
+SQUARE_ENVIRONMENT              (sandbox | production)
+SQUARE_WEBHOOK_SIGNATURE_KEY
+SQUARE_WEBHOOK_NOTIFICATION_URL
+ROASTIE_LEDGER_PATH             (override ledger JSON location)
 
 # Optional — enables auto-upload of saved MP4s to Google Drive.
 # Missing any one of these silently skips the upload (local save still works).
