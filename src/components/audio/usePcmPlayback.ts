@@ -264,6 +264,11 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       const runningMs =
         sharedCtxRunningSince === null ? 0 : performance.now() - sharedCtxRunningSince;
       const needMs = Math.max(0, CTX_GLITCH_WINDOW_MS - runningMs);
+      // Always log the first-buffer context state — this line is how session
+      // logs prove which warm path ran when diagnosing pitched/garbled openers.
+      useSessionStore.getState().logTiming(
+        `audio: first buffer — ctx rate=${ctx.sampleRate} state=${ctx.state} running=${Math.round(runningMs)}ms pre-roll=${Math.round(needMs)}ms`,
+      );
       if (needMs > 0) {
         const silence = ctx.createBuffer(1, Math.round((ctx.sampleRate * needMs) / 1000), ctx.sampleRate);
         const silenceSrc = ctx.createBufferSource();
@@ -272,9 +277,6 @@ export function usePcmPlayback(): PcmPlaybackHandle {
         const t = Math.max(ctx.currentTime, queueEndRef.current);
         silenceSrc.start(t);
         queueEndRef.current = t + silence.duration;
-        useSessionStore.getState().logTiming(
-          `audio: pre-roll ${Math.round(needMs)}ms silence (ctx running ${Math.round(runningMs)}ms)`,
-        );
       }
     }
 

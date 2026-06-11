@@ -51,10 +51,14 @@ describe("PersonaConfig shape", () => {
         for (const mode of ["clean", "vulgar"] as const) {
           const bank = p.cannedIntros[mode];
           for (const line of [...bank.anytime, ...bank.early, ...bank.late]) {
-            // The opener doubles as the name question — it must END on a
-            // who-are-you ask ("?" or "?!"), so the first answer is the name.
+            // The opener doubles as the name question — it must END on an
+            // identity ask ("?" or "?!") so the first answer is the name.
+            // Accepts who-questions ("who is this?") and direct name asks
+            // ("what's your name?").
             expect(
-              /\bwho(se)?\b[^?]*\?!*$/i.test(line.trim()),
+              /\b(?:who(?:se)?\b[^?]*|what(?:'s| is)? your name\b[^?]*|what should i call you\b[^?]*)\?!*$/i.test(
+                line.trim(),
+              ),
               `doesn't end asking who they are: "${line}"`,
             ).toBe(true);
           }

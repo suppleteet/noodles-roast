@@ -1165,7 +1165,7 @@ export class ComedianBrain {
         this.deps.playPrefetchedAudio(pre.text, pre.audio, openerMotion, openerIntensity);
         this.deps.logTiming("brain: canned intro opener (prefetched TTS audio)");
       } else {
-        this.deps.queueSpeak(opener, openerMotion, openerIntensity);
+        this.deps.queueSpeak(opener, openerMotion, openerIntensity, undefined, this._openerVoiceOverride());
         this.deps.logTiming("brain: canned intro opener (no LLM, no vision wait)");
       }
       this.deps.setCurrentQuestion(opener);
@@ -1207,7 +1207,7 @@ export class ComedianBrain {
         const fallback = this._greetingFallbackLine();
         const [fbMotion, fbIntensity] = this._openerRegister();
         this.deps.logTiming("brain: greeting failed — using short fallback");
-        this.deps.queueSpeak(fallback, fbMotion, fbIntensity);
+        this.deps.queueSpeak(fallback, fbMotion, fbIntensity, undefined, this._openerVoiceOverride());
         this._addLedger("joke", fallback, []);
       } else {
         const joke = response.jokes[0];
@@ -1276,6 +1276,19 @@ export class ComedianBrain {
   private _openerRegister(): [MotionState, number] {
     if (this._isToast()) return ["energetic", 0.8];
     return [PERSONAS[this.deps.getPersona()].motionPreferences[0] ?? "emphasis", 0.6];
+  }
+
+  /** Voice override for scripted opening lines. The screech on the first line
+   *  tracks the style axis: the Roast base voice runs style=1.0 and the motion
+   *  deltas barely lower it (deadpan: -0.18×0.6 → ~0.89) — still effectively
+   *  style-maxed, which reads high-pitched/shrill on a cold open. Cap style
+   *  hard for scripted openers; jokes keep the expressive base. Toast's base
+   *  style is already moderate — no cap needed. */
+  private _openerVoiceOverride(): { style: number } | undefined {
+    if (this._isToast()) return undefined;
+    const base = this.deps.getVoiceSettings?.();
+    const style = Math.min(base?.style ?? 1, 0.5);
+    return { style };
   }
 
   /** Canned greeting line matched to the experience — Toast must never open in the roast voice. */
@@ -2724,6 +2737,23 @@ export class ComedianBrain {
       .then((data: { question: string; jokeContext: string }) => {
         if (this.state !== "ask_question") return; // stale
         const questionText = data.question;
+        // The route returns a FIXED fallback ("So what's going on with you?")
+        // when its LLM call fails — during a provider outage every cycle gets
+        // the same text and the puppet asked it three times in a row in a real
+        // session. If we've already asked this exact question, divert to an
+        // unasked bank question instead.
+        if (this._questionAlreadyAsked(questionText)) {
+          const bankQ = this._nextValidQuestion();
+          if (bankQ) {
+            this.askedQuestionIds.add(bankQ.id);
+            this.currentQuestion = bankQ;
+            this._queueQuestionWithBridge(this._pickQuestionText(bankQ));
+            this.deps.logTiming(
+              `brain: contextual question repeated — using bank "${bankQ.id}" instead`,
+            );
+            return;
+          }
+        }
         this.currentQuestion = {
           id: `generated_${Date.now()}`,
           question: questionText,
@@ -2865,6 +2895,12 @@ export class ComedianBrain {
       .then((data: { question: string; jokeContext: string }) => {
         if (!data?.question) return;
         if (this.preQueuedQuestion) return; // raced — keep whichever landed first
+        // Route-level LLM failure returns a fixed fallback question — don't
+        // pre-queue a repeat; enterAskQuestion will pick a bank question instead.
+        if (this._questionAlreadyAsked(data.question)) {
+          this.deps.logTiming("brain: pre-fetched contextual is a repeat — discarding");
+          return;
+        }
         this.preQueuedQuestion = {
           id: `generated_${Date.now()}`,
           question: data.question,
@@ -3399,6 +3435,12 @@ export class ComedianBrain {
   /** All question texts asked so far. Passed to generate-question to prevent topic repetition. */
   private _getPreviousQuestionTexts(): string[] {
     return this.ledger.filter((e) => e.type === "question").map((e) => e.text);
+  }
+
+  /** Exact-text repeat check (case-insensitive) against every question asked so far. */
+  private _questionAlreadyAsked(text: string): boolean {
+    const needle = text.trim().toLowerCase();
+    return this._getPreviousQuestionTexts().some((q) => q.trim().toLowerCase() === needle);
   }
 
   /** Full ledger summary for throwback references — all facts learned so far. */

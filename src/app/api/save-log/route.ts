@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, rename } from "fs/promises";
 import path from "path";
+import { randomUUID } from "crypto";
 
 const DEBUG_DIR = path.join(process.cwd(), ".debug");
 const MAX_BODY_BYTES = 1_000_000; // 1MB
@@ -49,7 +50,15 @@ export async function POST(req: NextRequest) {
       transcriptHistory: body.transcriptHistory ?? [],
     }, null, 2);
 
-    await writeFile(path.join(DEBUG_DIR, "last-session.json"), content, "utf-8");
+    // Atomic write: session end can fire two saves nearly simultaneously
+    // (end-trigger + beforeunload), and two concurrent writeFile calls to the
+    // same path interleave — a real log came out as new JSON with a stale tail
+    // of the previous longer write appended. Write to a unique temp file, then
+    // rename over the target (replace-existing is atomic per volume).
+    const target = path.join(DEBUG_DIR, "last-session.json");
+    const tmp = path.join(DEBUG_DIR, `.last-session.${randomUUID()}.tmp`);
+    await writeFile(tmp, content, "utf-8");
+    await rename(tmp, target);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -334,10 +334,16 @@ export function prefetchCannedOpener(): CannedOpenerPrefetch | null {
     new Date().getHours(),
     s.contentMode === "vulgar",
   );
-  // Same register the brain uses for scripted opening lines (_openerRegister).
+  // Same register the brain uses for scripted opening lines (_openerRegister),
+  // and the same hard style cap (_openerVoiceOverride): the Roast base voice is
+  // style-maxed (1.0) and motion deltas barely lower it — style ~0.9 on a cold
+  // open is the high-pitched/shrill first line. Jokes keep the expressive base.
   const motion = persona.motionPreferences[0] ?? "emphasis";
   const intensity = 0.6;
-  const audio = prefetchGreetingAudio(text, motion, intensity, s.voiceSettings, "roast");
-  s.logTiming(`live: canned opener TTS prefetch fired — "${text.slice(0, 40)}…"`);
+  const cappedVoice = { ...s.voiceSettings, style: Math.min(s.voiceSettings.style, 0.5) };
+  const audio = prefetchGreetingAudio(text, motion, intensity, cappedVoice, "roast");
+  s.logTiming(
+    `live: canned opener TTS prefetch fired (style=${cappedVoice.style}) — "${text.slice(0, 40)}…"`,
+  );
   return { text, motion, intensity, audio };
 }
