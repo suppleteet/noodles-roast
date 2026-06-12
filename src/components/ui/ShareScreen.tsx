@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useRef, useState, useEffect } from "react";
+import { upload } from "@vercel/blob/client";
 import { useSessionStore } from "@/store/useSessionStore";
 import FeedbackBox from "@/components/ui/FeedbackBox";
 import { useDevUnlock } from "@/lib/devUnlock";
@@ -16,12 +17,9 @@ interface SaveVideoResponse {
 type UploadState =
   | { status: "idle" }
   | { status: "uploading"; uploadedBytes: number; totalBytes: number }
+  | { status: "finalizing" }
   | { status: "complete"; webViewLink: string }
   | { status: "error"; message: string };
-
-function preferredFilename(filename: string | null, _blob: Blob | null): string {
-  return filename ?? "roastie.mp4";
-}
 
 /** Build the last-N lines of the conversation as role-prefixed text for /api/name-video. */
 function buildTranscriptForNaming(
@@ -42,7 +40,7 @@ export default function ShareScreen() {
   const [playing, setPlaying] = useState(false);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [mp4Blob, setMp4Blob] = useState<Blob | null>(null);
+  const [fancyName, setFancyName] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [savedFolder, setSavedFolder] = useState<string | null>(null);
   const [savedFilename, setSavedFilename] = useState<string | null>(null);
@@ -52,9 +50,15 @@ export default function ShareScreen() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const savedBlobRef = useRef<Blob | null>(null);
 
-  const shareBlob = mp4Blob ?? videoBlob;
+  // The recording the client holds IS the source of truth — Download and
+  // Send-to-Tyler both work straight from it, so they don't depend on the
+  // server having stashed a copy (which doesn't survive Vercel serverless).
+  const shareBlob = videoBlob;
   const recordingMissing = !recordedBlob || recordedBlob.size === 0;
-  const shareFilename = preferredFilename(savedFilename, shareBlob);
+  const shareFilename = useMemo(
+    () => (fancyName ? `${fancyName}.mp4` : "roastie.mp4"),
+    [fancyName],
+  );
   const hasNativeShare = typeof navigator !== "undefined" && "share" in navigator;
 
   const canNativeShare = useMemo(() => {
@@ -73,7 +77,7 @@ export default function ShareScreen() {
     savedBlobRef.current = recordedBlob;
 
     setVideoBlob(recordedBlob);
-    setMp4Blob(null);
+    setFancyName(null);
     setSavedFolder(null);
     setSavedFilename(null);
     setConverting(true);
@@ -105,40 +109,32 @@ export default function ShareScreen() {
             suggestedName = typeof data.filename === "string" ? data.filename : null;
           }
         } catch {
-          // Best-effort — save-video will fall back to its random adjective-noun name.
+          // Best-effort — Download/Share fall back to "roastie.mp4".
         }
+        setFancyName(suggestedName);
 
-        const saveUrl = suggestedName
-          ? `/api/save-video?name=${encodeURIComponent(suggestedName)}`
-          : "/api/save-video";
-        const saveResp = await fetch(saveUrl, {
-          method: "POST",
-          headers: { "Content-Type": "video/mp4" },
-          body: recordedBlob,
-        });
-        const data = (await saveResp.json().catch(() => ({}))) as SaveVideoResponse;
-        if (!saveResp.ok) throw new Error(data.error ?? `save failed (${saveResp.status})`);
-
-        setSavedFolder(data.folder ?? null);
-        setSavedFilename(data.filename ?? null);
-
-        if (data.filename) {
-          const serveResp = await fetch(
-            `/api/serve-video?filename=${encodeURIComponent(data.filename)}`,
-          );
-          if (serveResp.ok) {
-            const savedBlob = await serveResp.blob();
-            const normalizedBlob = savedBlob.type
-              ? savedBlob
-              : new Blob([savedBlob], { type: data.mimeType ?? recordedBlob.type });
-            if (data.filename.endsWith(".mp4")) setMp4Blob(normalizedBlob);
-            if (!videoRef.current || videoRef.current.paused) {
-              setVideoBlob(normalizedBlob);
-            }
+        // Best-effort local-disk save. This powers the dev "open videos folder"
+        // button on localhost (one persistent process). On Vercel it may fail —
+        // serverless /tmp is per-invocation and the function body cap is ~4.5MB
+        // — but the share UI no longer depends on it: Download reads the
+        // in-memory blob, and Send-to-Tyler uploads it to Vercel Blob directly.
+        try {
+          const saveUrl = suggestedName
+            ? `/api/save-video?name=${encodeURIComponent(suggestedName)}`
+            : "/api/save-video";
+          const saveResp = await fetch(saveUrl, {
+            method: "POST",
+            headers: { "Content-Type": "video/mp4" },
+            body: recordedBlob,
+          });
+          if (saveResp.ok) {
+            const data = (await saveResp.json().catch(() => ({}))) as SaveVideoResponse;
+            setSavedFolder(data.folder ?? null);
+            setSavedFilename(data.filename ?? null);
           }
+        } catch {
+          // Ignore — local save is non-essential.
         }
-      } catch (e) {
-        console.warn("[share] save/fetch failed:", e);
       } finally {
         setConverting(false);
       }
@@ -181,20 +177,10 @@ export default function ShareScreen() {
   }
 
   function handleDownload() {
-    // Server-served URL with Content-Disposition: attachment is the only
-    // reliable way to control the saved filename on mobile — Safari iOS and
-    // Android Chrome both ignore <a download="..."> with a blob: URL and fall
-    // back to "blob" or some default. Fall back to the blob path only if the
-    // server save hasn't completed yet (rare — only if the user clicks while
-    // the auto-save is still in flight).
-    if (savedFilename) {
-      const url = `/api/serve-video?filename=${encodeURIComponent(savedFilename)}&download=1`;
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = savedFilename;
-      a.click();
-      return;
-    }
+    // Download straight from the in-memory recording. Android Chrome (Tyler's
+    // mobile target) honors <a download="..."> with a blob: URL, so the file
+    // saves with the clever name. The old server-served path needed the file
+    // to survive on the server's disk — which it doesn't on Vercel serverless.
     if (!shareBlob) return;
     const url = URL.createObjectURL(shareBlob);
     const a = document.createElement("a");
@@ -205,58 +191,46 @@ export default function ShareScreen() {
   }
 
   async function handleSendToTyler() {
-    if (!savedFilename) return;
+    if (!shareBlob) return;
     if (uploadAbortRef.current) uploadAbortRef.current.abort();
     const abort = new AbortController();
     uploadAbortRef.current = abort;
-    setUploadState({ status: "uploading", uploadedBytes: 0, totalBytes: 0 });
+    setUploadState({ status: "uploading", uploadedBytes: 0, totalBytes: shareBlob.size });
 
     try {
+      // Step 1: browser → Vercel Blob. Client upload streams directly to Blob
+      // storage, dodging the ~4.5MB serverless request-body cap that broke the
+      // old "POST the video to the server" approach on Vercel.
+      const blob = await upload(shareFilename, shareBlob, {
+        access: "public",
+        handleUploadUrl: "/api/video-blob-upload",
+        contentType: "video/mp4",
+        multipart: shareBlob.size > 8 * 1024 * 1024,
+        abortSignal: abort.signal,
+        onUploadProgress: ({ loaded, total }) =>
+          setUploadState({ status: "uploading", uploadedBytes: loaded, totalBytes: total }),
+      });
+
+      // Step 2: server copies the durable Blob URL into Drive (server→server,
+      // fast) and deletes the temporary Blob copy.
+      setUploadState({ status: "finalizing" });
       const resp = await fetch("/api/upload-to-drive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: savedFilename }),
+        body: JSON.stringify({ blobUrl: blob.url, filename: shareFilename }),
         signal: abort.signal,
       });
-      if (!resp.ok || !resp.body) {
-        const data = (await resp.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `upload failed (${resp.status})`);
+      const data = (await resp.json().catch(() => ({}))) as {
+        webViewLink?: string;
+        error?: string;
+      };
+      if (!resp.ok || !data.webViewLink) {
+        throw new Error(data.error ?? `Drive upload failed (${resp.status})`);
       }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let sseBuf = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        sseBuf += decoder.decode(value, { stream: true });
-        const lines = sseBuf.split("\n");
-        sseBuf = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          let event: { type: string; uploadedBytes?: number; totalBytes?: number; webViewLink?: string; message?: string };
-          try {
-            event = JSON.parse(line.slice(6));
-          } catch {
-            continue;
-          }
-          if (event.type === "progress") {
-            setUploadState({
-              status: "uploading",
-              uploadedBytes: event.uploadedBytes ?? 0,
-              totalBytes: event.totalBytes ?? 0,
-            });
-          } else if (event.type === "complete" && event.webViewLink) {
-            setUploadState({ status: "complete", webViewLink: event.webViewLink });
-          } else if (event.type === "error") {
-            setUploadState({ status: "error", message: event.message ?? "Upload failed" });
-          }
-        }
-      }
+      setUploadState({ status: "complete", webViewLink: data.webViewLink });
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
-      console.warn("[share] upload failed:", e);
+      console.warn("[share] send-to-tyler failed:", e);
       setUploadState({
         status: "error",
         message: e instanceof Error ? e.message : "Upload failed",
@@ -348,7 +322,11 @@ export default function ShareScreen() {
         </button>
         <button
           onClick={handleSendToTyler}
-          disabled={buttonsDisabled || !savedFilename || uploadState.status === "uploading"}
+          disabled={
+            buttonsDisabled ||
+            uploadState.status === "uploading" ||
+            uploadState.status === "finalizing"
+          }
           title="Upload this video to Tyler's Drive folder"
           className="rounded-xl bg-purple-600 px-6 py-3 font-black transition-all hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-purple-600"
         >
@@ -415,6 +393,7 @@ function UploadProgressModal({
 }) {
   const percent = (() => {
     if (state.status === "complete") return 100;
+    if (state.status === "finalizing") return 100;
     if (state.status === "error") return 0;
     if (state.totalBytes === 0) return 0;
     return Math.min(100, Math.round((state.uploadedBytes / state.totalBytes) * 100));
@@ -422,6 +401,8 @@ function UploadProgressModal({
   const sizeLabel = state.status === "uploading"
     ? `${formatBytes(state.uploadedBytes)} / ${formatBytes(state.totalBytes)}`
     : null;
+  // The browser→Blob upload and the server→Drive copy both block closing.
+  const busy = state.status === "uploading" || state.status === "finalizing";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6">
@@ -429,10 +410,11 @@ function UploadProgressModal({
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">
             {state.status === "uploading" && "Sending to Tyler…"}
+            {state.status === "finalizing" && "Saving to Drive…"}
             {state.status === "complete" && "Upload complete"}
             {state.status === "error" && "Upload failed"}
           </h2>
-          {state.status !== "uploading" && (
+          {!busy && (
             <button
               onClick={onClose}
               className="text-xl leading-none text-white/40 hover:text-white"
@@ -455,6 +437,7 @@ function UploadProgressModal({
         <div className="mb-5 flex items-baseline justify-between text-xs text-white/60">
           <span>
             {state.status === "uploading" && sizeLabel}
+            {state.status === "finalizing" && "Copying into Tyler's Drive folder…"}
             {state.status === "complete" && "Saved to Tyler's Drive folder."}
             {state.status === "error" && state.message}
           </span>
@@ -477,7 +460,7 @@ function UploadProgressModal({
             Close
           </button>
         )}
-        {state.status === "uploading" && (
+        {busy && (
           <p className="text-center text-xs text-white/40">
             Don&apos;t close this window — hang tight.
           </p>

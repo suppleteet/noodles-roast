@@ -1,82 +1,60 @@
-import { NextRequest } from "next/server";
-import { join } from "path";
-import { existsSync } from "fs";
-import { VIDEOS_FOLDER } from "@/lib/videoPaths";
+import { NextRequest, NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { isSafeVideoFilename } from "@/lib/mediaRecorderSupport";
-import { uploadVideoToDriveWithProgress } from "@/lib/googleDriveUpload";
+import { uploadRemoteVideoToDrive } from "@/lib/googleDriveUpload";
 
 /**
- * Triggered by the "Send to Tyler" button. The video has already been saved
- * + converted by /api/save-video; this route streams it to Drive and emits
- * SSE progress events so the UI can show a live progress bar.
+ * Triggered by the "Send to Tyler" button. By the time we're called the client
+ * has already streamed the recording to Vercel Blob (see /api/video-blob-upload)
+ * and hands us the durable Blob URL. We copy that into Drive, then delete the
+ * temporary Blob copy.
  *
- * SSE event shape:
- *   { type: "progress", uploadedBytes, totalBytes }
- *   { type: "complete", webViewLink, fileId }
- *   { type: "error", message }
- *
- * The connection closes after `complete` or `error`.
+ * This replaced the old read-from-/tmp flow, which only worked on a single
+ * persistent dev process: on Vercel the file written by /api/save-video lived
+ * in one serverless instance's ephemeral /tmp and was gone by the time this
+ * route ran on a different instance ("File not found on server").
  */
 export async function POST(req: NextRequest) {
-  const { filename } = (await req.json().catch(() => ({}))) as { filename?: string };
+  const { blobUrl, filename } = (await req.json().catch(() => ({}))) as {
+    blobUrl?: string;
+    filename?: string;
+  };
+
   if (!isSafeVideoFilename(filename)) {
-    return new Response(JSON.stringify({ error: "Invalid filename" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  const filePath = join(VIDEOS_FOLDER, filename);
-  if (!existsSync(filePath)) {
-    return new Response(JSON.stringify({ error: "File not found on server" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      const send = (event: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-      };
+  // Only accept Vercel Blob URLs — prevents this route from being used as an
+  // SSRF proxy to fetch arbitrary internal URLs.
+  let host: string;
+  try {
+    host = new URL(blobUrl ?? "").host;
+  } catch {
+    return NextResponse.json({ error: "Invalid blobUrl" }, { status: 400 });
+  }
+  if (!host.endsWith(".blob.vercel-storage.com")) {
+    return NextResponse.json({ error: "Invalid blobUrl host" }, { status: 400 });
+  }
 
-      // Rate-limit progress events to ~10/sec so a small video doesn't flood
-      // the channel with thousands of progress messages.
-      let lastEmitTs = 0;
-      const minIntervalMs = 100;
-
-      try {
-        const result = await uploadVideoToDriveWithProgress(
-          filePath,
-          filename,
-          ({ uploadedBytes, totalBytes }) => {
-            const now = Date.now();
-            const atEnd = uploadedBytes >= totalBytes;
-            if (atEnd || now - lastEmitTs >= minIntervalMs) {
-              lastEmitTs = now;
-              send({ type: "progress", uploadedBytes, totalBytes });
-            }
-          },
-        );
-
-        if (!result) {
-          send({ type: "error", message: "Drive credentials not configured" });
-        } else {
-          send({ type: "complete", webViewLink: result.webViewLink, fileId: result.fileId });
-        }
-      } catch (err) {
-        send({ type: "error", message: err instanceof Error ? err.message : String(err) });
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
+  try {
+    const result = await uploadRemoteVideoToDrive(blobUrl!, filename);
+    if (!result) {
+      return NextResponse.json(
+        { error: "Drive credentials not configured" },
+        { status: 503 },
+      );
+    }
+    // Best-effort cleanup — the recording is safely in Drive now, so drop the
+    // temporary Blob copy. Don't fail the request if cleanup hiccups.
+    await del(blobUrl!).catch((e) =>
+      console.warn("[upload-to-drive] blob cleanup failed:", e),
+    );
+    return NextResponse.json({ webViewLink: result.webViewLink, fileId: result.fileId });
+  } catch (err) {
+    console.warn("[upload-to-drive] failed:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Upload failed" },
+      { status: 500 },
+    );
+  }
 }
