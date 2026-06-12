@@ -18,8 +18,10 @@ import { NextRequest, NextResponse } from "next/server";
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const body = (await req.json()) as HandleUploadBody;
   try {
+    // Parse inside the try so a malformed body returns a clean 400 rather than
+    // escaping as an unhandled 500.
+    const body = (await req.json()) as HandleUploadBody;
     const jsonResponse = await handleUpload({
       body,
       request: req,

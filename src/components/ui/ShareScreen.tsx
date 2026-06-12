@@ -192,6 +192,10 @@ export default function ShareScreen() {
 
   async function handleSendToTyler() {
     if (!shareBlob) return;
+    // Abort any in-flight upload before starting a new one. In practice the
+    // button is disabled while busy and the modal hides its close button mid-
+    // upload, so this abort path only fires as restart semantics (a fresh Send
+    // after a prior error), never as a user cancel.
     if (uploadAbortRef.current) uploadAbortRef.current.abort();
     const abort = new AbortController();
     uploadAbortRef.current = abort;

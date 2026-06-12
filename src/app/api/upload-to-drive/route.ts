@@ -23,12 +23,15 @@ export async function POST(req: NextRequest) {
   if (!isSafeVideoFilename(filename)) {
     return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
   }
+  if (!blobUrl) {
+    return NextResponse.json({ error: "Missing blobUrl" }, { status: 400 });
+  }
 
   // Only accept Vercel Blob URLs — prevents this route from being used as an
   // SSRF proxy to fetch arbitrary internal URLs.
   let host: string;
   try {
-    host = new URL(blobUrl ?? "").host;
+    host = new URL(blobUrl).host;
   } catch {
     return NextResponse.json({ error: "Invalid blobUrl" }, { status: 400 });
   }
@@ -37,7 +40,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await uploadRemoteVideoToDrive(blobUrl!, filename);
+    const result = await uploadRemoteVideoToDrive(blobUrl, filename);
     if (!result) {
       return NextResponse.json(
         { error: "Drive credentials not configured" },
@@ -46,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
     // Best-effort cleanup — the recording is safely in Drive now, so drop the
     // temporary Blob copy. Don't fail the request if cleanup hiccups.
-    await del(blobUrl!).catch((e) =>
+    await del(blobUrl).catch((e) =>
       console.warn("[upload-to-drive] blob cleanup failed:", e),
     );
     return NextResponse.json({ webViewLink: result.webViewLink, fileId: result.fileId });
