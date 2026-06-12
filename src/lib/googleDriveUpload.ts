@@ -1,6 +1,4 @@
-import { createReadStream } from "fs";
-import { statSync } from "fs";
-import { Transform } from "stream";
+import { Readable } from "stream";
 import { google, type drive_v3 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 
@@ -39,110 +37,61 @@ function getDriveClient(): { drive: drive_v3.Drive; folderId: string } | null {
   return { drive: cachedDrive, folderId: cachedFolderId };
 }
 
-export async function uploadVideoToDrive(
-  filePath: string,
-  filename: string,
-): Promise<UploadResult | null> {
-  const client = getDriveClient();
-  if (!client) return null;
-
-  try {
-    const resp = await client.drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [client.folderId],
-      },
-      media: {
-        mimeType: "video/mp4",
-        body: createReadStream(filePath),
-      },
-      fields: "id, webViewLink",
-    });
-
-    const fileId = resp.data.id;
-    const webViewLink = resp.data.webViewLink;
-    if (!fileId || !webViewLink) {
-      console.warn("[gdrive-upload] response missing id/webViewLink", resp.data);
-      return null;
-    }
-    return { fileId, webViewLink };
-  } catch (err) {
-    // Surface code/status so future failures (auth expired vs rate limit vs
-    // folder deleted) are distinguishable without re-running with a debugger.
-    const e = err as { code?: unknown; status?: unknown; message?: unknown };
-    console.error(
-      `[gdrive-upload] upload failed (code=${String(e.code)} status=${String(e.status)}):`,
-      e.message ?? err,
-    );
-    return null;
-  }
-}
-
 /**
- * Same as uploadVideoToDrive, but emits per-chunk progress as bytes flow
- * through the upload stream. Used by /api/upload-to-drive to drive the
- * Send-to-Tyler UI progress bar.
+ * Streams a video that already lives at a remote URL (a Vercel Blob URL) into
+ * Drive without ever staging it on the local/serverless filesystem. This is
+ * the prod path: the browser uploads the recording to Vercel Blob, then asks
+ * /api/upload-to-drive to copy that durable URL here — which survives across
+ * serverless invocations, unlike the old read-from-/tmp approach.
  *
- * `onProgress` is called with `{ uploadedBytes, totalBytes }` for each chunk
- * the SDK sends; callers can rate-limit if they like. Errors are surfaced as
- * a thrown Error so the caller can report a failure event.
+ * Returns null if Drive credentials aren't configured; throws on fetch/upload
+ * failure so the caller can surface a real error.
  */
-export async function uploadVideoToDriveWithProgress(
-  filePath: string,
+export async function uploadRemoteVideoToDrive(
+  sourceUrl: string,
   filename: string,
-  onProgress: (state: { uploadedBytes: number; totalBytes: number }) => void,
 ): Promise<UploadResult | null> {
   const client = getDriveClient();
   if (!client) return null;
 
-  const totalBytes = statSync(filePath).size;
-  let uploadedBytes = 0;
-
-  // Wrap the file read stream in a counting Transform so we can emit progress
-  // for each chunk. The googleapis SDK pipes the body into its multipart
-  // request; bytes that pass through here are bytes that have left the server
-  // toward Google Drive. (Drive uploads via the v3 SDK don't expose a native
-  // progress callback for the simple media upload path.)
-  const readStream = createReadStream(filePath);
-  const counter = new Transform({
-    transform(chunk: Buffer, _enc, cb) {
-      uploadedBytes += chunk.length;
-      try { onProgress({ uploadedBytes, totalBytes }); } catch { /* ignore listener errors */ }
-      cb(null, chunk);
-    },
-  });
-  readStream.pipe(counter);
-  readStream.on("error", (err) => counter.destroy(err));
+  const resp = await fetch(sourceUrl);
+  if (!resp.ok || !resp.body) {
+    throw new Error(`failed to fetch source blob (${resp.status})`);
+  }
+  // googleapis wants a Node Readable for the media body; fetch gives a WHATWG
+  // web stream. Readable.fromWeb bridges them. Cast is needed because Node's
+  // lib types and the DOM ReadableStream type don't structurally line up.
+  const nodeStream = Readable.fromWeb(
+    resp.body as unknown as Parameters<typeof Readable.fromWeb>[0],
+  );
 
   try {
-    const resp = await client.drive.files.create({
+    const driveResp = await client.drive.files.create({
       requestBody: {
         name: filename,
         parents: [client.folderId],
       },
       media: {
         mimeType: "video/mp4",
-        body: counter,
+        body: nodeStream,
       },
       fields: "id, webViewLink",
     });
 
-    const fileId = resp.data.id;
-    const webViewLink = resp.data.webViewLink;
+    const fileId = driveResp.data.id;
+    const webViewLink = driveResp.data.webViewLink;
     if (!fileId || !webViewLink) {
-      console.warn("[gdrive-upload] response missing id/webViewLink", resp.data);
+      console.warn("[gdrive-upload] response missing id/webViewLink", driveResp.data);
       return null;
     }
-    // Ensure the final progress event lands at 100% even if the last chunk
-    // arrived before the create() promise resolved.
-    onProgress({ uploadedBytes: totalBytes, totalBytes });
     return { fileId, webViewLink };
   } catch (err) {
     const e = err as { code?: unknown; status?: unknown; message?: unknown };
     console.error(
-      `[gdrive-upload] upload failed (code=${String(e.code)} status=${String(e.status)}):`,
+      `[gdrive-upload] remote upload failed (code=${String(e.code)} status=${String(e.status)}):`,
       e.message ?? err,
     );
     throw err instanceof Error ? err : new Error(String(err));
   }
 }
+
