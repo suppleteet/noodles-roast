@@ -10,7 +10,7 @@ const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
   { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-  { id: "gpt-4o", label: "GPT-4o" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
 ];
@@ -58,8 +58,10 @@ export default function LandingScreen() {
   // pushed time-to-first-speech to ~28s in one log). Fire-and-forget; each call
   // is harmless on its own and the post-permission warmup still runs as backstop.
   useEffect(() => {
-    // EL DNS/TLS handshake (host-level — covers both Roast and Toast voices).
-    // Cheap (open+close, no synthesis), so it's safe to run for every visitor.
+    // Warm the EL synthesis path for the default Roast voice — a tiny real
+    // synth (one word) so the model/voice cold-start is mostly paid before the
+    // user even clicks Start. The post-permission prewarm in page.tsx warms the
+    // exact experience voice again closer to use; this just gets a head start.
     fetch("/api/prewarm-tts", { method: "POST" }).catch(() => {});
 
     // In dev, first-hit route compilation is the dominant cold cost (the

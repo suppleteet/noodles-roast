@@ -230,10 +230,11 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
-  it("watchdog: first hang skips the joke and continues; second hang ends the session", async () => {
+  it("watchdog: a generation hang runs the brain-busted exit and offers a model restart", async () => {
     vi.useFakeTimers();
     const onSessionEnd = vi.fn();
-    const deps = makeDeps({ onSessionEnd });
+    const onModelTrouble = vi.fn();
+    const deps = makeDeps({ onSessionEnd, onModelTrouble });
     const brain = new ComedianBrain(deps);
     await driveToWaitAnswer(brain);
     // generate-speak hangs forever (simulates a Gemini / server stall — a real
@@ -244,26 +245,15 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
     (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
 
-    // Fire #1 (generationTimeoutMs): transient hang — canned save line, show
-    // continues to the next question instead of ending the session.
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(getStates(deps)).toContain("delivering");
-    expect(getStates(deps)).not.toContain("wrapup");
-    expect(deps.queueSpeak).toHaveBeenCalled(); // canned save line was spoken
-    expect(onSessionEnd).not.toHaveBeenCalled();
-
-    // Save line drains → check_vision → ask_question; let the rephrase race
-    // (450ms) resolve so the next question gets queued, then drain it.
-    brain.onTtsQueueDrained();
-    await vi.advanceTimersByTimeAsync(600);
-    brain.onTtsQueueDrained();
-    expect(getStates(deps)).toContain("wait_answer");
-
-    // Second answer — generation hangs again → fire #2 = LLM is down → graceful exit.
-    brain.onInputTranscription("I am a plumber from Ohio");
-    vi.advanceTimersByTime(1600);
+    // Watchdog (generationTimeoutMs): no silent model swap, no canned limp-along.
+    // The comedian speaks the in-character busted line and the session wraps up.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(getStates(deps)).toContain("wrapup");
+    expect(deps.queueSpeak).toHaveBeenCalled(); // brain-busted line was spoken
+    // Controller is told which model failed so it can prompt a different-model restart.
+    expect(onModelTrouble).toHaveBeenCalledWith("gemini-3.5-flash");
+
+    // The closing line drains → session ends.
     brain.onTtsQueueDrained();
     expect(onSessionEnd).toHaveBeenCalled();
   });

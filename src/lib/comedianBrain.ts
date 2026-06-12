@@ -125,7 +125,7 @@ export interface ComedianBrainDeps {
   getAmbientContext: () => import("@/store/useSessionStore").AmbientContext | null;
   /** Optional async local culture/vibe line (filled after geolocation). */
   getTownFlavor: () => string | null;
-  /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-4o"). */
+  /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-5.4-mini"). */
   getRoastModel: () => string;
   /** Latency experiment: when true (roast only), the greeting is an instant canned
    *  video-call intro that doubles as the name question — no LLM, no vision wait. */
@@ -151,10 +151,11 @@ export interface ComedianBrainDeps {
   logLlm?: (dir: "→" | "←", label: string, text: string) => void;
   /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
   setError?: (error: string) => void;
-  /** Called when a Gemini call returns 503 UNAVAILABLE. Controller surfaces a
-   *  fallback prompt to the user; on accept the session restarts with the
-   *  suggested model. Brain stops issuing further calls after this fires. */
-  onModelUnavailable?: (failedModel: string, suggestedFallback: string) => void;
+  /** Called when the model is in trouble — a generation hang past the watchdog,
+   *  or a 503 UNAVAILABLE. The brain has already spoken an in-character
+   *  "my brain's busted" line and is ending the session; the controller surfaces
+   *  a "restart with a different model?" prompt. No silent model swap happens. */
+  onModelTrouble?: (failedModel: string) => void;
   /** Called when session should reveal the puppet (fade in). */
   revealSession?: () => void;
   /** Fire-and-forget: save an in-session critique to feedback storage. */
@@ -191,6 +192,10 @@ export interface ComedianBrainDeps {
     motion?: MotionState,
     intensity?: number,
     appendToPrev?: boolean,
+    /** Merged over resolved settings if the buffer fails/stalls and the line is
+     *  RE-synthesized via queueSpeak — keeps e.g. the opener style cap intact
+     *  on the fallback path (a real session lost it there and screeched). */
+    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
   ) => void;
 }
 
@@ -398,9 +403,6 @@ export class ComedianBrain {
   private generationWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Abort controller for the in-flight generate-speak fetch — let the watchdog cancel it. */
   private generationAbort: AbortController | null = null;
-  /** Watchdog fires this session. Fire #1 = skip the joke and move on (transient
-   *  hang); fire #2 = the LLM is actually down → technical-difficulties exit. */
-  private watchdogFires = 0;
 
   // Availability flags
   private micAvailable = true;
@@ -425,9 +427,9 @@ export class ComedianBrain {
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
 
-  // Model availability — flipped once a 503 has fired the onModelUnavailable
-  // callback, so we don't spam the user with the same prompt for every retry.
-  private modelUnavailableFired = false;
+  // Model trouble — flipped once a hang/503 has triggered the brain-busted exit,
+  // so a second trigger (e.g. watchdog + a late 503) can't double-exit or re-prompt.
+  private modelTroubleExited = false;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -473,7 +475,6 @@ export class ComedianBrain {
     this.ledger = [];
     this.jokeHopper = [];
     this.usedFallbackLines.clear();
-    this.watchdogFires = 0;
     this.knownName = null;
     this.openerIsNameAsk = false;
     this.transitionCount = 0;
@@ -484,7 +485,7 @@ export class ComedianBrain {
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
-    this.modelUnavailableFired = false;
+    this.modelTroubleExited = false;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -1161,8 +1162,17 @@ export class ComedianBrain {
         this.askedQuestionIds.add(nameQ.id);
       }
       if (pre?.audio && this.deps.playPrefetchedAudio) {
-        // playPrefetchedAudio falls back to queueSpeak internally if the buffer failed.
-        this.deps.playPrefetchedAudio(pre.text, pre.audio, openerMotion, openerIntensity);
+        // playPrefetchedAudio falls back to queueSpeak internally if the buffer
+        // failed or stalls — pass the opener style cap so the re-synthesized
+        // line doesn't revert to the style-maxed (screechy) base voice.
+        this.deps.playPrefetchedAudio(
+          pre.text,
+          pre.audio,
+          openerMotion,
+          openerIntensity,
+          undefined,
+          this._openerVoiceOverride(),
+        );
         this.deps.logTiming("brain: canned intro opener (prefetched TTS audio)");
       } else {
         this.deps.queueSpeak(opener, openerMotion, openerIntensity, undefined, this._openerVoiceOverride());
@@ -1939,51 +1949,38 @@ export class ComedianBrain {
       this.generationWatchdog = null;
       // If a joke arrived we've already left "generating" — nothing to rescue.
       if (this.state !== "generating") return;
-      this.watchdogFires++;
       // Cancel the hung fetch so a late response can't double-fire on top of what's next.
       try { this.generationAbort?.abort(); } catch { /* best-effort */ }
       this.generationAbort = null;
       // Invalidate any in-flight stream callbacks (they check deliveryGeneration).
       this.deliveryGeneration++;
       this._stopFillerPump();
-
-      // Second hang this session: the LLM is actually down. Speak a persona-flavored
-      // "technical difficulties" line and end the session rather than grinding through
-      // more filler stacks (each watchdog cycle costs ~10s of fillers).
-      if (this.watchdogFires >= 2) {
-        this.deps.logTiming(
-          `brain: generation watchdog fired AGAIN (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — graceful exit`,
-        );
-        this._enterTechnicalDifficultiesExit();
-        return;
-      }
-
-      // First hang: don't kill the show over one stuck request (a real session died
-      // 37s in because its very first answer-joke generation hung). Skip this joke —
-      // canned save line, then straight on to the next question. No regeneration
-      // attempt: that could hang again and double the dead air.
+      // The model hung. We no longer limp along on canned save lines or silently
+      // swap models — that "weird canned experience" reads as broken. Instead the
+      // comedian says (in character) that his brain's busted, the session ends,
+      // and the controller offers a restart with a different model.
       this.deps.logTiming(
-        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — canned save, moving on`,
+        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — brain-busted exit`,
       );
-      const fallback = this._pickFallbackRoast(this.answerBuffer);
-      this._transition("delivering");
-      this.deps.queueSpeak(
-        fallback.text,
-        fallback.motion as import("@/lib/motionStates").MotionState,
-        fallback.intensity,
-      );
-      this._addLedger("joke", fallback.text, []);
-      this._preQueueNextQuestion();
+      this._enterTechnicalDifficultiesExit(this.deps.getRoastModel());
     }, COMEDIAN_CONFIG.generationTimeoutMs);
   }
 
   /**
-   * Watchdog-triggered graceful exit. Speaks a persona-flavored
-   * technical-difficulties line and routes through the wrapup state so
-   * the existing drain handler fires onSessionEnd. Skips the LLM closing-line
-   * call (that's what just failed) — uses a canned line directly.
+   * Brain-busted graceful exit, triggered by model trouble (generation hang past
+   * the watchdog, or a 503). Speaks a persona-flavored "my brain's busted, try
+   * again later" line and routes through the wrapup state so the existing drain
+   * handler fires onSessionEnd. Skips the LLM closing-line call (that's what just
+   * failed) — uses a canned line directly.
+   *
+   * When `failedModel` is given, also notifies the controller via onModelTrouble
+   * so it can offer a "restart with a different model?" prompt. Idempotent: a
+   * second trigger (watchdog + a late 503) is ignored.
    */
-  private _enterTechnicalDifficultiesExit(): void {
+  private _enterTechnicalDifficultiesExit(failedModel?: string): void {
+    if (this.modelTroubleExited) return;
+    this.modelTroubleExited = true;
+
     // Cancel anything that could still queue audio after us.
     this._clearTimers();
     this._cancelSpeculative();
@@ -2010,6 +2007,9 @@ export class ComedianBrain {
     this._addLedger("joke", line, []);
     // Flip the gate so the next wrapup drain event fires session end.
     this.wrapupClosingQueued = true;
+
+    // Surface the restart-with-a-different-model prompt (no silent swap).
+    if (failedModel) this.deps.onModelTrouble?.(failedModel);
   }
 
   /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */
@@ -2683,7 +2683,9 @@ export class ComedianBrain {
       .then((d: { rephrased?: string }) => d.rephrased?.trim() || null)
       .catch(() => null);
 
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 450));
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), COMEDIAN_CONFIG.rephraseTimeoutMs),
+    );
 
     Promise.race([rephrasePromise, timeoutPromise]).then((rephrased) => {
       // Guard: only queue if we're in ask_question (normal path) or the pre-queue is
@@ -2734,22 +2736,23 @@ export class ComedianBrain {
       }),
     })
       .then((r) => r.json())
-      .then((data: { question: string; jokeContext: string }) => {
+      .then((data: { question: string; jokeContext: string; fallback?: boolean }) => {
         if (this.state !== "ask_question") return; // stale
         const questionText = data.question;
         // The route returns a FIXED fallback ("So what's going on with you?")
-        // when its LLM call fails — during a provider outage every cycle gets
-        // the same text and the puppet asked it three times in a row in a real
-        // session. If we've already asked this exact question, divert to an
-        // unasked bank question instead.
-        if (this._questionAlreadyAsked(questionText)) {
+        // when its LLM call fails or overflows — `fallback: true` flags it. That
+        // generic line reads canned (and during an outage every cycle returns it,
+        // so the puppet asked it three times in a row in a real session). Divert
+        // to a fresh bank question whenever the route fell back OR we've already
+        // asked this exact question.
+        if (data.fallback || this._questionAlreadyAsked(questionText)) {
           const bankQ = this._nextValidQuestion();
           if (bankQ) {
             this.askedQuestionIds.add(bankQ.id);
             this.currentQuestion = bankQ;
             this._queueQuestionWithBridge(this._pickQuestionText(bankQ));
             this.deps.logTiming(
-              `brain: contextual question repeated — using bank "${bankQ.id}" instead`,
+              `brain: contextual question ${data.fallback ? "fell back" : "repeated"} — using bank "${bankQ.id}" instead`,
             );
             return;
           }
@@ -3836,18 +3839,12 @@ export class ComedianBrain {
           this.deps.logTiming(`brain: QUOTA ERROR from ${provider}`);
         } else if (resp.status === 503) {
           const body = await resp.json().catch(() => ({}));
-          const b = body as { error?: string; failedModel?: string; suggestedFallback?: string };
-          if (
-            b.error === "model_unavailable" &&
-            b.failedModel &&
-            b.suggestedFallback &&
-            !this.modelUnavailableFired
-          ) {
-            this.modelUnavailableFired = true;
-            this.deps.logTiming(
-              `brain: MODEL_UNAVAILABLE ${b.failedModel} → suggest ${b.suggestedFallback}`,
-            );
-            this.deps.onModelUnavailable?.(b.failedModel, b.suggestedFallback);
+          const b = body as { error?: string; failedModel?: string };
+          if (b.error === "model_unavailable" && b.failedModel && !this.modelTroubleExited) {
+            this.deps.logTiming(`brain: MODEL_UNAVAILABLE ${b.failedModel} — brain-busted exit`);
+            // Same UX as a generation hang: speak the busted line, end the
+            // session, and let the controller offer a different-model restart.
+            this._enterTechnicalDifficultiesExit(b.failedModel);
           }
         }
         return null;

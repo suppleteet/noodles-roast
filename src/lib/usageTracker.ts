@@ -51,7 +51,7 @@ const ttsUsageEntries: TtsUsageEntry[] = [];
 const MODEL_PRICE_PER_MILLION: Record<string, { input: number; output: number }> = {
   "gemini-3.5-flash": { input: 0.3, output: 2.5 },
   "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
-  "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5 },
 };
@@ -61,7 +61,7 @@ const ELEVENLABS_ESTIMATED_COST_PER_1K_CHARS =
 
 function priceForModel(model: string): { input: number; output: number } {
   if (MODEL_PRICE_PER_MILLION[model]) return MODEL_PRICE_PER_MILLION[model];
-  if (model.startsWith("gpt-")) return { input: 2.5, output: 10 };
+  if (model.startsWith("gpt-")) return { input: 0.75, output: 4.5 };
   if (model.startsWith("claude-haiku")) return { input: 1, output: 5 };
   if (model.startsWith("claude-")) return { input: 3, output: 15 };
   return { input: 0.3, output: 2.5 };

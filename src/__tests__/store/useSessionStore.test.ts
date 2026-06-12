@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useSessionStore } from "@/store/useSessionStore";
+import { useSessionStore, pickDifferentModel } from "@/store/useSessionStore";
 
 beforeEach(() => {
   useSessionStore.getState().reset();
@@ -61,6 +61,58 @@ describe("phase transitions", () => {
     // idle → sharing is invalid
     setPhase("sharing", "SHARE_CLICKED");
     expect(useSessionStore.getState().phase).toBe("idle");
+  });
+});
+
+describe("model fallback (brain-busted restart)", () => {
+  it("pickDifferentModel crosses providers", () => {
+    // Gemini in trouble → suggest OpenAI, and vice-versa, so the restart
+    // doesn't land back in the same provider's outage.
+    expect(pickDifferentModel("gemini-3.5-flash")).toBe("gpt-5.4-mini");
+    expect(pickDifferentModel("gemini-2.5-flash")).toBe("gpt-5.4-mini");
+    expect(pickDifferentModel("gpt-5.4-mini")).toBe("gemini-3.5-flash");
+    expect(pickDifferentModel("claude-haiku-4-5-20251001")).toBe("gemini-3.5-flash");
+  });
+
+  it("pickDifferentModel always returns a model different from the failed one", () => {
+    const all = [
+      "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite",
+      "gpt-5.4-mini", "gpt-4o", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
+    ] as const;
+    for (const m of all) expect(pickDifferentModel(m)).not.toBe(m);
+  });
+
+  it("acceptModelFallback swaps the roast model and clears the prompt", () => {
+    const s = useSessionStore.getState();
+    s.setModelUnavailable({ failedModel: "gemini-3.5-flash", suggestedFallback: "gpt-5.4-mini" });
+    s.acceptModelFallback();
+    const after = useSessionStore.getState();
+    expect(after.roastModel).toBe("gpt-5.4-mini");
+    expect(after.modelUnavailable).toBeNull();
+  });
+
+  it("acceptModelFallback keeps vision on Gemini when the new roast model is non-Gemini", () => {
+    // Vision routes call Gemini directly, so a swap to gpt/claude must not drag
+    // visionModel off Gemini.
+    const s = useSessionStore.getState();
+    s.setModelUnavailable({ failedModel: "gemini-3.5-flash", suggestedFallback: "gpt-5.4-mini" });
+    s.acceptModelFallback();
+    expect(useSessionStore.getState().visionModel.startsWith("gemini")).toBe(true);
+  });
+
+  it("acceptModelFallback follows vision to a Gemini fallback", () => {
+    const s = useSessionStore.getState();
+    s.setModelUnavailable({ failedModel: "gemini-3.5-flash", suggestedFallback: "gemini-2.5-flash" });
+    s.acceptModelFallback();
+    const after = useSessionStore.getState();
+    expect(after.roastModel).toBe("gemini-2.5-flash");
+    expect(after.visionModel).toBe("gemini-2.5-flash");
+  });
+
+  it("acceptModelFallback is a no-op when nothing is pending", () => {
+    const before = useSessionStore.getState().roastModel;
+    useSessionStore.getState().acceptModelFallback();
+    expect(useSessionStore.getState().roastModel).toBe(before);
   });
 });
 

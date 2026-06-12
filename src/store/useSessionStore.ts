@@ -27,9 +27,24 @@ export type RoastModelId =
   | "gemini-3.5-flash"
   | "gemini-2.5-flash"
   | "gemini-3.1-flash-lite"
+  | "gpt-5.4-mini"
+  // Not in the UI dropdown, but a valid pickDifferentModel target / older
+  // sessions may still carry it.
   | "gpt-4o"
   | "claude-sonnet-4-6"
   | "claude-haiku-4-5-20251001";
+
+/**
+ * Pick a DIFFERENT model to suggest when the current one is in trouble (hung or
+ * unavailable). Crosses providers on purpose: a Gemini outage routes to OpenAI
+ * and vice-versa, so the suggested restart isn't likely to hit the same outage.
+ */
+export function pickDifferentModel(failed: RoastModelId): RoastModelId {
+  if (failed.startsWith("gpt")) return "gemini-3.5-flash";
+  if (failed.startsWith("claude")) return "gemini-3.5-flash";
+  // Gemini (or anything else) → OpenAI.
+  return "gpt-5.4-mini";
+}
 
 /**
  * Surfaced when a Gemini model returns 503 UNAVAILABLE ("high demand").
@@ -369,11 +384,15 @@ export const useSessionStore = create<SessionState>((set) => ({
   acceptModelFallback: () => set((s) => {
     const info = s.modelUnavailable;
     if (!info) return {};
-    const fallback = info.suggestedFallback;
+    const fallback = info.suggestedFallback as RoastModelId;
+    // Vision is Gemini-only (the /api/vision + /api/analyze routes call Gemini
+    // directly). If the new roast model is a non-Gemini provider, keep vision on
+    // a healthy Gemini tier rather than pointing it at gpt/claude.
+    const visionModel = fallback.startsWith("gemini") ? fallback : "gemini-2.5-flash";
     return {
       modelUnavailable: null,
-      roastModel: fallback as RoastModelId,
-      visionModel: fallback,
+      roastModel: fallback,
+      visionModel,
     };
   }),
   setActivePersona: (activePersona) => set({ activePersona }),

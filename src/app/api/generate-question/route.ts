@@ -124,10 +124,14 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
 
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return NextResponse.json({ question: "So what's going on with you?", jokeContext: "General roast." });
+      // `fallback: true` tells the brain this is the canned safety line, not a
+      // real generated question — divert to a fresh bank question so the puppet
+      // never recites the generic "So what's going on with you?" (reads canned).
+      return NextResponse.json({ question: "So what's going on with you?", jokeContext: "General roast.", fallback: true });
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as { question?: string; jokeContext?: string };
+    const parsedFailed = !parsed.question;
     const rawQuestion = parsed.question ?? "So what's going on with you?";
 
     // Hard cap — same rationale as /api/rephrase-question. In-character LLMs love to pad
@@ -136,8 +140,9 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
     // so the puppet doesn't recite a paragraph.
     const MAX_QUESTION_WORDS = 15;
     const wc = rawQuestion.trim().split(/\s+/).filter(Boolean).length;
-    const question = wc <= MAX_QUESTION_WORDS ? rawQuestion : "So what's going on with you?";
-    if (question !== rawQuestion) {
+    const tooLong = wc > MAX_QUESTION_WORDS;
+    const question = tooLong ? "So what's going on with you?" : rawQuestion;
+    if (tooLong) {
       console.warn(
         `[generate-question] LLM exceeded ${MAX_QUESTION_WORDS}-word cap (${wc}w) — using fallback. raw="${rawQuestion.slice(0, 120)}"`,
       );
@@ -146,9 +151,11 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
     return NextResponse.json({
       question,
       jokeContext: parsed.jokeContext ?? "General roast.",
+      // Either path landed on the canned line — let the brain divert to a bank question.
+      fallback: parsedFailed || tooLong,
     });
   } catch (err) {
     console.error("[generate-question]", err);
-    return NextResponse.json({ question: "So what's going on with you?", jokeContext: "General roast." });
+    return NextResponse.json({ question: "So what's going on with you?", jokeContext: "General roast.", fallback: true });
   }
 }

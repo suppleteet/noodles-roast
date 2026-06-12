@@ -2,7 +2,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { GoogleGenAI, Modality } from "@google/genai";
 import type { Session, LiveServerMessage } from "@google/genai";
-import { useSessionStore } from "@/store/useSessionStore";
+import { useSessionStore, pickDifferentModel, type RoastModelId } from "@/store/useSessionStore";
 import type { WebcamCaptureHandle } from "./WebcamCapture";
 import type { VideoRecorderHandle } from "@/components/recording/VideoRecorder";
 import { useMicCapture } from "@/components/audio/useMicCapture";
@@ -340,6 +340,10 @@ export default function LiveSessionController({
     motion?: MotionState,
     intensity?: number,
     appendToPrev?: boolean,
+    // Merged over resolved settings when the line is RE-synthesized (failed or
+    // stalled buffer). The opener passes its style cap here — a real session
+    // lost it on the watchdog path and the re-synthesized opener screeched.
+    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
   ): void {
     // NOTE: `buffer` was synthesized upstream (greeting prefetch in page.tsx) from
     // the original text, so stripping here only sanitizes the TRANSCRIPT, not the
@@ -351,7 +355,7 @@ export default function LiveSessionController({
     if (!text.trim() || !isRunningRef.current) return;
     if (buffer.failed) {
       // TTS prefetch errored — fall back to legacy queueSpeak.
-      queueSpeak(text, motion, intensity, appendToPrev);
+      queueSpeak(text, motion, intensity, appendToPrev, voiceOverride);
       return;
     }
     useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
@@ -374,7 +378,7 @@ export default function LiveSessionController({
         `tts-prefetched: no audio after ${PREFETCH_AUDIO_WATCHDOG_MS}ms (done=${buffer.done} failed=${buffer.failed}) — re-synthesizing via queueSpeak`,
       );
       if (!buffer.done) buffer.finish(true); // release scheduleFromPrefetch
-      queueSpeak(text, motion, intensity, appendToPrev);
+      queueSpeak(text, motion, intensity, appendToPrev, voiceOverride);
     }, PREFETCH_AUDIO_WATCHDOG_MS);
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
@@ -386,6 +390,21 @@ export default function LiveSessionController({
       );
       await scheduleFromPrefetch(buffer, gen, gainForMotion(motion, intensity));
     });
+  }
+
+  /**
+   * Model trouble (Tyler: "say his brain is busted and ask if they want to start
+   * over with a different model" — no silent swap). The brain has already spoken
+   * the in-character busted line and is ending the session; here we just surface
+   * the restart prompt by stashing a different suggested model in the store. The
+   * page-level modal owns Yes (restart with that model) / Cancel (back to landing).
+   */
+  function promptModelRestart(failedModel: string): void {
+    const store = useSessionStore.getState();
+    if (store.modelUnavailable) return; // already prompting
+    const different = pickDifferentModel(store.roastModel as RoastModelId);
+    store.setModelUnavailable({ failedModel, suggestedFallback: different });
+    store.logTiming(`live: model trouble (${failedModel}) — prompting restart with ${different}`);
   }
 
   // ─── TTS pipeline ─────────────────────────────────────────────────────────────
@@ -1262,17 +1281,9 @@ export default function LiveSessionController({
       logTiming: (e) => useSessionStore.getState().logTiming(e),
       logLlm: (dir, label, text) => useSessionStore.getState().pushLlmLog(dir, label, text),
       setError: (e) => useSessionStore.getState().setError(e),
-      onModelUnavailable: (failedModel, suggestedFallback) => {
-        const store = useSessionStore.getState();
-        // Already showing the prompt? Don't reset it (caller may have stale info).
-        if (store.modelUnavailable) return;
-        store.setModelUnavailable({ failedModel, suggestedFallback });
-        store.logTiming(`live: model unavailable — prompting fallback to ${suggestedFallback}`);
-        // Don't tear down the session here — page-level modal owns the restart.
-        // The brain's modelUnavailableFired flag prevents further LLM calls
-        // from triggering duplicate prompts, so it's safe to leave running
-        // until the user decides.
-      },
+      // Generation hang or 503: the brain already spoke the busted line + is
+      // ending the session. Surface the "restart with a different model?" prompt.
+      onModelTrouble: (failedModel) => promptModelRestart(failedModel),
       revealSession: () => useSessionStore.getState().setHasSpokenThisSession(true),
       prefetchedGreeting: greetingPrefetch,
       prefetchedGreetingAudio: warmupGreetingAudio ?? undefined,
@@ -1514,8 +1525,10 @@ export default function LiveSessionController({
     }
 
     // Only navigate to sharing if the user hasn't already moved on (e.g. clicked
-    // "Start Session" again before this async stop finished).
-    if (useSessionStore.getState().phase === "stopped") {
+    // "Start Session" again before this async stop finished). When a model-trouble
+    // prompt is up, DON'T auto-navigate to the share screen behind it — the modal
+    // owns where we go next (restart with a different model, or back to landing).
+    if (useSessionStore.getState().phase === "stopped" && !useSessionStore.getState().modelUnavailable) {
       store.setPhase("sharing", "SHARE_CLICKED");
     }
 

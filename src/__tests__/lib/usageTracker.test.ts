@@ -25,7 +25,7 @@ describe("usageTracker", () => {
     recordLlmUsage({
       route: "test",
       provider: "openai",
-      model: "gpt-4o",
+      model: "gpt-5.4-mini",
       inputTokens: 1000,
       outputTokens: 500,
       exact: true,
@@ -34,7 +34,7 @@ describe("usageTracker", () => {
     expect(snapshot.calls).toBe(1);
     expect(snapshot.inputTokens).toBe(1000);
     expect(snapshot.outputTokens).toBe(500);
-    expect(snapshot.estimatedCostUsd).toBeCloseTo(0.0075);
+    expect(snapshot.estimatedCostUsd).toBeCloseTo(0.003);
   });
 
   it("aggregates ElevenLabs character cost", () => {

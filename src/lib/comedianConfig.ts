@@ -13,6 +13,7 @@ const defaults = {
   unfinalizedAnswerSilenceMs: 1600, // wait longer for trailing STT chunks before committing partial answers
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
+  rephraseTimeoutMs: 1200,       // inline question-rephrase race cap. 450ms never beat a cold LLM, so questions shipped generic/impersonal (no name) and read canned. Higher = personalization lands; worst case is this much dead air before the bridged-original fallback.
   visionIntervalMs: 5000,        // how often vision analyze fires
   greetingVisionTimeoutMs: 1500, // max wait for prefetched vision greeting before speaking an instant fallback — the real greeting chains after the fallback when it lands, so firing this is cheap
   firstSpeechBeatMs: 250,        // brief reveal beat before first TTS; keep TTFS low while avoiding an abrupt entrance
@@ -70,12 +71,12 @@ const defaults = {
   fillerMaxStack: 4,
 
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
-  // within this window, abort it. Fire #1 in a session = skip the joke (canned save line,
-  // move on to the next question); fire #2 = the LLM is actually down → in-character
-  // technical-difficulties exit. Sized to fire as the 4-filler stack (~10s) exhausts, so
-  // the save line lands with minimal dead air. A healthy generation delivers its first
-  // joke in 1-4s, well inside this window — so it never false-fires.
-  generationTimeoutMs: 10_000,
+  // within this window, abort it and run the brain-busted exit: the comedian says (in
+  // character) that his brain froze, the session ends, and the user is offered a restart
+  // with a different model (no silent model swap, no canned limp-along). 8s per Tyler
+  // ("if it hangs longer than 8 seconds") — a healthy generation delivers its first joke
+  // in 1-4s, well inside this window.
+  generationTimeoutMs: 8_000,
 };
 
 const windowOverride =

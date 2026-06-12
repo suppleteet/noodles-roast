@@ -242,7 +242,8 @@ export async function generateText(req: LlmRequest): Promise<string> {
           const forceJsonObject = req.forceJsonObject ?? false;
           const resp = await client.chat.completions.create({
             model: req.model,
-            max_tokens: req.maxOutputTokens,
+            // gpt-5.x models reject the legacy max_tokens param.
+            max_completion_tokens: req.maxOutputTokens,
             ...(forceJsonObject ? { response_format: { type: "json_object" as const } } : {}),
             messages: [
               { role: "system", content: req.systemPrompt },
@@ -358,7 +359,8 @@ export async function* generateTextStream(
           const forceJsonObject = req.forceJsonObject ?? false;
           const stream = await client.chat.completions.create({
             model: req.model,
-            max_tokens: req.maxOutputTokens,
+            // gpt-5.x models reject the legacy max_tokens param.
+            max_completion_tokens: req.maxOutputTokens,
             ...(forceJsonObject ? { response_format: { type: "json_object" as const } } : {}),
             stream: true,
             messages: [
