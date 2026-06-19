@@ -1423,18 +1423,18 @@ export class ComedianBrain {
       this.currentQuestion = question;
       this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
       if (rephrased) {
-        this.deps.queueSpeak(rephrased, "emphasis", 0.6);
+        this._queueQuestionSpeech(rephrased);
         this.deps.logTiming(`brain: using pre-queued rephrase — "${rephrased.slice(0, 60)}"`);
         spokenQuestionText = rephrased;
       } else {
         // Rephrase didn't resolve in time — fall back to original with bridge (no second fetch)
         const text = this._pickQuestionText(question);
         if (COMEDIAN_CONFIG.skipScriptedLines) {
-          this.deps.queueSpeak(text, "emphasis", 0.6);
+          this._queueQuestionSpeech(text);
           spokenQuestionText = text;
         } else {
           spokenQuestionText = ComedianBrain._questionWithBridge(text);
-          this.deps.queueSpeak(spokenQuestionText, "emphasis", 0.6);
+          this._queueQuestionSpeech(spokenQuestionText);
         }
         this.deps.logTiming("brain: pre-queue rephrase not ready — using original");
       }
@@ -2642,7 +2642,7 @@ export class ComedianBrain {
     // verbatim instead.
     if (this._isToast()) {
       const withName = this._toastInjectWrongName(questionText);
-      this.deps.queueSpeak(withName, "emphasis", 0.6);
+      this._queueQuestionSpeech(withName);
       this.deps.setCurrentQuestion(withName);
       this._addLedger("question", withName, []);
       this.deps.logTiming("brain: toast — verbatim bank question (no rephrase)");
@@ -2659,7 +2659,7 @@ export class ComedianBrain {
     // Skip rephrase when there's nothing to anchor it against — rephrase only
     // wins when it can bridge from a prior line or personalize with facts.
     if (!lastJoke && knownFacts.length === 0) {
-      this.deps.queueSpeak(questionText, "emphasis", 0.6);
+      this._queueQuestionSpeech(questionText);
       this.deps.setCurrentQuestion(questionText);
       this._addLedger("question", questionText, []);
       this.deps.logTiming("brain: rephrase skipped — no prior context");
@@ -2695,20 +2695,31 @@ export class ComedianBrain {
       let spokenQuestionText: string;
       if (rephrased) {
         spokenQuestionText = rephrased;
-        this.deps.queueSpeak(spokenQuestionText, "emphasis", 0.6);
+        this._queueQuestionSpeech(spokenQuestionText);
         this.deps.logTiming(`brain: rephrased question — "${rephrased.slice(0, 60)}"`);
       } else if (COMEDIAN_CONFIG.skipScriptedLines) {
         spokenQuestionText = questionText;
-        this.deps.queueSpeak(spokenQuestionText, "emphasis", 0.6);
+        this._queueQuestionSpeech(spokenQuestionText);
         this.deps.logTiming("brain: rephrase timed out — using original (no bridge)");
       } else {
         spokenQuestionText = ComedianBrain._questionWithBridge(questionText);
-        this.deps.queueSpeak(spokenQuestionText, "emphasis", 0.6);
+        this._queueQuestionSpeech(spokenQuestionText);
         this.deps.logTiming("brain: rephrase timed out — using original");
       }
       this.deps.setCurrentQuestion(spokenQuestionText);
       this._addLedger("question", spokenQuestionText, []);
     });
+  }
+
+  /**
+   * Questions should sound like the same performer continuing the set, not a
+   * separate announcer voice. Reuse the most recent joke's motion/intensity so
+   * ElevenLabs receives the same motion-derived voice settings across the joke
+   * -> question handoff. The first question before any joke still falls back to
+   * the initialized emphasis register.
+   */
+  private _queueQuestionSpeech(text: string): void {
+    this.deps.queueSpeak(text, this.lastJokeMotion, this.lastJokeIntensity);
   }
 
   /** Generate a contextual question via LLM based on what we see + know. */
@@ -3354,22 +3365,13 @@ export class ComedianBrain {
     if (this.ledger.length > 30) this.ledger = this.ledger.slice(-30);
   }
 
-  /** IDs of questions to skip when ambient context provides location. Stay in sync with
-   *  questionBank.ts — currently only `where_from` asks about location. */
-  private static readonly LOCATION_QUESTION_IDS = new Set(["where_from"]);
-
   /** Returns the next valid question, skipping excluded ones. Null if exhausted. */
   private _nextValidQuestion(): ComedyQuestion | null {
     const total = this.shuffledQuestions.length;
-    const ambientCity = this.deps.getAmbientContext()?.city;
-    const hasLocation = !!ambientCity && ambientCity !== "unknown";
-
     for (let i = 0; i < total; i++) {
       const q = this.shuffledQuestions[(this.questionIndex + i) % total];
       // Skip if already asked
       if (this.askedQuestionIds.has(q.id)) continue;
-      // Skip location questions when we already know their city
-      if (hasLocation && ComedianBrain.LOCATION_QUESTION_IDS.has(q.id)) continue;
       // Skip if excluded by a previously asked question
       const excluded = this.shuffledQuestions
         .filter((prev) => this.askedQuestionIds.has(prev.id) && prev.excludes)
@@ -3448,7 +3450,7 @@ export class ComedianBrain {
 
   /** Full ledger summary for throwback references — all facts learned so far. */
   /**
-   * Maximum personal facts (excluding city) included in `knownFacts` per joke
+   * Maximum personal facts (excluding current location) included in `knownFacts` per joke
    * generation call. Without this cap the prompt accumulates the entire
    * dossier ("name, age, job, hobby, kids...") and the LLM starts reciting
    * the list instead of riffing on what just happened. 2 = current topic +
@@ -3468,11 +3470,12 @@ export class ComedianBrain {
     // Cap to the most recent N — bias toward what just happened.
     const capped = deduped.slice(-ComedianBrain.MAX_KNOWN_FACTS);
 
-    // City is always included if known. It's geo-derived flavor, not a fact
-    // they told us, so it doesn't count against the cap.
+    // Current location is always included if known. It's geo-derived flavor,
+    // not a residence/origin fact they told us, so it doesn't count against
+    // the personal-fact cap.
     const ambient = this.deps.getAmbientContext();
     if (ambient?.city && ambient.city !== "unknown") {
-      capped.push(`city:${ambient.city}`);
+      capped.push(`current_location:${ambient.city}`);
     }
     return capped;
   }

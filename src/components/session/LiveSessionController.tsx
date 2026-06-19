@@ -206,10 +206,13 @@ export default function LiveSessionController({
     intensity?: number,
     appendToPrev?: boolean,
     voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+    options?: { skipTranscript?: boolean },
   ): void {
     text = stripStageDirections(text);
     if (!text.trim() || !isRunningRef.current) return;
-    useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
+    if (!options?.skipTranscript) {
+      useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
+    }
     wasDrainedRef.current = false; // reset edge so drain detection fires when this plays through
     const gen = ttsGenerationRef.current;
 
@@ -368,17 +371,21 @@ export default function LiveSessionController({
     // EL WS that silently dies before the first chunk) leaves scheduleFromPrefetch
     // parked on waitForUpdate forever — the show opens on dead silence with no
     // drain edge to advance it (a real local session sat mute for 10s until the
-    // user gave up). If nothing has arrived in time, kill the buffer (unblocks
-    // the chain) and re-synthesize the same text through legacy queueSpeak.
-    const PREFETCH_AUDIO_WATCHDOG_MS = 2_500;
+    // user gave up). If nothing has arrived in time, enqueue the replacement
+    // before releasing this buffer so the drain edge cannot advance the brain
+    // before the re-synthesized opener actually plays.
+    const PREFETCH_AUDIO_WATCHDOG_MS = 4_500;
     setTimeout(() => {
       if (!isRunningRef.current || ttsGenerationRef.current !== gen) return;
       if (buffer.chunks.length > 0) return; // audio arrived (or is playing) — healthy
       useSessionStore.getState().logTiming(
         `tts-prefetched: no audio after ${PREFETCH_AUDIO_WATCHDOG_MS}ms (done=${buffer.done} failed=${buffer.failed}) — re-synthesizing via queueSpeak`,
       );
+      if (lastSpokenTextRef.current === text.trim()) {
+        lastSpokenTextRef.current = previousText;
+      }
+      queueSpeak(text, motion, intensity, appendToPrev, voiceOverride, { skipTranscript: true });
       if (!buffer.done) buffer.finish(true); // release scheduleFromPrefetch
-      queueSpeak(text, motion, intensity, appendToPrev, voiceOverride);
     }, PREFETCH_AUDIO_WATCHDOG_MS);
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
@@ -445,6 +452,9 @@ export default function LiveSessionController({
         const motionMerged = voiceSettingsForMotion(baseVoice, motion, intensity);
         // voiceOverride wins last — used to slow fillers below the base speed.
         const mergedVoice = voiceOverride ? { ...motionMerged, ...voiceOverride } : motionMerged;
+        useSessionStore.getState().logTiming(
+          `tts-request: motion=${motion ?? "none"} intensity=${(intensity ?? 0.7).toFixed(2)} stability=${mergedVoice.stability.toFixed(2)} style=${mergedVoice.style.toFixed(2)} speed=${mergedVoice.speed.toFixed(2)}`,
+        );
         const resp = await fetch("/api/tts-ws", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -629,7 +639,9 @@ export default function LiveSessionController({
           wasDrainedRef.current = true;
           earlyListenFiredRef.current = false;
           store.setIsSpeaking(false);
-          store.setActiveMotionState("idle", 0.3);
+          // Do not force idle between queued lines. The brain picks the next
+          // state immediately on this edge; forcing idle here creates a visible
+          // energy dip between a joke and its follow-up question.
           brainRef.current?.onTtsQueueDrained();
         } else if (!isEmpty) {
           wasDrainedRef.current = false;
@@ -1255,7 +1267,13 @@ export default function LiveSessionController({
     // Build ComedianBrain
     brainRef.current = new ComedianBrain({
       queueSpeak,
-      openJokeStream,
+      // Keep jokes and questions on the same ElevenLabs path. The streamed
+      // joke-audio path opened EL on the server (/api/generate-speak), while
+      // questions used queueSpeak -> /api/tts-ws. That made the joke->question
+      // handoff sound like a different delivery mode. With no openJokeStream
+      // hook, joke text still streams from /api/generate-speak, then every
+      // spoken line is synthesized through queueSpeak with the same previousText
+      // and voice-settings merge.
       cancelSpeech,
       isQueueEmpty: () => playback.isQueueEmpty(),
       setMotion: (state, intensity) =>

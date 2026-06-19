@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       process.env.ELEVENLABS_VOICE_ID ??
       ELEVENLABS_VOICE_ID;
     const voiceSettings = overrideSettings ?? {
-      stability: 0.72,
+      stability: 0.5,
       similarity_boost: 0.7,
       style: 1,
       speed: 0.88,

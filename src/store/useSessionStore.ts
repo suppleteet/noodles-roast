@@ -64,7 +64,7 @@ export interface VoiceSettings {
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  stability: 0.72,
+  stability: 0.5,
   similarity_boost: 0.7,
   style: 1,
   speed: 1.0,

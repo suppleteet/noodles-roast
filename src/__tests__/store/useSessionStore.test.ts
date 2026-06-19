@@ -37,6 +37,10 @@ describe("initial state", () => {
   it("opts into location by default", () => {
     expect(useSessionStore.getState().locationConsent).toBe(true);
   });
+
+  it("starts Roast voice stability at 0.5", () => {
+    expect(useSessionStore.getState().voiceSettings.stability).toBe(0.5);
+  });
 });
 
 describe("phase transitions", () => {

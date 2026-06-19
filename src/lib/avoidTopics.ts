@@ -22,7 +22,7 @@ export const GLOBAL_AVOID_TOPICS: string[] = [
   "Overly cerebral or niche references: if the joke requires the audience to know a specific subculture, meme format, or technical domain, cut it — the roast should be immediately accessible",
 
   // ── Background objects ───────────────────────────────────────────────────────
-  "Specific background objects: never call out individual items behind the person (a bookshelf, a poster, a lamp, a chair, a plant, etc.) — these jokes are lazy and feel like you're describing the scene rather than roasting the person. You MAY joke about the overall inferred location (an office, a bedroom, a bus) if multiple background elements clearly point to it — joke about BEING THERE, not the objects.",
+  "Specific background objects: never call out individual items behind the person (a bookshelf, a poster, a lamp, a chair, a plant, etc.) — these jokes are lazy and feel like you're describing the scene rather than roasting the person. You MAY joke about the overall inferred current setting/location (an office, a bedroom, a bus) if multiple background elements clearly point to it — joke about BEING THERE, not the objects, and never imply they live there unless they said so.",
 
   // ── Generic non-observational filler ────────────────────────────────────────
   "Weather, traffic, or current events: too universal, too detached from the person on camera — every joke must be about THIS person",

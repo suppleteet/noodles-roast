@@ -97,7 +97,7 @@ function buildUserParts(
   if (body.observations?.length)
     contextLines.push(`CURRENT OBSERVATIONS: ${trimObservations(body.observations, body.setting).join("; ")}`);
   if (body.setting)
-    contextLines.push(`SETTING: The person appears to be in their ${body.setting}.`);
+    contextLines.push(`VISIBLE SETTING: The person appears to currently be in a ${body.setting}. Do NOT assume this is their home, workplace, or where they live.`);
   if (body.previousObservations?.length)
     contextLines.push(`PREVIOUS OBSERVATIONS: ${body.previousObservations.join("; ")}`);
   if (body.conversationSoFar?.length)
@@ -106,7 +106,7 @@ function buildUserParts(
     contextLines.push(`KNOWN FACTS: ${body.knownFacts.join(", ")}`);
   if (body.townFlavor?.trim()) {
     contextLines.push(
-      `LOCAL PLACE VIBE (background texture only — do NOT lean on this): ${body.townFlavor.trim()}\nUSE IT SPARINGLY: name the town/location in AT MOST one joke, and NOT in back-to-back jokes. Most jokes should not mention the location at all — roast the person and their answers first. If you've already nodded to the place once this session, skip it.`,
+      `CURRENT PLACE VIBE (background texture only — do NOT lean on this): ${body.townFlavor.trim()}\nThis describes the place they appear to be right now, NOT where they live, grew up, or are from. USE IT SPARINGLY: name the town/location in AT MOST one joke, and NOT in back-to-back jokes. Most jokes should not mention the location at all — roast the person and their answers first. If you've already nodded to the place once this session, skip it. If you use it, say "I see you're in ____" or "what are you doing in ____" rather than calling it home.`,
     );
   }
   if (body.ambientAntiRepeatNote) {
@@ -114,7 +114,7 @@ function buildUserParts(
   } else if (body.ambientContext) {
     const ac = body.ambientContext;
     const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
-    contextLines.push(`AMBIENT (use sparingly): They're in ${ac.city} on a ${dayName} ${ac.timeOfDay}.${ac.weather ? ` Weather: ${ac.weather}.` : ""} NEVER say the exact time or location details.`);
+    contextLines.push(`CURRENT WHEREABOUTS (use sparingly): They appear to be in ${ac.city} right now on a ${dayName} ${ac.timeOfDay}.${ac.weather ? ` Weather: ${ac.weather}.` : ""} This is NOT evidence that they live there, are from there, or call it home. NEVER say the exact time. If you use the place, phrase it like "I see you're in ${ac.city}" or "what are you doing in ${ac.city}" and make the joke about them being there right now.`);
   }
   if (body.maxJokes)
     contextLines.push(`Generate exactly ${body.maxJokes} joke(s).`);

@@ -33,6 +33,7 @@ RULES:
 - The question must feel like a natural next thing to say in a conversation — NOT like a game show or dating questionnaire.
 - React to what you SEE if you can. If they're in an office: "So what do you do in that office?" If they're in a car: "Where are you headed?" If you can't tell where they are: "Where are you right now?"
 - If you already know things about them (KNOWN FACTS), ask something that builds on what you've learned — not something you already know.
+- A current_location fact only means where they appear to be right now. It is NOT where they live, grew up, or are from; you may still ask about home/origin if the user has not answered that.
 - ABSOLUTELY DO NOT re-ask about a topic you have already asked about (see ALREADY ASKED list). Even a rephrasing of the same subject is forbidden — if you already asked about the posters, the wall art, the room decor, anything in that vicinity, that ENTIRE TOPIC is dead. Pick a different subject from what you see or a fresh personal angle (their clothing, their face, their voice, their job, their hometown, their hobbies, the lighting, the time of day, what they're holding, etc.).
 - Keep it SHORT. One sentence max. Casual, conversational tone.
 - Easy to answer — don't ask deep philosophical questions or anything that requires a long explanation.
@@ -72,6 +73,7 @@ RULES:
 - Ask a CLOSED, low-effort question: a yes/no, or a basic fact they can answer in one or two words. Things like: "You married?", "Got any kids?", "Dog person?", "You work from home?", "You drive?", "From around here?", "You a coffee drinker?", "Live alone?".
 - NOTHING open-ended. NOTHING they'd have to think hard about or explain. No "tell me about…", no "what's the story with…", no feelings, no philosophy, no favorites that require deliberation.
 - React to what you SEE or build naturally on what you already know — but DO NOT re-ask anything already answered (see WHAT YOU ALREADY KNOW) or any topic in ALREADY ASKED. If they told you they're married, NEVER ask if they're married. Pick a genuinely new fact.
+- A current_location fact only means where they appear to be right now. It is NOT where they live, grew up, or are from; do not treat it as an answered home/origin question.
 - ONE short sentence. Casual, in character. Whatever they answer, you should be able to roast it.
 
 BAD (open-ended / too much thought):
@@ -95,9 +97,9 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
     if (body.observations?.length)
       contextLines.push(`WHAT YOU SEE: ${body.observations.join("; ")}`);
     if (body.setting)
-      contextLines.push(`LOCATION: ${body.setting}`);
+      contextLines.push(`VISIBLE SETTING: ${body.setting} (where they appear to be right now; not necessarily home or work)`);
     if (body.knownFacts?.length)
-      contextLines.push(`WHAT YOU ALREADY KNOW (don't ask about these): ${body.knownFacts.join(", ")}`);
+      contextLines.push(`WHAT YOU ALREADY KNOW (don't ask about these, except current_location is only current whereabouts, not residence/origin): ${body.knownFacts.join(", ")}`);
     if (body.previousQuestions?.length) {
       // Hard list of dead topics. The prompt rule above forbids any rephrasing of these.
       contextLines.push(

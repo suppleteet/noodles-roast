@@ -83,6 +83,14 @@ describe("getJokePrompt", () => {
       expect(prompt).toContain("BACKGROUND RULE");
     });
 
+    it("forbids treating current location as residence or origin", () => {
+      const prompt = getJokePrompt("answer_roast", "kvetch", 3, "clean");
+      expect(prompt).toContain("Current Location Rule");
+      expect(prompt).toContain("where the person appears to be RIGHT NOW");
+      expect(prompt).toContain("I see you're in ____");
+      expect(prompt).toContain("Only tag residence/origin when the user actually said it.");
+    });
+
     it("instructs to use QUESTION ASKED and USER'S ANSWER", () => {
       const prompt = getJokePrompt("answer_roast", "kvetch", 3, "clean");
       expect(prompt).toContain("QUESTION ASKED");

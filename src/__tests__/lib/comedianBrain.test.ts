@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
+import type { ComedyQuestion } from "@/lib/questionBank";
 
 // Mock COMEDIAN_CONFIG at module level (evaluated at import time)
 vi.mock("@/lib/comedianConfig", () => ({
@@ -387,6 +388,76 @@ describe("ComedianBrain", () => {
       const brain = new ComedianBrain(makeDeps());
       brain.start();
       expect(() => brain.onVisionUpdate(["wearing glasses", "smiling"])).not.toThrow();
+    });
+  });
+
+  describe("question voice continuity", () => {
+    it("asks questions using the previous joke register instead of fixed emphasis", () => {
+      const deps = makeDeps();
+      const brain = new ComedianBrain(deps) as unknown as {
+        lastJokeMotion: "deadpan";
+        lastJokeIntensity: number;
+        _queueQuestionWithBridge: (questionText: string) => void;
+      };
+
+      brain.lastJokeMotion = "deadpan";
+      brain.lastJokeIntensity = 0.42;
+      brain._queueQuestionWithBridge("Where are you from?");
+
+      expect(deps.queueSpeak).toHaveBeenCalledWith(
+        "Where are you from?",
+        "deadpan",
+        0.42,
+      );
+    });
+  });
+
+  describe("location handling", () => {
+    const whereFromQuestion: ComedyQuestion = {
+      id: "where_from",
+      question: "Where are you from?",
+      jokeContext: "Hometown roast.",
+      prodLines: [],
+    };
+
+    it("does not treat ambient city as answering where the user is from", () => {
+      const brain = new ComedianBrain(makeDeps({
+        getAmbientContext: vi.fn(() => ({
+          city: "Seattle",
+          region: "WA",
+          timeOfDay: "afternoon",
+          localTime: "2026-06-18T15:00:00-07:00",
+        })),
+      })) as unknown as {
+        shuffledQuestions: ComedyQuestion[];
+        questionIndex: number;
+        askedQuestionIds: Set<string>;
+        _nextValidQuestion: () => ComedyQuestion | null;
+      };
+
+      brain.shuffledQuestions = [whereFromQuestion];
+      brain.questionIndex = 0;
+      brain.askedQuestionIds = new Set();
+
+      expect(brain._nextValidQuestion()?.id).toBe("where_from");
+    });
+
+    it("labels geolocation as current_location, not city or hometown", () => {
+      const brain = new ComedianBrain(makeDeps({
+        getAmbientContext: vi.fn(() => ({
+          city: "Seattle",
+          region: "WA",
+          timeOfDay: "afternoon",
+          localTime: "2026-06-18T15:00:00-07:00",
+        })),
+      })) as unknown as {
+        _getThrowbackContext: () => string[];
+      };
+
+      const facts = brain._getThrowbackContext();
+      expect(facts).toContain("current_location:Seattle");
+      expect(facts).not.toContain("city:Seattle");
+      expect(facts).not.toContain("hometown:Seattle");
     });
   });
 });

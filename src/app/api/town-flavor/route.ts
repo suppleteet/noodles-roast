@@ -28,13 +28,14 @@ Output format: one line of short phrases separated by semicolons (no bullets, no
 Include stereotypes, regional vibe, what outsiders joke about, roast angles — e.g. hippie enclave, crystal shops,
 suburban strip malls, tech money, cows, yoga retreats, wine moms, military town, beach tourism, etc.
 Be playful; exaggerate slightly for comedy. If unsure, lean on plausible regional clichés rather than inventing fake venues.
+This place comes from current geolocation only. Do not imply the person lives here, grew up here, or is from here.
 
 Hard limits: under 400 characters. Plain text only.`;
 
     const text = await generateText({
       model: VISION_MODEL,
       systemPrompt,
-      userParts: [{ text: `Place name (from geolocation): ${place}` }],
+      userParts: [{ text: `Place name (current geolocation only, not home/residence/origin): ${place}` }],
       maxOutputTokens: 220,
     });
 
