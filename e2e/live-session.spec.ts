@@ -39,6 +39,23 @@ test.describe("Startup", () => {
     await page.getByRole("button", { name: /roast me/i }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   });
+
+  test("canned startup opener uses low-register non-rising TTS", async ({ page }) => {
+    const mock = new LiveSessionMock(page);
+    await mock.setup();
+
+    await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
+
+    const req = await mock.waitForTtsRequest(5000);
+    expect(req.text).toMatch(/tell me .*name\.$/i);
+    expect(req.text).not.toMatch(/\?$/);
+    expect(req.voiceSettings).toMatchObject({
+      style: 0.25,
+      speed: 0.88,
+      stability: 0.852,
+    });
+  });
 });
 
 // ─── TTS pipeline (brain-driven) ──────────────────────────────────────────────

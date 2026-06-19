@@ -23,24 +23,10 @@ import type { PersonaId } from "@/lib/personas";
  */
 
 // ─── Filler while a joke is being written ───────────────────────────────────
-// Spoken to cover the 1-4s the LLM takes to write a roast, so there's never dead
-// air. The breath beat before each one is added in code (comedianBrain inserts
-// COMEDIAN_CONFIG.fillerBreathMs of silence), NOT baked into the text — so no
-// leading "..." here. Keep these a touch longer than a single word: a few words
-// of "I'm-thinking-about-this" give ElevenLabs enough context to perform them
-// with real intonation. Two-word clips render flat/low-energy. Still lead with a
-// soft/voiced sound (vowel, m/n hum, "Ah/Oh/Yeah") so the clip onset isn't a
-// hard percussive consonant.
-export const NONWORD_FILLERS = [
-  "Mm, okay, let me see here.",
-  "Hm, alright, hang on a sec.",
-  "Uh-huh, sure, I'm with you.",
-  "Right, right, I hear you.",
-  "Oh, interesting, okay.",
-  "Yeah, alright, give me a beat.",
-  "Mm-hm, noted, hold on.",
-  "Ah, okay, I see where this is going.",
-];
+// The per-persona "thinking" filler pool (the old NONWORD_FILLERS) now lives on
+// each comedian: `fillers` in src/lib/comedians/*.ts, so each character thinks
+// out loud in its own voice. Toast uses TOAST_FILLER_LINES below. The echo-filler
+// mechanism (repeat the user's answer) stays global, right here.
 
 // Echo fillers — repeat the user's whole answer once, then bridge into the joke.
 // Keep these declarative (not question-shaped) so they sound like active listening.
@@ -181,9 +167,9 @@ export const TOAST_GREETINGS = [
   "…and she goes, NO, and I'm like — *clink* — oh shit, hi! You're here! Welcome welcome.",
 ];
 
-/** Drunk-thinking fillers — same role as NONWORD_FILLERS but for a woman
- *  who is genuinely WASTED. Meandering, slurry-adjacent, repeating herself,
- *  losing the thread. */
+/** Drunk-thinking fillers — same role as the per-persona `fillers`
+ *  (src/lib/comedians/*.ts) but for a woman who is genuinely WASTED.
+ *  Meandering, slurry-adjacent, repeating herself, losing the thread. */
 export const TOAST_FILLER_LINES = [
   "Hmm, where was I, where was I, what was I —",
   "Oh god, oh god — okay — let me think let me think.",

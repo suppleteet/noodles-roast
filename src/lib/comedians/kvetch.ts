@@ -69,51 +69,62 @@ export const kvetch: PersonaConfig = {
   ],
   motionPreferences: ["deadpan", "thinking", "conspiratorial", "emphasis", "smug"],
   // Canned video-call intros — instant opener when the cannedIntro toggle is on.
-  // Grumpy old man who can barely believe the contraption rang. Every line ends
-  // asking who they are (the opener doubles as the name question).
+  // Grumpy old man who can barely believe the contraption rang. Lines end on a
+  // short name command so TTS does not pitch up on a terminal question.
   cannedIntros: {
     clean: {
       anytime: [
-        "Well, would you look at that — Who am I talking to over there?",
-        "Oh good, I think the camera works. Now who are you? What's your name?",
-        "Hello there! Who is this?",
-        "How you doing there? How's it going? And who am I talking to?",
-        "Hey how ya doing, who am I talking to over there?",
-        "Good day to you, who is this? What should I call you?",
-        "Well this is a surprise, who is this and where are you from?",
+        "Well, would you look at that. Tell me your name.",
+        "Oh good, I think the camera works. Tell me your name.",
+        "Hello there. Tell me your name.",
+        "How you doing there? Alright, tell me your name.",
+        "Hey, how ya doing over there. Tell me your name.",
+        "Good day to you. Tell me your name.",
+        "Well this is a surprise. Tell me your name.",
       ],
       early: [
-        "Why are you up so early? The sun barely made it up. Who is this?",
-        "I haven't even had my coffee yet. What are we even doing awake? Who are you?",
-        "It is too early for whatever this is. Why are we here? And who are you?",
+        "Why are you up so early? The sun barely made it up. Tell me your name.",
+        "I haven't even had my coffee yet. Tell me your name.",
+        "It is too early for whatever this is. Tell me your name.",
       ],
       late: [
-        "It's the middle of the night and you're calling me. This better be good. Who is this?",
-        "Do you know what time it is? Of course you don't, you should be sleeping. What's your name?",
-        "Normal people are asleep right now. Not us, apparently. Who is this?",
+        "It's the middle of the night and you're calling me. Tell me your name.",
+        "Do you know what time it is? Of course you don't. Tell me your name.",
+        "Normal people are asleep right now. Not us, apparently. Tell me your name.",
       ],
     },
     vulgar: {
       anytime: [
-        "Well, what the fuck am I looking at here? Who am I talking to?",
-        "Oh terrific, the camera works. Who the hell is this?",
-        "Hello! welcome, welcome. Now who the hell are you?",
-        "I was having a perfectly fine day until you showed up. Who is this? Who am I talking to?",
-        "Welcome, you sack of fucking shit. Who the fuck is this?",
-        "Every god damn time with this. Who am I looking at? Who is this?",
-        "Well look at you, what a mess. Who are you and why am I talking to you?",
-        "God damnit, it's you! Wait, who are you?",
+        "Well, what the fuck am I looking at here? Tell me your name.",
+        "Oh terrific, the camera works. Tell me your damn name.",
+        "Hello! Welcome, welcome. Now tell me your name.",
+        "I was having a perfectly fine day until you showed up. Tell me your name.",
+        "Welcome, you sack of fucking shit. Tell me your name.",
+        "Every god damn time with this. Tell me your name.",
+        "Well look at you, what a mess. Tell me your name.",
+        "God damnit, it's you! Wait, tell me your name.",
       ],
       early: [
-        "Why are you here so fucking early? Who is this?",
-        "The sun's barely up and you're already bothering me. Who the hell is this?",
-        "Good morning, fuck face! I haven't even had my damn coffee yet. Who am I talking to?",
+        "Why are you here so fucking early? Tell me your name.",
+        "The sun's barely up and you're already bothering me. Tell me your name.",
+        "Good morning, fuck face! I haven't even had my damn coffee yet. Tell me your name.",
       ],
       late: [
-        "It's the middle of the god damn night. This had better be good. Who is this?",
-        "Do you know what the hell time it is? Of course you don't. Who are you?",
-        "Normal people are asleep right now, insomniac. Who the fuck is this?",
+        "It's the middle of the god damn night. This had better be good. Tell me your name.",
+        "Do you know what the hell time it is? Of course you don't. Tell me your name.",
+        "Normal people are asleep right now, insomniac. Tell me your name.",
       ],
     },
   },
+  // Spoken while a roast is being written. Grumpy, impatient, deadpan — an old
+  // man making you wait while he thinks.
+  fillers: [
+    "Mm, alright.",
+    "Hm, uh huh.",
+    "Yep, yep",
+    "Mm-hm, Mm-hm",
+    "uhhh huh",
+    "Right, right",
+    "Ahhhh, okay",
+  ],
 };

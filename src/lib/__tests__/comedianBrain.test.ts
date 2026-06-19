@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { BrainState } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
-import { NONWORD_FILLERS } from "@/lib/scriptLines";
 import { PERSONAS } from "@/lib/personas";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 
@@ -711,7 +710,22 @@ describe("ComedianBrain — filler echo gating", () => {
     // No leading "..." anymore — the breath beat is inserted in code (fillerBreathMs of
     // silence) instead of baked into the text. The filler is one of the verbatim non-word lines.
     expect(filler.startsWith("...")).toBe(false);
-    expect(NONWORD_FILLERS).toContain(filler);
+    // Fillers are now per-persona; this harness runs the default persona (kvetch).
+    expect(PERSONAS.kvetch.fillers).toContain(filler);
+  });
+
+  // The `fillers` field is required on PersonaConfig, so TS guarantees presence —
+  // but an empty array would still typecheck and then crash the picker at runtime
+  // (pool[floor(random*0)] → undefined → queueSpeak(undefined)). Guard non-emptiness
+  // and the no-leading-"..." rule for every persona's pool.
+  it("every persona has a usable filler pool", () => {
+    for (const persona of Object.values(PERSONAS)) {
+      expect(persona.fillers.length, `${persona.id} fillers`).toBeGreaterThan(0);
+      for (const line of persona.fillers) {
+        expect(line.trim().length, `${persona.id} filler "${line}"`).toBeGreaterThan(0);
+        expect(line.startsWith("..."), `${persona.id} filler "${line}"`).toBe(false);
+      }
+    }
   });
 
   it("does not echo a dangling half-sentence even when random=0", async () => {

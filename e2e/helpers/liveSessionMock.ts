@@ -155,8 +155,12 @@ export class LiveSessionMock {
 
     // Mock /api/tts-ws — streaming SSE TTS endpoint (WebSocket-backed in production)
     await this.page.route("/api/tts-ws", async (route) => {
-      const body = route.request().postDataJSON() as { text?: string };
-      const req: TtsRequest = { text: body.text ?? "" };
+      const body = route.request().postDataJSON() as TtsRequest & { text?: string };
+      const req: TtsRequest = {
+        text: body.text ?? "",
+        voiceId: body.voiceId,
+        voiceSettings: body.voiceSettings,
+      };
       this.ttsRequests.push(req);
       for (const resolve of this.ttsWaiters.splice(0)) resolve(req);
       // Return SSE with a silent PCM chunk (50ms at 24kHz, 16-bit mono)
@@ -179,6 +183,7 @@ export class LiveSessionMock {
       "/api/ambient-context",
       "/api/rephrase-question",
       "/api/open-videos-folder",
+      "/api/prewarm-tts",
     ]) {
       await this.page.route(path, (route) =>
         route.fulfill({ status: 200, contentType: "application/json", body: jsonOk })

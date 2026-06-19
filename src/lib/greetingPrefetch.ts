@@ -6,7 +6,7 @@ import { pickCannedIntro } from "@/lib/comedians/types";
 import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
-import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import { voiceSettingsForMotion, voiceSettingsForRoastOpener } from "@/lib/voiceMotionPresets";
 import type { MotionState } from "@/lib/motionStates";
 
 export interface GreetingPrefetchSnapshot {
@@ -334,16 +334,15 @@ export function prefetchCannedOpener(): CannedOpenerPrefetch | null {
     new Date().getHours(),
     s.contentMode === "vulgar",
   );
-  // Same register the brain uses for scripted opening lines (_openerRegister),
-  // and the same hard style cap (_openerVoiceOverride): the Roast base voice is
-  // style-maxed (1.0) and motion deltas barely lower it — style ~0.9 on a cold
-  // open is the high-pitched/shrill first line. Jokes keep the expressive base.
+  // Same register and final voice caps the brain uses for scripted opening
+  // lines. Keep this resolved at the final settings so the prefetched opener
+  // and watchdog fallback cannot synthesize the same first line differently.
   const motion = persona.motionPreferences[0] ?? "emphasis";
   const intensity = 0.6;
-  const cappedVoice = { ...s.voiceSettings, style: Math.min(s.voiceSettings.style, 0.5) };
-  const audio = prefetchGreetingAudio(text, motion, intensity, cappedVoice, "roast");
+  const openerVoice = voiceSettingsForRoastOpener(s.voiceSettings, motion, intensity);
+  const audio = prefetchGreetingAudio(text, undefined, undefined, openerVoice, "roast");
   s.logTiming(
-    `live: canned opener TTS prefetch fired (style=${cappedVoice.style}) — "${text.slice(0, 40)}…"`,
+    `live: canned opener TTS prefetch fired (style=${openerVoice.style} speed=${openerVoice.speed}) — "${text.slice(0, 40)}…"`,
   );
   return { text, motion, intensity, audio };
 }

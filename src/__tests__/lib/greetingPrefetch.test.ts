@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
-import { useSessionStore } from "@/store/useSessionStore";
+import { DEFAULT_VOICE_SETTINGS, useSessionStore } from "@/store/useSessionStore";
+import {
+  ROAST_OPENER_SPEED_CAP,
+  ROAST_OPENER_STYLE_CAP,
+} from "@/lib/voiceMotionPresets";
 
 const DEFAULT_SNAPSHOT = {
   activePersona: "kvetch" as const,
@@ -267,5 +271,48 @@ describe("prefetchGreetingAudio", () => {
       expect(buffer.done).toBe(true);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("prefetchCannedOpener", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends Kvetch startup TTS with non-rising text and final opener voice settings", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, body: null });
+    vi.stubGlobal("fetch", fetchMock);
+    useSessionStore.setState({
+      cannedIntro: true,
+      experienceType: "roast",
+      activePersona: "kvetch",
+      contentMode: "clean",
+      voiceSettings: { ...DEFAULT_VOICE_SETTINGS },
+    });
+
+    const { prefetchCannedOpener } = await import("@/lib/greetingPrefetch");
+    const opener = prefetchCannedOpener();
+
+    expect(opener).not.toBeNull();
+    expect(opener?.text).toMatch(/tell me your name\.$/i);
+    expect(opener?.text).not.toMatch(/\?$/);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tts-ws",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toBe(opener?.text);
+    expect(body.previousText).toBeUndefined();
+    expect(body.voiceSettings).toMatchObject({
+      style: ROAST_OPENER_STYLE_CAP,
+      speed: ROAST_OPENER_SPEED_CAP,
+      // Kvetch opens deadpan (stability delta +0.22) at opener intensity 0.6,
+      // applied to the base default stability — derive it so this survives a
+      // default-stability change.
+      stability: DEFAULT_VOICE_SETTINGS.stability + 0.22 * 0.6,
+      similarity_boost: DEFAULT_VOICE_SETTINGS.similarity_boost,
+    });
+    expect(body.experienceType).toBe("roast");
   });
 });

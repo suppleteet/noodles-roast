@@ -71,6 +71,13 @@ const CTX_GLITCH_WINDOW_MS = 600;
 let sharedCtx: AudioContext | null = null;
 let sharedCtxRunningSince: number | null = null;
 
+export function shouldUseMediaElementPlaybackBridge(userAgent?: string): boolean {
+  const ua =
+    userAgent ??
+    (typeof navigator === "undefined" ? "" : navigator.userAgent);
+  return /\bAndroid\b/i.test(ua);
+}
+
 function trackCtxRunning(ctx: AudioContext): void {
   const mark = () => {
     if (ctx.state === "running" && sharedCtxRunningSince === null) {
@@ -138,88 +145,93 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       recordingDestRef.current = recordingDest;
       analyser.connect(recordingDest);
 
-      // PLAYBACK: analyser → masterGain → playbackDest → <audio> element →
-      // device speakers.
+      // PLAYBACK: analyser -> masterGain -> speakers.
       //
-      // Why the <audio> indirection: ctx.destination alone does NOT reliably
-      // attach to the Android Chrome MEDIA volume widget. On many devices it
-      // routes outside the OS mixer entirely — hardware volume buttons don't
-      // affect it, and OS volume=0 still leaks audio through. Routing through
-      // a MediaStream into an <audio> element puts the playback path under the
-      // OS mixer (MEDIA stream), so the volume buttons control it AND zero
-      // means zero. masterGain caps Toast's hot peaks at ≈ −3 dB so loud lines
-      // don't blow out.
+      // Desktop Chrome should use ctx.destination directly. A user-observed
+      // diagnostic proved why: live output was high-pitched/glitchy, but the
+      // saved MP4 (captured from analyser -> recordingDest above) sounded
+      // correct. That isolates the problem to the old live-only bridge:
+      // MediaStreamAudioDestination -> hidden <audio srcObject>. Avoid that
+      // extra Chrome resampling/buffering path except on Android, where the
+      // bridge is still needed to bind hardware volume buttons to MEDIA volume.
       const masterGain = ctx.createGain();
       masterGain.gain.value = MASTER_PLAYBACK_GAIN;
       masterGainRef.current = masterGain;
-      const playbackDest = ctx.createMediaStreamDestination();
-      playbackDestRef.current = playbackDest;
       analyser.connect(masterGain);
-      masterGain.connect(playbackDest);
+      if (shouldUseMediaElementPlaybackBridge()) {
+        const playbackDest = ctx.createMediaStreamDestination();
+        playbackDestRef.current = playbackDest;
+        masterGain.connect(playbackDest);
+        useSessionStore.getState().logTiming("audio: speaker route=media-element-bridge");
 
-      // Mount the playback <audio> element. Imperative + appended to body so
-      // it survives any conditional rendering; the OS volume widget needs an
-      // element it can see in the DOM to bind controls to.
-      //
-      // ANDROID GOTCHA: <audio srcObject={mediaStream}> + autoplay only works
-      // reliably when (a) the stream isn't silent at srcObject-set time, and
-      // (b) play() is called inside a user gesture. warmUp() runs from
-      // startLiveSession() which is in an async effect — no gesture context.
-      // So we do two things:
-      //   1. Prime the stream with a 50ms silent buffer BEFORE setting
-      //      srcObject, so the MediaStream has data flowing when the audio
-      //      element binds to it.
-      //   2. If play() rejects, register a one-time pointerdown listener that
-      //      retries play() on the next user tap. The user's first tap is
-      //      almost always within a second of the puppet appearing anyway.
-      if (typeof document !== "undefined") {
-        let el = audioElRef.current;
-        if (!el) {
-          el = document.createElement("audio");
-          el.autoplay = true;
-          // playsInline isn't on the HTMLAudioElement type (it's HTMLVideoElement),
-          // but Android browsers respect the attribute on <audio> too — set it
-          // via setAttribute so it sticks without a type cast.
-          el.setAttribute("playsinline", "");
-          // Keep it out of the visual flow — but in the DOM so OS mixer sees it.
-          el.style.position = "fixed";
-          el.style.width = "0";
-          el.style.height = "0";
-          el.style.opacity = "0";
-          el.style.pointerEvents = "none";
-          // Don't show a default controls UI even if devtools force-shows it.
-          el.controls = false;
-          document.body.appendChild(el);
-          audioElRef.current = el;
+        // Mount the playback <audio> element. Imperative + appended to body so
+        // it survives any conditional rendering; the Android OS volume widget
+        // needs an element it can see in the DOM to bind controls to.
+        //
+        // ANDROID GOTCHA: <audio srcObject={mediaStream}> + autoplay only works
+        // reliably when (a) the stream isn't silent at srcObject-set time, and
+        // (b) play() is called inside a user gesture. warmUp() runs from
+        // startLiveSession() which is in an async effect — no gesture context.
+        // So we do two things:
+        //   1. Prime the stream with a 50ms silent buffer BEFORE setting
+        //      srcObject, so the MediaStream has data flowing when the audio
+        //      element binds to it.
+        //   2. If play() rejects, register a one-time pointerdown listener that
+        //      retries play() on the next user tap. The user's first tap is
+        //      almost always within a second of the puppet appearing anyway.
+        if (typeof document !== "undefined") {
+          let el = audioElRef.current;
+          if (!el) {
+            el = document.createElement("audio");
+            el.autoplay = true;
+            // playsInline isn't on the HTMLAudioElement type (it's HTMLVideoElement),
+            // but Android browsers respect the attribute on <audio> too — set it
+            // via setAttribute so it sticks without a type cast.
+            el.setAttribute("playsinline", "");
+            // Keep it out of the visual flow — but in the DOM so OS mixer sees it.
+            el.style.position = "fixed";
+            el.style.width = "0";
+            el.style.height = "0";
+            el.style.opacity = "0";
+            el.style.pointerEvents = "none";
+            // Don't show a default controls UI even if devtools force-shows it.
+            el.controls = false;
+            document.body.appendChild(el);
+            audioElRef.current = el;
+          }
+          // (1) Prime the stream with 50ms of silence — analyser -> masterGain ->
+          // playbackDest now has data flowing before the <audio> element binds.
+          // Without this, Chrome Android sees an empty MediaStream and pauses
+          // the audio element until "data arrives", which it then can't auto-
+          // resume from outside a user gesture.
+          try {
+            const primeBuf = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.05), ctx.sampleRate);
+            const primeSrc = ctx.createBufferSource();
+            primeSrc.buffer = primeBuf;
+            primeSrc.connect(analyser);
+            primeSrc.start();
+          } catch { /* createBufferSource shouldn't fail; ignore if it does */ }
+
+          el.srcObject = playbackDest.stream;
+
+          // (2) Try play(). If it rejects (no gesture), arm a one-shot retry on
+          // the next pointerdown anywhere on the page so the user's first tap
+          // (or the next button press) wakes the element.
+          el.play().catch(() => {
+            const audioEl = el!;
+            const retry = () => {
+              void audioEl.play().catch(() => { /* still gated, give up */ });
+              window.removeEventListener("pointerdown", retry);
+              window.removeEventListener("touchstart", retry);
+            };
+            window.addEventListener("pointerdown", retry, { once: true, passive: true });
+            window.addEventListener("touchstart", retry, { once: true, passive: true });
+          });
         }
-        // (1) Prime the stream with 50ms of silence — analyser → masterGain →
-        // playbackDest now has data flowing before the <audio> element binds.
-        // Without this, Chrome Android sees an empty MediaStream and pauses
-        // the audio element until "data arrives", which it then can't auto-
-        // resume from outside a user gesture.
-        try {
-          const primeBuf = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.05), ctx.sampleRate);
-          const primeSrc = ctx.createBufferSource();
-          primeSrc.buffer = primeBuf;
-          primeSrc.connect(analyser);
-          primeSrc.start();
-        } catch { /* createBufferSource shouldn't fail; ignore if it does */ }
-
-        el.srcObject = playbackDest.stream;
-
-        // (2) Try play(). If it rejects (no gesture), arm a one-shot retry on
-        // the next pointerdown anywhere on the page so the user's first tap
-        // (or the next button press) wakes the element.
-        el.play().catch(() => {
-          const audioEl = el!;
-          const retry = () => {
-            void audioEl.play().catch(() => { /* still gated, give up */ });
-            window.removeEventListener("pointerdown", retry);
-            window.removeEventListener("touchstart", retry);
-          };
-          window.addEventListener("pointerdown", retry, { once: true, passive: true });
-          window.addEventListener("touchstart", retry, { once: true, passive: true });
-        });
+      } else {
+        playbackDestRef.current = null;
+        masterGain.connect(ctx.destination);
+        useSessionStore.getState().logTiming("audio: speaker route=direct-destination");
       }
     }
     return ctx;

@@ -13,6 +13,9 @@
 import type { VoiceSettings } from "@/store/useSessionStore";
 import type { MotionState } from "@/lib/stateMachine";
 
+export const ROAST_OPENER_STYLE_CAP = 0.25;
+export const ROAST_OPENER_SPEED_CAP = 0.88;
+
 /**
  * Per-motion offsets. Each value is ADDED to the base setting before clamping.
  * `null` means no offset.
@@ -101,5 +104,23 @@ export function voiceSettingsForMotion(
     stability: clamp(base.stability + (delta.stability ?? 0) * i, 0.2, 1),
     style: clamp(base.style + (delta.style ?? 0) * i, 0, 1),
     speed: clamp(base.speed + (delta.speed ?? 0) * i, 0.7, 1.2),
+  };
+}
+
+/**
+ * Final voice settings for scripted Roast openers. Apply this after motion
+ * deltas so the prefetched path and watchdog fallback synthesize the first line
+ * with the same quieter register.
+ */
+export function voiceSettingsForRoastOpener(
+  base: VoiceSettings,
+  motion?: MotionState,
+  intensity = 0.7,
+): VoiceSettings {
+  const merged = voiceSettingsForMotion(base, motion, intensity);
+  return {
+    ...merged,
+    style: Math.min(merged.style, ROAST_OPENER_STYLE_CAP),
+    speed: Math.min(merged.speed, ROAST_OPENER_SPEED_CAP),
   };
 }

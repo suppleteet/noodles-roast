@@ -32,7 +32,6 @@ import {
 import { TOAST_QUESTION_BANK, drunkWrongName } from "@/lib/toastQuestionBank";
 import { pickCannedIntro } from "@/lib/comedians/types";
 import {
-  NONWORD_FILLERS,
   ECHO_FILLER_TEMPLATES,
   ECHO_FILLER_PROBABILITY,
   QUESTION_BRIDGES,
@@ -61,6 +60,7 @@ import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
 import { PERSONAS, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
+import { voiceSettingsForRoastOpener } from "@/lib/voiceMotionPresets";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1171,11 +1171,17 @@ export class ComedianBrain {
           openerMotion,
           openerIntensity,
           undefined,
-          this._openerVoiceOverride(),
+          this._openerVoiceOverride(openerMotion, openerIntensity),
         );
         this.deps.logTiming("brain: canned intro opener (prefetched TTS audio)");
       } else {
-        this.deps.queueSpeak(opener, openerMotion, openerIntensity, undefined, this._openerVoiceOverride());
+        this.deps.queueSpeak(
+          opener,
+          openerMotion,
+          openerIntensity,
+          undefined,
+          this._openerVoiceOverride(openerMotion, openerIntensity),
+        );
         this.deps.logTiming("brain: canned intro opener (no LLM, no vision wait)");
       }
       this.deps.setCurrentQuestion(opener);
@@ -1217,7 +1223,13 @@ export class ComedianBrain {
         const fallback = this._greetingFallbackLine();
         const [fbMotion, fbIntensity] = this._openerRegister();
         this.deps.logTiming("brain: greeting failed — using short fallback");
-        this.deps.queueSpeak(fallback, fbMotion, fbIntensity, undefined, this._openerVoiceOverride());
+        this.deps.queueSpeak(
+          fallback,
+          fbMotion,
+          fbIntensity,
+          undefined,
+          this._openerVoiceOverride(fbMotion, fbIntensity),
+        );
         this._addLedger("joke", fallback, []);
       } else {
         const joke = response.jokes[0];
@@ -1294,11 +1306,23 @@ export class ComedianBrain {
    *  style-maxed, which reads high-pitched/shrill on a cold open. Cap style
    *  hard for scripted openers; jokes keep the expressive base. Toast's base
    *  style is already moderate — no cap needed. */
-  private _openerVoiceOverride(): { style: number } | undefined {
+  private _openerVoiceOverride(
+    motion: MotionState,
+    intensity: number,
+  ): import("@/store/useSessionStore").VoiceSettings | undefined {
     if (this._isToast()) return undefined;
     const base = this.deps.getVoiceSettings?.();
-    const style = Math.min(base?.style ?? 1, 0.5);
-    return { style };
+    return voiceSettingsForRoastOpener(
+      base ?? {
+        stability: 0.5,
+        similarity_boost: 0.7,
+        style: 1,
+        speed: 1,
+        use_speaker_boost: true,
+      },
+      motion,
+      intensity,
+    );
   }
 
   /** Canned greeting line matched to the experience — Toast must never open in the roast voice. */
@@ -1839,8 +1863,14 @@ export class ComedianBrain {
     return "restate";
   }
 
-  // Filler reaction lines (NONWORD_FILLERS / ECHO_FILLER_TEMPLATES / ECHO_FILLER_PROBABILITY)
-  // live in src/lib/scriptLines.ts — edit them there.
+  // The "thinking" filler pool is per-persona — edit `fillers` in
+  // src/lib/comedians/*.ts (Toast uses TOAST_FILLER_LINES). The echo-filler
+  // mechanism (ECHO_FILLER_TEMPLATES / ECHO_FILLER_PROBABILITY) stays global in
+  // src/lib/scriptLines.ts.
+  /** The active persona's "thinking" filler lines (src/lib/comedians/*.ts). */
+  private _roastFillers(): string[] {
+    return PERSONAS[this.deps.getPersona()].fillers;
+  }
 
   // Meta-complaints about the comedian's own behavior — never echo these.
   // Echoing "You keep asking about the posters." back as "...you say." reads as broken/glitchy.
@@ -1898,25 +1928,26 @@ export class ComedianBrain {
         Math.floor(Math.random() * TOAST_FILLER_LINES.length)
       ];
     }
+    const fillers = this._roastFillers();
     if (this._isFillerEchoable(answer) && Math.random() < ECHO_FILLER_PROBABILITY) {
       const cleaned = ComedianBrain._stripLeadingHesitation(
         answer.trim().replace(/[.?!,]+$/, "").trim(),
       );
       // If stripping left us with too little to echo, fall back to non-word filler.
       if (wordCount(cleaned) < 1) {
-        return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
+        return fillers[Math.floor(Math.random() * fillers.length)];
       }
       const tpl = ECHO_FILLER_TEMPLATES[
         Math.floor(Math.random() * ECHO_FILLER_TEMPLATES.length)
       ];
       return tpl.replaceAll("{answer}", cleaned);
     }
-    return NONWORD_FILLERS[Math.floor(Math.random() * NONWORD_FILLERS.length)];
+    return fillers[Math.floor(Math.random() * fillers.length)];
   }
 
   /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
   private _pickNonWordFiller(avoid: string | null): string {
-    const pool0 = this._isToast() ? TOAST_FILLER_LINES : NONWORD_FILLERS;
+    const pool0 = this._isToast() ? TOAST_FILLER_LINES : this._roastFillers();
     const opts = pool0.filter((f) => f !== avoid);
     const pool = opts.length > 0 ? opts : pool0;
     return pool[Math.floor(Math.random() * pool.length)];
@@ -3368,6 +3399,7 @@ export class ComedianBrain {
   /** Returns the next valid question, skipping excluded ones. Null if exhausted. */
   private _nextValidQuestion(): ComedyQuestion | null {
     const total = this.shuffledQuestions.length;
+
     for (let i = 0; i < total; i++) {
       const q = this.shuffledQuestions[(this.questionIndex + i) % total];
       // Skip if already asked

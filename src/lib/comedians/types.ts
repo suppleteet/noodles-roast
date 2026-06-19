@@ -14,7 +14,13 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   body language AND drives per-line voice prosody (voiceMotionPresets.ts).
  * - cannedIntros → instant video-call opener pool, spoken (not LLM-generated)
  *   when the cannedIntro toggle is on. Every line must END by asking who the
- *   user is — the opener doubles as the name question.
+ *   user is or telling them to give their name — the opener doubles as the
+ *   name question.
+ * - fillers → short "thinking" lines spoken (not LLM-generated) to cover the
+ *   1-4s while a roast is being written, so there's never dead air. Not injected
+ *   into the prompt. Keep them a few words long and lead with a soft/voiced
+ *   sound (a vowel, an "Mm/Oh/Yeah" hum) — the breath beat before each is added
+ *   in code, so don't bake in a leading "...". (Toast has its own pool.)
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.
@@ -32,6 +38,10 @@ export interface PersonaConfig {
   avoidTopics?: string[];
   motionPreferences: MotionState[];
   cannedIntros: CannedIntros;
+  /** Short "thinking" filler lines spoken while a roast is being written
+   *  (covers LLM latency so there's no dead air). Spoken verbatim, not sent to
+   *  the LLM. See the field docs above for the soft-onset / no-leading-"..." rule. */
+  fillers: string[];
 }
 
 /** One pool of canned video-call intro lines. `early` (5-9am) and `late`
@@ -67,7 +77,7 @@ export function pickCannedIntro(
   // Pools should never be empty (test-enforced per persona), but a new persona
   // with a sparse bank must not crash the instant-opener path — fall back to
   // the other buckets, then to a neutral line. The opener MUST still end with
-  // a who-are-you ask (it doubles as the name question).
+  // an identity ask (it doubles as the name question).
   const pool = bank.anytime.length > 0 ? bank.anytime : [...bank.early, ...bank.late];
   if (pool.length === 0) return "Well, look at that — it connected. Who am I talking to?";
   return pool[Math.floor(rand() * pool.length)];

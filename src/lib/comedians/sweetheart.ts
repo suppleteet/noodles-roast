@@ -88,4 +88,15 @@ export const sweetheart: PersonaConfig = {
       ],
     },
   },
+  // Spoken while a roast is being written. Warm, patient, motherly — the
+  // sweetness that makes the eventual kill-shot land harder.
+  fillers: [
+    "Oh, mm, let me think about this, sweetie.",
+    "Aw, hang on, give me one second.",
+    "Mm-hm, okay honey, I'm with you.",
+    "Oh bless, let me just look here.",
+    "Yeah, one moment, dear, I'm thinking.",
+    "Mm, alright now, hold on.",
+    "Oh, let me see, sweetheart.",
+  ],
 };
