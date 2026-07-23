@@ -37,10 +37,8 @@ export interface PcmPlaybackHandle {
   /** Route an external stream (e.g. mic) to the recording destination only
    *  (NOT speakers — avoids feedback). Returns a disconnect function. */
   addInputToRecording(stream: MediaStream): () => void;
-  /** Call synchronously from a user gesture (tap/click) to create and warm the
-   *  AudioContext. On iOS Safari this is required for hardware volume buttons
-   *  to control Web Audio output. */
-  warmUp(): void;
+  /** Create and resume the AudioContext after media permission has resolved. */
+  warmUp(): Promise<void>;
 }
 
 /**
@@ -63,75 +61,47 @@ const MASTER_PLAYBACK_GAIN = 0.7;
  *  came out high-pitched. 600ms covers the observed window with margin. */
 const CTX_GLITCH_WINDOW_MS = 600;
 
-// Module-level shared context so the Start-button GESTURE can create and
-// resume it (page.tsx → warmSharedAudioContext). Resume outside a gesture is
-// best-effort under autoplay policies; inside the gesture it's guaranteed —
-// and by the time the canned opener plays (~2s later) the glitch window has
-// burned off on silence.
-let sharedCtx: AudioContext | null = null;
-let sharedCtxRunningSince: number | null = null;
-
-export function shouldUseMediaElementPlaybackBridge(userAgent?: string): boolean {
-  const ua =
-    userAgent ??
-    (typeof navigator === "undefined" ? "" : navigator.userAgent);
-  return /\bAndroid\b/i.test(ua);
-}
-
-function trackCtxRunning(ctx: AudioContext): void {
-  const mark = () => {
-    if (ctx.state === "running" && sharedCtxRunningSince === null) {
-      sharedCtxRunningSince = performance.now();
-    }
-  };
-  mark();
-  ctx.addEventListener("statechange", mark);
-}
-
-/** Create + resume the playback AudioContext from a user gesture (Start button).
- *  Safe to call repeatedly; no-op on the server. */
-export function warmSharedAudioContext(): void {
-  if (typeof window === "undefined" || typeof AudioContext === "undefined") return;
-  if (!sharedCtx || sharedCtx.state === "closed") {
-    sharedCtx = new AudioContext({ latencyHint: "playback" });
-    sharedCtxRunningSince = null;
-    trackCtxRunning(sharedCtx);
-  }
-  if (sharedCtx.state === "suspended") void sharedCtx.resume();
+/**
+ * Regression guard: the old Android-only MediaStream → hidden <audio> bridge
+ * introduced a second playback clock. Chrome could begin at the wrong rate
+ * and slowly converge, producing the live-only "chipmunk" opener while the
+ * recording (captured before that bridge) remained correct.
+ */
+export function shouldUseMediaElementPlaybackBridge(): false {
+  return false;
 }
 
 export function usePcmPlayback(): PcmPlaybackHandle {
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const recordingDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-  const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const queueEndRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const rafRef = useRef<number>(0);
   const lastAmplitudeRef = useRef<number>(0);
+  const amplitudeDataRef = useRef<Float32Array<ArrayBuffer>>(new Float32Array(256));
   const preRollDoneRef = useRef<boolean>(false);
+  const ctxRunningSinceRef = useRef<number | null>(null);
 
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") {
-      // Prefer the gesture-warmed shared context (warmSharedAudioContext at the
-      // Start button) — it's been running since the button press, so the iOS
-      // startup glitch window has already burned off. Fall back to creating one
-      // here (device native sample rate — don't request 24kHz; iOS sometimes
-      // coerces silently to 48kHz and its implicit resampler glitches. We
-      // resample ourselves in enqueueChunk for one deterministic path).
-      if (sharedCtx && sharedCtx.state !== "closed") {
-        ctx = sharedCtx;
-      } else {
-        ctx = new AudioContext({ latencyHint: "playback" });
-        sharedCtx = ctx;
-        sharedCtxRunningSince = null;
-        trackCtxRunning(ctx);
-      }
+      // This hook mounts only after camera/mic permission resolves. Creating
+      // the playback context here is intentional: warming it before getUserMedia
+      // can leave Chrome holding the pre-permission device sample rate while
+      // the audio stack switches devices underneath it.
+      ctx = new AudioContext({ latencyHint: "playback" });
       ctxRef.current = ctx;
-      preRollDoneRef.current = false; // fresh context binding → first real buffer gets the silent pre-roll
+      ctxRunningSinceRef.current = null;
+      const markRunning = () => {
+        if (ctx?.state === "running" && ctxRunningSinceRef.current === null) {
+          ctxRunningSinceRef.current = performance.now();
+        }
+      };
+      markRunning();
+      ctx.addEventListener("statechange", markRunning);
+      preRollDoneRef.current = false;
 
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -147,92 +117,16 @@ export function usePcmPlayback(): PcmPlaybackHandle {
 
       // PLAYBACK: analyser -> masterGain -> speakers.
       //
-      // Desktop Chrome should use ctx.destination directly. A user-observed
-      // diagnostic proved why: live output was high-pitched/glitchy, but the
-      // saved MP4 (captured from analyser -> recordingDest above) sounded
-      // correct. That isolates the problem to the old live-only bridge:
-      // MediaStreamAudioDestination -> hidden <audio srcObject>. Avoid that
-      // extra Chrome resampling/buffering path except on Android, where the
-      // bridge is still needed to bind hardware volume buttons to MEDIA volume.
+      // Use the AudioContext destination directly on every platform. The old
+      // Android-only MediaStream -> hidden <audio> bridge added another clock
+      // and resampler after the recording branch, exactly matching the observed
+      // "live sounds pitched, saved video sounds normal" failure.
       const masterGain = ctx.createGain();
       masterGain.gain.value = MASTER_PLAYBACK_GAIN;
       masterGainRef.current = masterGain;
       analyser.connect(masterGain);
-      if (shouldUseMediaElementPlaybackBridge()) {
-        const playbackDest = ctx.createMediaStreamDestination();
-        playbackDestRef.current = playbackDest;
-        masterGain.connect(playbackDest);
-        useSessionStore.getState().logTiming("audio: speaker route=media-element-bridge");
-
-        // Mount the playback <audio> element. Imperative + appended to body so
-        // it survives any conditional rendering; the Android OS volume widget
-        // needs an element it can see in the DOM to bind controls to.
-        //
-        // ANDROID GOTCHA: <audio srcObject={mediaStream}> + autoplay only works
-        // reliably when (a) the stream isn't silent at srcObject-set time, and
-        // (b) play() is called inside a user gesture. warmUp() runs from
-        // startLiveSession() which is in an async effect — no gesture context.
-        // So we do two things:
-        //   1. Prime the stream with a 50ms silent buffer BEFORE setting
-        //      srcObject, so the MediaStream has data flowing when the audio
-        //      element binds to it.
-        //   2. If play() rejects, register a one-time pointerdown listener that
-        //      retries play() on the next user tap. The user's first tap is
-        //      almost always within a second of the puppet appearing anyway.
-        if (typeof document !== "undefined") {
-          let el = audioElRef.current;
-          if (!el) {
-            el = document.createElement("audio");
-            el.autoplay = true;
-            // playsInline isn't on the HTMLAudioElement type (it's HTMLVideoElement),
-            // but Android browsers respect the attribute on <audio> too — set it
-            // via setAttribute so it sticks without a type cast.
-            el.setAttribute("playsinline", "");
-            // Keep it out of the visual flow — but in the DOM so OS mixer sees it.
-            el.style.position = "fixed";
-            el.style.width = "0";
-            el.style.height = "0";
-            el.style.opacity = "0";
-            el.style.pointerEvents = "none";
-            // Don't show a default controls UI even if devtools force-shows it.
-            el.controls = false;
-            document.body.appendChild(el);
-            audioElRef.current = el;
-          }
-          // (1) Prime the stream with 50ms of silence — analyser -> masterGain ->
-          // playbackDest now has data flowing before the <audio> element binds.
-          // Without this, Chrome Android sees an empty MediaStream and pauses
-          // the audio element until "data arrives", which it then can't auto-
-          // resume from outside a user gesture.
-          try {
-            const primeBuf = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.05), ctx.sampleRate);
-            const primeSrc = ctx.createBufferSource();
-            primeSrc.buffer = primeBuf;
-            primeSrc.connect(analyser);
-            primeSrc.start();
-          } catch { /* createBufferSource shouldn't fail; ignore if it does */ }
-
-          el.srcObject = playbackDest.stream;
-
-          // (2) Try play(). If it rejects (no gesture), arm a one-shot retry on
-          // the next pointerdown anywhere on the page so the user's first tap
-          // (or the next button press) wakes the element.
-          el.play().catch(() => {
-            const audioEl = el!;
-            const retry = () => {
-              void audioEl.play().catch(() => { /* still gated, give up */ });
-              window.removeEventListener("pointerdown", retry);
-              window.removeEventListener("touchstart", retry);
-            };
-            window.addEventListener("pointerdown", retry, { once: true, passive: true });
-            window.addEventListener("touchstart", retry, { once: true, passive: true });
-          });
-        }
-      } else {
-        playbackDestRef.current = null;
-        masterGain.connect(ctx.destination);
-        useSessionStore.getState().logTiming("audio: speaker route=direct-destination");
-      }
+      masterGain.connect(ctx.destination);
+      useSessionStore.getState().logTiming("audio: speaker route=direct-destination");
     }
     return ctx;
   }
@@ -241,7 +135,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const pollAmplitude = useCallback(() => {
     const analyser = analyserRef.current;
     if (analyser) {
-      const data = new Float32Array(analyser.fftSize);
+      const data = amplitudeDataRef.current;
       analyser.getFloatTimeDomainData(data);
       let sumSq = 0;
       for (let i = 0; i < data.length; i++) sumSq += data[i] * data[i];
@@ -274,7 +168,9 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     if (!preRollDoneRef.current) {
       preRollDoneRef.current = true;
       const runningMs =
-        sharedCtxRunningSince === null ? 0 : performance.now() - sharedCtxRunningSince;
+        ctxRunningSinceRef.current === null
+          ? 0
+          : performance.now() - ctxRunningSinceRef.current;
       const needMs = Math.max(0, CTX_GLITCH_WINDOW_MS - runningMs);
       // Always log the first-buffer context state — this line is how session
       // logs prove which warm path ran when diagnosing pitched/garbled openers.
@@ -366,12 +262,7 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       if (ctxRef.current?.state !== "closed") {
         ctxRef.current?.close();
       }
-      // Release the shared singleton if it was ours — the next session's Start
-      // gesture creates and warms a fresh one.
-      if (sharedCtx === ctxRef.current) {
-        sharedCtx = null;
-        sharedCtxRunningSince = null;
-      }
+      ctxRunningSinceRef.current = null;
     };
   }, [flush]);
 
@@ -387,16 +278,13 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     return Math.max(0, (queueEndRef.current - ctx.currentTime) * 1000);
   }, []);
 
-  const warmUp = useCallback(() => {
+  const warmUp = useCallback(async (): Promise<void> => {
     const ctx = getOrCreateContext();
-    if (ctx.state === "suspended") ctx.resume();
-    // 250ms of silence at OUTPUT_SAMPLE_RATE: marks the context as user-initiated
-    // media (so iOS hardware volume buttons control it) AND warms the resampler
-    // before real audio arrives. Without the latter, iOS Safari plays the first
-    // ~500ms of real chunks at the context's native rate (chipmunk effect) before
-    // the 24kHz→48kHz resampler stabilizes.
-    const samples = Math.round(OUTPUT_SAMPLE_RATE * 0.25);
-    const buf = ctx.createBuffer(1, samples, OUTPUT_SAMPLE_RATE);
+    if (ctx.state === "suspended") await ctx.resume();
+    // Prime at the context's native rate. The first real 24kHz PCM chunk is
+    // manually resampled below, after the device/output clock is stable.
+    const samples = Math.round(ctx.sampleRate * 0.25);
+    const buf = ctx.createBuffer(1, samples, ctx.sampleRate);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(analyserRef.current ?? ctx.destination);

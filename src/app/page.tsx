@@ -18,7 +18,6 @@ import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
 import { useDevUnlock, toggleDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
-import { warmSharedAudioContext } from "@/components/audio/usePcmPlayback";
 
 const ShareScreen = dynamic(() => import("@/components/ui/ShareScreen"), { ssr: false });
 const DebugTimeline = dynamic(() => import("@/components/ui/DebugTimeline"), { ssr: false });
@@ -296,13 +295,6 @@ function MainApp() {
 
   const handleStartSession = async () => {
     preloadLiveExperienceModules();
-    // Create + resume the playback AudioContext INSIDE this gesture — autoplay
-    // policies make a resume outside a gesture best-effort, and a context that
-    // starts running late plays its first ~600ms at the wrong rate (the
-    // high-pitched opener — reproduced on Chrome Windows/Android). By the time
-    // the canned opener plays (~2s from now) the glitch window has burned off
-    // on silence instead of the opener's first words.
-    warmSharedAudioContext();
     // MP4-only flow — block the session if MediaRecorder can't produce MP4.
     // No fallback to WebM since the server can't convert it (Vercel Hobby tier
     // has no ffmpeg). Surface a clear message so the user knows to switch

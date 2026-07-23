@@ -16,6 +16,8 @@ import type { MotionState } from "@/lib/motionStates";
 import { recordTtsUsage } from "@/lib/usageTracker";
 import { getElevenLabsModelId } from "@/lib/elTtsStream";
 import { voiceIdForExperience } from "@/lib/constants";
+import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 type StreamEvent =
   | { type: "joke"; index?: number; text: string; motion: string; intensity: number; score: number }
@@ -131,9 +133,17 @@ function buildUserParts(
 export async function POST(req: NextRequest) {
   let body: GenerateSpeakRequest;
   try {
-    body = (await req.json()) as GenerateSpeakRequest;
-  } catch {
-    return new Response("Invalid JSON", { status: 400 });
+    body = await readLimitedJson<GenerateSpeakRequest>(req);
+  } catch (error) {
+    const status = error instanceof ApiRequestError ? error.status : 400;
+    const message = error instanceof ApiRequestError ? error.message : "Invalid JSON";
+    return new Response(message, { status });
+  }
+  if (body.imageBase64 !== undefined && !isValidImageBase64(body.imageBase64)) {
+    return new Response("Invalid or oversized image", { status: 413 });
+  }
+  if (body.model !== undefined && !isRoastModelId(body.model)) {
+    return new Response("Unsupported model", { status: 400 });
   }
 
   const model = body.model ?? ROAST_MODEL;
@@ -297,6 +307,8 @@ export async function POST(req: NextRequest) {
             model,
             systemPrompt,
             userParts,
+            maxOutputTokens: 1024,
+            reasoningProfile: "creative",
             forceJsonObject: true,
           });
         }
@@ -383,7 +395,7 @@ export async function POST(req: NextRequest) {
           try {
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ type: "error", error: "quota_exceeded", provider: e.provider, detail: e.message })}\n\n`,
+                `data: ${JSON.stringify({ type: "error", error: "quota_exceeded", provider: e.provider })}\n\n`,
               ),
             );
           } catch {

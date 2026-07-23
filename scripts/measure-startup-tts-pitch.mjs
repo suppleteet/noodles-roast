@@ -4,7 +4,7 @@ import path from "node:path";
 import WebSocket from "ws";
 
 const SAMPLE_RATE = 24000;
-const DEFAULT_MODEL = "eleven_turbo_v2_5";
+const DEFAULT_MODEL = "eleven_flash_v2_5";
 const DEFAULT_HOST = "api.elevenlabs.io";
 const OUTPUT_FORMAT = "pcm_24000";
 const DEFAULT_TEXT = "Hello there! Who is this?";

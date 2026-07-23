@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSession, deleteSession, warmSession } from "@/lib/chatSessionStore";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
+import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 /**
  * POST /api/comedian-session — Create a new multi-turn chat session.
@@ -24,9 +26,13 @@ export async function POST(req: NextRequest) {
     experienceType?: string;
   };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    body = await readLimitedJson<typeof body>(req, 50_000);
+  } catch (error) {
+    const status = error instanceof ApiRequestError ? error.status : 400;
+    return NextResponse.json({ error: "Invalid request" }, { status });
+  }
+  if (body.model !== undefined && !isRoastModelId(body.model)) {
+    return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
   }
 
   const persona: PersonaId = PERSONA_IDS.includes(body.persona as PersonaId)
@@ -59,9 +65,10 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   let body: { sessionId?: string };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    body = await readLimitedJson<typeof body>(req, 10_000);
+  } catch (error) {
+    const status = error instanceof ApiRequestError ? error.status : 400;
+    return NextResponse.json({ error: "Invalid request" }, { status });
   }
 
   if (body.sessionId) {

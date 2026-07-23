@@ -8,6 +8,8 @@ import type { BurnIntensity } from "@/lib/prompts";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import { recordGeminiUsage } from "@/lib/usageTracker";
 import { toModelUnavailableError } from "@/lib/llmClient";
+import { geminiThinkingConfig } from "@/lib/geminiThinking";
+import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 const ANALYZE_RETRY_DELAYS_MS = [250, 700];
@@ -41,12 +43,25 @@ type RoastSentenceRaw = { text: string; motion: string; intensity: number };
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, burnIntensity = 3, mode = "roast", persona } = await req.json();
-    if (!imageBase64) {
-      return NextResponse.json({ error: "imageBase64 required" }, { status: 400 });
+    const body = await readLimitedJson<{
+      imageBase64?: unknown;
+      burnIntensity?: unknown;
+      mode?: unknown;
+      persona?: unknown;
+    }>(req);
+    if (!isValidImageBase64(body.imageBase64)) {
+      return NextResponse.json({ error: "Valid imageBase64 required" }, { status: 400 });
     }
+    const imageBase64 = body.imageBase64;
+    const burnIntensity: BurnIntensity = ([1, 2, 3, 4, 5] as const).includes(
+      body.burnIntensity as BurnIntensity,
+    ) ? (body.burnIntensity as BurnIntensity) : 3;
+    const mode = body.mode === "vision" || body.mode === "greeting" ? body.mode : "roast";
+    const persona = body.persona;
 
-    const personaId: PersonaId = PERSONA_IDS.includes(persona) ? persona : DEFAULT_PERSONA;
+    const personaId: PersonaId = PERSONA_IDS.includes(persona as PersonaId)
+      ? (persona as PersonaId)
+      : DEFAULT_PERSONA;
 
     // Vision-only mode: fast, focused call that returns only observations
     if (mode === "vision") {
@@ -65,7 +80,10 @@ Keep it compact. Return ONLY the JSON object.` },
             ],
           },
         ],
-        config: { thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 500 },
+        config: {
+          thinkingConfig: geminiThinkingConfig(VISION_MODEL, "realtime-utility"),
+          maxOutputTokens: 500,
+        },
       });
       const text = response.text ?? "{}";
       recordGeminiUsage({
@@ -100,7 +118,7 @@ Keep it compact. Return ONLY the JSON object.` },
       ],
       config: {
         systemInstruction: systemPrompt,
-        thinkingConfig: { thinkingBudget: 0 },
+        thinkingConfig: geminiThinkingConfig(VISION_MODEL, "creative"),
         maxOutputTokens: 1200,
       },
     });
@@ -128,6 +146,9 @@ Keep it compact. Return ONLY the JSON object.` },
 
     return NextResponse.json({ sentences, observations });
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     const unavailable = toModelUnavailableError(VISION_MODEL, err);
     if (unavailable) {
       console.error("[analyze] MODEL_UNAVAILABLE:", unavailable.failedModel);
@@ -140,8 +161,7 @@ Keep it compact. Return ONLY the JSON object.` },
         { status: 503 },
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[analyze]", message);
-    return NextResponse.json({ error: "Analyze API failed", detail: message }, { status: 500 });
+    console.error("[analyze]", err);
+    return NextResponse.json({ error: "Analyze API failed" }, { status: 500 });
   }
 }

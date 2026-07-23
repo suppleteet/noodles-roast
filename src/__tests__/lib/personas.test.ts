@@ -62,6 +62,12 @@ describe("PersonaConfig shape", () => {
               ),
               `doesn't end asking who they are: "${line}"`,
             ).toBe(true);
+            expect(
+              line,
+              `asks for profile information in the name slot: "${line}"`,
+            ).not.toMatch(
+              /\b(?:where (?:are|do|did|were)|where .* from|what do you do|how old|do you live|are you from)\b/i,
+            );
           }
         }
       });

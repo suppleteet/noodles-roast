@@ -93,7 +93,7 @@ export default function ShareScreen() {
         try {
           // Pass the user's selected roast model so name-video honors the
           // model fallback. Without this, the route falls back to ROAST_MODEL
-          // (gemini-3.5-flash) which 503s when 3.5 is overloaded, and the
+          // (for example Gemini Flash) which may 503 when that tier is overloaded, and the
           // share UI ends up with the timestamp fallback name.
           //
           // experienceType drives the filename prefix — Roastie_ vs Toastie_

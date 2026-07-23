@@ -26,6 +26,7 @@ import {
   estimateUserPartsTokens,
   recordLlmUsage,
 } from "@/lib/usageTracker";
+import { geminiThinkingConfig } from "@/lib/geminiThinking";
 
 const TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // check every minute
@@ -136,8 +137,9 @@ export function createSession(
       model: resolvedModel,
       config: {
         systemInstruction: systemPrompt,
-        thinkingConfig: { thinkingBudget: 0 },
-        maxOutputTokens: 200,
+        thinkingConfig: geminiThinkingConfig(resolvedModel, "creative"),
+        maxOutputTokens: 1024,
+        responseMimeType: "application/json",
       },
     });
   }
@@ -235,6 +237,7 @@ export async function sendMessage(
     systemPrompt: session.systemPrompt,
     userParts: contextParts,
     maxOutputTokens,
+    reasoningProfile: "creative",
     forceJsonObject: true,
   });
 
@@ -310,6 +313,7 @@ export async function* sendMessageStream(
     model: session.model,
     systemPrompt: session.systemPrompt,
     userParts: contextParts,
+    reasoningProfile: "creative",
     forceJsonObject: true,
   })) {
     accumulated += chunk;
@@ -352,6 +356,7 @@ export function warmSession(sessionId: string): void {
     systemPrompt: session.systemPrompt,
     userParts: [{ text: "Acknowledge with a single word." }],
     maxOutputTokens: 5,
+    reasoningProfile: "realtime-utility",
   }).catch(() => {
     /* best-effort warmup; cold first-turn just pays full latency */
   });

@@ -3,9 +3,10 @@ import { PERSONA_GREETINGS, type PersonaId } from "@/lib/personaMetadata";
 export const FRAME_INTERVAL_MS = 8000; // how often to grab a webcam frame for vision
 
 export const ROAST_PAUSE_MS = 2000;    // pause between roast cycles
-export const VISION_MODEL = "gemini-3.5-flash";
-export const ROAST_MODEL = "gemini-3.5-flash";
+export const VISION_MODEL = "gemini-3.6-flash";
+export const ROAST_MODEL = "gemini-3.6-flash";
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "EXAVITQu4vr4xnSDxMaL"; // Rachel (default, Roast)
+export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
 
 /** Toast uses a different ElevenLabs voice — the drunk-toast-at-a-wedding
  *  character. vamKBH1qWYogA4WG6UPB is the picked voice for her; override via

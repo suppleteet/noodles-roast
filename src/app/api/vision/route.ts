@@ -5,15 +5,18 @@ import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
 import { recordGeminiUsage } from "@/lib/usageTracker";
 import { toModelUnavailableError } from "@/lib/llmClient";
+import { geminiThinkingConfig } from "@/lib/geminiThinking";
+import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64 } = await req.json();
-    if (!imageBase64) {
-      return NextResponse.json({ error: "imageBase64 required" }, { status: 400 });
+    const body = await readLimitedJson<{ imageBase64?: unknown }>(req);
+    if (!isValidImageBase64(body.imageBase64)) {
+      return NextResponse.json({ error: "Valid imageBase64 required" }, { status: 400 });
     }
+    const imageBase64 = body.imageBase64;
 
     const response = await ai.models.generateContent({
       model: VISION_MODEL,
@@ -28,10 +31,7 @@ export async function POST(req: NextRequest) {
       ],
       config: {
         systemInstruction: VISION_SYSTEM_PROMPT,
-        // gemini-3.x defaults to internal reasoning before output. With small
-        // token budgets the thinking eats the entire budget and the response
-        // truncates to broken JSON. Disable for low-latency direct generation.
-        thinkingConfig: { thinkingBudget: 0 },
+        thinkingConfig: geminiThinkingConfig(VISION_MODEL, "realtime-utility"),
         maxOutputTokens: 512,
       },
     });
@@ -50,6 +50,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ scene: sceneJson });
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     const unavailable = toModelUnavailableError(VISION_MODEL, err);
     if (unavailable) {
       console.error("[vision] MODEL_UNAVAILABLE:", unavailable.failedModel);
@@ -62,8 +65,7 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[vision]", message);
-    return NextResponse.json({ error: "Vision API failed", detail: message }, { status: 500 });
+    console.error("[vision]", err);
+    return NextResponse.json({ error: "Vision API failed" }, { status: 500 });
   }
 }

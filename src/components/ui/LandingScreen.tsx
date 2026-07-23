@@ -7,12 +7,13 @@ import { useDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
 
 const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
-  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+  { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash — Recommended" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra — Balanced" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna — Fast" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash — Previous default" },
+  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite — Speed baseline" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 — Speed baseline" },
 ];
 
 const PAYMENTS_ENABLED = process.env.NEXT_PUBLIC_ROASTIE_PAYMENTS_ENABLED === "true";

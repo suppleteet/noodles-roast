@@ -5,6 +5,8 @@ import { VISION_MODEL } from "@/lib/constants";
 import { extractJson } from "@/lib/jsonUtils";
 import type { BurnIntensity } from "@/lib/prompts";
 import { recordGeminiUsage } from "@/lib/usageTracker";
+import { geminiThinkingConfig } from "@/lib/geminiThinking";
+import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -12,10 +14,19 @@ type RoastSentenceRaw = { text: string; motion: string; intensity: number };
 
 export async function POST(req: NextRequest) {
   try {
-    const { scene, burnIntensity = 3, mode = "roast" } = await req.json();
-    if (!scene) {
+    const body = await readLimitedJson<{
+      scene?: unknown;
+      burnIntensity?: unknown;
+      mode?: unknown;
+    }>(req, 250_000);
+    if (!body.scene || typeof body.scene !== "object" || Array.isArray(body.scene)) {
       return NextResponse.json({ error: "scene required" }, { status: 400 });
     }
+    const scene = body.scene;
+    const burnIntensity: BurnIntensity = ([1, 2, 3, 4, 5] as const).includes(
+      body.burnIntensity as BurnIntensity,
+    ) ? (body.burnIntensity as BurnIntensity) : 3;
+    const mode = body.mode === "greeting" ? "greeting" : "roast";
 
     const systemPrompt = mode === "greeting"
       ? getGreetingSystemPrompt()
@@ -35,7 +46,7 @@ export async function POST(req: NextRequest) {
       ],
       config: {
         systemInstruction: systemPrompt,
-        thinkingConfig: { thinkingBudget: 0 },
+        thinkingConfig: geminiThinkingConfig(VISION_MODEL, "creative"),
         maxOutputTokens: 800,
       },
     });
@@ -54,8 +65,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ sentences });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[roast]", message);
-    return NextResponse.json({ error: "Roast API failed", detail: message }, { status: 500 });
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    console.error("[roast]", err);
+    return NextResponse.json({ error: "Roast API failed" }, { status: 500 });
   }
 }

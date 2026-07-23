@@ -99,4 +99,10 @@ export const menace: PersonaConfig = {
     "Ooh, right, let me think this through.",
     "Mm, okay, you're gonna hate this.",
   ],
+  // Echo fillers — savor the answer back, already plotting. {answer} required.
+  echoFillers: [
+    "{answer}, huh. Oh, this'll be good.",
+    "{answer}, you say. Delicious.",
+    "{answer}. Heh. Okay then.",
+  ],
 };

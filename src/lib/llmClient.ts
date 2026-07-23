@@ -15,6 +15,7 @@ import {
   estimateUserPartsTokens,
   recordLlmUsage,
 } from "@/lib/usageTracker";
+import { geminiThinkingConfig } from "@/lib/geminiThinking";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,11 @@ export interface LlmRequest {
   systemPrompt: string;
   userParts: UserPart[];
   maxOutputTokens?: number;
+  /**
+   * Creative turns get a small reasoning allowance; utility calls such as
+   * question phrasing stay at the provider's minimum-latency setting.
+   */
+  reasoningProfile?: "creative" | "realtime-utility";
   /** OpenAI only: force JSON object response. Defaults to false. */
   forceJsonObject?: boolean;
 }
@@ -66,6 +72,9 @@ export class ModelUnavailableError extends Error {
  * models have no auto-fallback path.
  */
 export function suggestedFallbackFor(failedModel: string): string | null {
+  if (failedModel === "gemini-3.6-flash") {
+    return "gemini-3.5-flash";
+  }
   if (failedModel.startsWith("gemini-") && failedModel !== "gemini-2.5-flash") {
     return "gemini-2.5-flash";
   }
@@ -156,6 +165,12 @@ function estimatedInputTokens(req: LlmRequest): number {
   return estimateTokenCount(req.systemPrompt) + estimateUserPartsTokens(req.userParts);
 }
 
+function openAiReasoningEffort(
+  req: LlmRequest,
+): "none" | "low" {
+  return req.reasoningProfile === "creative" ? "low" : "none";
+}
+
 // ─── API key helpers ────────────────────────────────────────────────────────────
 
 function getGeminiKey(): string {
@@ -219,8 +234,14 @@ export async function generateText(req: LlmRequest): Promise<string> {
             model: req.model,
             config: {
               systemInstruction: req.systemPrompt,
-              thinkingConfig: { thinkingBudget: 0 },
+              thinkingConfig: geminiThinkingConfig(
+                req.model,
+                req.reasoningProfile ?? "realtime-utility",
+              ),
               maxOutputTokens: req.maxOutputTokens,
+              ...(req.forceJsonObject
+                ? { responseMimeType: "application/json" }
+                : {}),
             },
             contents: [{ role: "user", parts: req.userParts }],
           });
@@ -244,6 +265,9 @@ export async function generateText(req: LlmRequest): Promise<string> {
             model: req.model,
             // gpt-5.x models reject the legacy max_tokens param.
             max_completion_tokens: req.maxOutputTokens,
+            ...(req.model.startsWith("gpt-5")
+              ? { reasoning_effort: openAiReasoningEffort(req) }
+              : {}),
             ...(forceJsonObject ? { response_format: { type: "json_object" as const } } : {}),
             messages: [
               { role: "system", content: req.systemPrompt },
@@ -321,8 +345,14 @@ export async function* generateTextStream(
             model: req.model,
             config: {
               systemInstruction: req.systemPrompt,
-              thinkingConfig: { thinkingBudget: 0 },
+              thinkingConfig: geminiThinkingConfig(
+                req.model,
+                req.reasoningProfile ?? "realtime-utility",
+              ),
               maxOutputTokens: req.maxOutputTokens,
+              ...(req.forceJsonObject
+                ? { responseMimeType: "application/json" }
+                : {}),
             },
             contents: [{ role: "user", parts: req.userParts }],
           });
@@ -361,6 +391,9 @@ export async function* generateTextStream(
             model: req.model,
             // gpt-5.x models reject the legacy max_tokens param.
             max_completion_tokens: req.maxOutputTokens,
+            ...(req.model.startsWith("gpt-5")
+              ? { reasoning_effort: openAiReasoningEffort(req) }
+              : {}),
             ...(forceJsonObject ? { response_format: { type: "json_object" as const } } : {}),
             stream: true,
             messages: [

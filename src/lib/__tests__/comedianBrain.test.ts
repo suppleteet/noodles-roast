@@ -725,6 +725,12 @@ describe("ComedianBrain — filler echo gating", () => {
         expect(line.trim().length, `${persona.id} filler "${line}"`).toBeGreaterThan(0);
         expect(line.startsWith("..."), `${persona.id} filler "${line}"`).toBe(false);
       }
+      // Echo fillers must be non-empty and carry the {answer} token, or the
+      // echo branch would emit a template literal with no user answer in it.
+      expect(persona.echoFillers.length, `${persona.id} echoFillers`).toBeGreaterThan(0);
+      for (const line of persona.echoFillers) {
+        expect(line.includes("{answer}"), `${persona.id} echoFiller "${line}"`).toBe(true);
+      }
     }
   });
 

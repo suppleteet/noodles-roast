@@ -4,7 +4,7 @@
 
 | Package | Version | Notes |
 |---------|---------|-------|
-| next | ^16.1.6 | App Router, Server Components |
+| next | ^16.2.11 | App Router, Server Components |
 | react / react-dom | ^19.0.0 | React 19 — new ref callback syntax |
 | typescript | ^5 | strict mode on |
 | three | ^0.175.0 | R3F peer |
@@ -19,22 +19,22 @@
 | simplex-noise | ^4.0.3 | Used by HeadMotionComponent (createNoise3D) |
 | tailwindcss | ^3.4.19 | |
 | autoprefixer | ^10.4.27 | PostCSS plugin |
-| postcss | ^8.5.8 | |
-| ws | ^8.20.0 | WebSocket client for ElevenLabs TTS streaming (elTtsStream.ts) |
-| vitest | ^4.1.0 | Unit test runner |
+| postcss | ^8.5.22 | |
+| ws | ^8.21.1 | WebSocket client for ElevenLabs TTS streaming (elTtsStream.ts) |
+| vitest | ^4.1.10 | Unit test runner |
 | @playwright/test | ^1.58.2 | E2E test framework |
 | @testing-library/react | ^16.3.2 | React component testing utilities |
 | @testing-library/jest-dom | ^6.9.1 | Custom jest/vitest matchers |
 | @testing-library/user-event | ^14.6.1 | User interaction simulation |
 | @vitejs/plugin-react | ^6.0.1 | Vite/Vitest React plugin |
-| @vitest/ui | ^4.1.0 | Vitest UI dashboard |
+| @vitest/ui | ^4.1.10 | Vitest UI dashboard |
 | @types/ws | ^8.18.1 | TypeScript types for ws |
 | @vercel/blob | ^2.3.3 | Durable feedback storage (Vercel Blob) |
 | jsdom | ^29.0.0 | DOM environment for Vitest |
 | openai | ^6.34.0 | Used by `llmClient.ts` for `gpt-*` and `o*` models |
 | googleapis | ^172.0.0 | OAuth + Drive v3 for auto-upload of finished roast MP4s |
 | eslint | ^9 | Lint runner; `npm run lint` just aliases `typecheck` |
-| eslint-config-next | ^16.1.6 | Next.js ESLint preset |
+| eslint-config-next | ^16.2.11 | Next.js ESLint preset |
 | @types/node | ^20 | Node typings |
 | @types/react | ^19 | React typings (matches react ^19.0.0) |
 | @types/react-dom | ^19 | React DOM typings |
@@ -43,9 +43,10 @@
 
 | Constant | Model ID | Used For |
 |----------|----------|----------|
-| `VISION_MODEL` | `gemini-3.5-flash` | Webcam frame analysis (`/api/vision`, `/api/analyze`) |
-| `ROAST_MODEL` | `gemini-3.5-flash` | Default joke generation model (`/api/generate-joke`, `/api/generate-speak`, `/api/generate-question`, `/api/rephrase-question`) — Claude Sonnet 4.6, Claude Haiku 4.5, GPT-5.4 Mini, `gemini-2.5-flash`, and `gemini-3.1-flash-lite` also selectable via UI |
+| `VISION_MODEL` | `gemini-3.6-flash` | Webcam frame analysis (`/api/vision`, `/api/analyze`) |
+| `ROAST_MODEL` | `gemini-3.6-flash` | Default joke generation model (`/api/generate-joke`, `/api/generate-speak`, `/api/generate-question`, `/api/rephrase-question`). The dev UI also offers GPT-5.6 Terra/Luna, Claude Sonnet 4.6/Haiku 4.5, and Gemini 3.5 Flash/Flash-Lite; persisted legacy model IDs remain accepted |
 | `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel (Roast). Picked per-experience by `voiceIdForExperience()` |
+| `DEFAULT_ELEVENLABS_MODEL_ID` | `eleven_flash_v2_5` | Low-latency streaming TTS default; override via `ELEVENLABS_MODEL_ID` |
 | `TOAST_VOICE_ID` | `vamKBH1qWYogA4WG6UPB` | TTS voice for the Toast experience (drunk-wedding-toast character). Override via `ELEVENLABS_TOAST_VOICE_ID` env |
 | `LIVE_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | Live API STT/VAD only (`/api/live-token`) |
 | `LIVE_VOICE_NAME` | `Kore` | Gemini native audio voice (used in session config) |
@@ -136,7 +137,7 @@ src/components/session/ SessionController (monologue), LiveSessionController (co
 src/components/audio/  AudioPlayer (monologue), useMicCapture + usePcmPlayback + useVad (conversation)
 src/components/recording/ MediaRecorder + offscreen canvas compositor
 src/components/ui/     Screen overlays (landing, consent, HUD, share, FeedbackBox, DebugTranscript)
-src/lib/               Pure utilities, constants, prompts, personas + personaMetadata (client-safe split), preloadLiveExperience (module warmup), greetingPrefetch (greeting joke+TTS prefetch), audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets (motion → voice_settings deltas), ttsChunkBuffer, llmClient, scriptLines (all canned spoken lines), toastPrompts + toastQuestionBank (Toast experience), mediaRecorderSupport (recording mimeType/bitrates), liveConstants (MIC_SAMPLE_RATE 16k, OUTPUT_SAMPLE_RATE 24k)
+src/lib/               Pure utilities, constants, prompts, personas + personaMetadata (client-safe split), preloadLiveExperience (module warmup), greetingPrefetch (greeting joke+TTS prefetch), audioUtils, motionInference, elTtsStream, chatSessionStore, voiceMotionPresets (motion → voice_settings deltas), ttsChunkBuffer, llmClient, geminiThinking, modelCatalog (allowed paid models), apiRequest (bounded route parsing), scriptLines (all canned spoken lines), toastPrompts + toastQuestionBank (Toast experience), mediaRecorderSupport (recording mimeType/bitrates), liveConstants (MIC_SAMPLE_RATE 16k, OUTPUT_SAMPLE_RATE 24k)
 src/lib/stateMachine/      State machine types, transitions, and configs (SessionPhase, BrainState, MotionState)
 src/lib/comedianBrain.ts   State machine class (conversation mode)
 src/lib/comedianBrainConfig.ts  Declarative STATE_CONFIG map
@@ -198,7 +199,7 @@ Tests inject fast timing via `window.__COMEDIAN_CONFIG__`:
 ```typescript
 await page.addInitScript(() => {
   (window as unknown as Record<string, unknown>).__COMEDIAN_CONFIG__ = {
-    answerWaitMs: 80, answerSilenceMs: 30, maxProds: 1,
+    answerWaitMs: 300, answerSilenceMs: 30, maxProds: 1,
     visionIntervalMs: 200, greetingVisionTimeoutMs: 300,
   };
   // Prevent session rotation from firing during long tests (default 90s):

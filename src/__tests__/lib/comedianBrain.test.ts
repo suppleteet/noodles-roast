@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { ComedyQuestion } from "@/lib/questionBank";
+import { PERSONAS } from "@/lib/personas";
 
 // Mock COMEDIAN_CONFIG at module level (evaluated at import time)
 vi.mock("@/lib/comedianConfig", () => ({
@@ -99,7 +100,9 @@ describe("ComedianBrain", () => {
         _pickFiller: (answer: string) => string;
       };
 
-      expect(brain._pickFiller("Gerard.")).toBe("Gerard, huh. Okay.");
+      // Echo templates are per-persona now; random=0 picks index 0 of kvetch's.
+      const expected = PERSONAS.kvetch.echoFillers[0].replaceAll("{answer}", "Gerard");
+      expect(brain._pickFiller("Gerard.")).toBe(expected);
     });
 
     it("removes a repeated answer lead from a joke after echo filler", () => {
@@ -144,6 +147,196 @@ describe("ComedianBrain", () => {
       // _queueQuestionWithBridge races rephrase vs timeout — flush microtasks
       await vi.advanceTimersByTimeAsync(1600);
       expect(deps.queueSpeak).toHaveBeenCalled();
+    });
+  });
+
+  describe("contextual question prefetch", () => {
+    it("consumes a camera-triggered contextual prefetch in fixed-bank mode", async () => {
+      let resolveQuestion!: (response: Response) => void;
+      const pendingQuestion = new Promise<Response>((resolve) => {
+        resolveQuestion = resolve;
+      });
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        if (String(input) === "/api/generate-question") return pendingQuestion;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        } as Response);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const deps = makeDeps({
+        getLlmQuestions: vi.fn(() => false),
+        captureFrame: vi.fn(() => "frame"),
+      });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        askedQuestionIds: Set<string>;
+        bankQuestionsInARow: number;
+        cameraAvailable: boolean;
+        contextualQuestionRequest: { result: Promise<unknown> } | null;
+        _preQueueNextQuestion(): void;
+        enterAskQuestion(): void;
+      };
+      brain.askedQuestionIds.add("name");
+      brain.bankQuestionsInARow = 1;
+      brain.cameraAvailable = true;
+      brain.state = "delivering";
+
+      brain._preQueueNextQuestion();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const request = brain.contextualQuestionRequest;
+      expect(request).not.toBeNull();
+
+      brain.enterAskQuestion();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      resolveQuestion({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            question: "What's with that painting?",
+            jokeContext: "Wall art roast.",
+          }),
+      } as Response);
+      await pendingQuestion;
+      await request?.result;
+      await Promise.resolve();
+
+      expect(deps.setCurrentQuestion).toHaveBeenCalledWith("What's with that painting?");
+      expect(brain.contextualQuestionRequest).toBeNull();
+    });
+
+    it("reuses one in-flight request and does not carry its result into the next cycle", async () => {
+      let resolveQuestion!: (response: Response) => void;
+      const pendingQuestion = new Promise<Response>((resolve) => {
+        resolveQuestion = resolve;
+      });
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        if (String(input) === "/api/generate-question") return pendingQuestion;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        } as Response);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const deps = makeDeps({ getLlmQuestions: vi.fn(() => true) });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        askedQuestionIds: Set<string>;
+        preQueuedQuestion: ComedyQuestion | null;
+        contextualQuestionRequest: {
+          result: Promise<unknown>;
+        } | null;
+        _preQueueNextQuestion(): void;
+        enterAskQuestion(): void;
+      };
+      brain.askedQuestionIds.add("name");
+      brain.state = "delivering";
+
+      brain._preQueueNextQuestion();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const firstRequest = brain.contextualQuestionRequest;
+      expect(firstRequest).not.toBeNull();
+
+      // Delivery drains before the prefetch resolves. The old implementation
+      // started a second request here and let the first result leak forward.
+      brain.enterAskQuestion();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      resolveQuestion({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            question: "You live alone?",
+            jokeContext: "Living arrangement roast.",
+          }),
+      } as Response);
+      await pendingQuestion;
+      await firstRequest?.result;
+      await Promise.resolve();
+
+      expect(deps.setCurrentQuestion).toHaveBeenCalledWith("You live alone?");
+      expect(deps.queueSpeak).toHaveBeenCalledWith(
+        "You live alone?",
+        expect.any(String),
+        expect.any(Number),
+      );
+      expect(brain.preQueuedQuestion).toBeNull();
+      expect(brain.contextualQuestionRequest).toBeNull();
+
+      // A later cycle starts a genuinely new request; no resolved question is
+      // left sitting in preQueuedQuestion to be asked again.
+      brain.state = "delivering";
+      brain._preQueueNextQuestion();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("aborts and ignores a pending contextual prefetch when the brain stops", async () => {
+      let resolveQuestion!: (response: Response) => void;
+      let requestSignal: AbortSignal | undefined;
+      const pendingQuestion = new Promise<Response>((resolve) => {
+        resolveQuestion = resolve;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined;
+          return pendingQuestion;
+        }),
+      );
+
+      const deps = makeDeps({ getLlmQuestions: vi.fn(() => true) });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        askedQuestionIds: Set<string>;
+        _preQueueNextQuestion(): void;
+        stop(): void;
+      };
+      brain.askedQuestionIds.add("name");
+      brain.state = "delivering";
+      brain._preQueueNextQuestion();
+
+      brain.stop();
+      expect(requestSignal?.aborted).toBe(true);
+
+      resolveQuestion({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            question: "This result is stale?",
+            jokeContext: "Stale request.",
+          }),
+      } as Response);
+      await pendingQuestion;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(deps.queueSpeak).not.toHaveBeenCalled();
+    });
+
+    it("treats host bridge wording as the same previously asked question", () => {
+      const brain = new ComedianBrain(makeDeps()) as unknown as {
+        ledger: Array<{
+          type: "question";
+          text: string;
+          timestamp: number;
+          tags: string[];
+        }>;
+        _questionAlreadyAsked(text: string): boolean;
+      };
+      brain.ledger = [
+        {
+          type: "question",
+          text: "Okay okay. You live alone?",
+          timestamp: Date.now(),
+          tags: [],
+        },
+      ];
+
+      expect(brain._questionAlreadyAsked("You live alone?")).toBe(true);
+      expect(brain._questionAlreadyAsked("You married?")).toBe(false);
     });
   });
 

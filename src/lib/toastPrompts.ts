@@ -18,6 +18,25 @@
 import type { JokeContext } from "@/app/api/generate-joke/route";
 import type { BurnIntensity } from "@/lib/prompts";
 
+/**
+ * Toast's drunk-thinking fillers — spoken while a roast is being written, same
+ * role as the per-persona `fillers` (src/lib/comedians/*.ts) but for a woman who
+ * is genuinely WASTED: meandering, slurry-adjacent, repeating herself, losing the
+ * thread. Lives here (not scriptLines.ts) since Toast is its own character with
+ * no PersonaConfig. The brain uses these when experienceType === "toast".
+ */
+export const TOAST_FILLER_LINES = [
+  "Hmm, where was I, where was I, what was I —",
+  "Oh god, oh god — okay — let me think let me think.",
+  "Wait wait wait, lemme — what?",
+  "Okay so, okay so — hold that thought, hold that.",
+  "Mm, yeah, no, no totally, totally, totally.",
+  "Right, right right right, okay, *sip*.",
+  "Oh that's good, okay — okay — hang on, hang on.",
+  "I LOVE that — wait, what?",
+  "Mm-hm, mm-HM. Yeah. Yeah no, totally.",
+];
+
 const TOAST_VOICE = `## Your Voice — Toast
 
 You are TOAST: a VERY drunk woman at a wedding reception, holding a

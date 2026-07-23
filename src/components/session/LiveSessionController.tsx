@@ -1186,10 +1186,13 @@ export default function LiveSessionController({
   async function startLiveSession() {
     if (isRunningRef.current) return; // guard against React StrictMode double-invoke
     isRunningRef.current = true;
+    const connectSpanId = useSessionStore.getState().beginSpan("session", "connect");
 
-    // Warm up AudioContext immediately — on iOS Safari, creating the context close
-    // to the user gesture ensures hardware volume buttons control Web Audio output.
-    playback.warmUp();
+    try {
+      // The controller mounts after camera/mic permission resolves. Create and
+      // bind the playback context now so Chrome sees the final device sample rate;
+      // creating it before permission caused the live-only pitched opener.
+      await playback.warmUp();
 
     ttsChainRef.current = Promise.resolve();
     ttsGenerationRef.current++; // increment (not reset) — invalidates any in-flight TTS from prior session
@@ -1365,8 +1368,6 @@ export default function LiveSessionController({
       useSessionStore.getState().logTiming("live: brain started");
     };
 
-    const connectSpanId = useSessionStore.getState().beginSpan("session", "connect");
-    try {
       const sessionPromise = openSession(prefetchedTokenPromise);
       const micPromise = mic.start(mediaStream).catch((e) => {
         console.warn("[live] mic start failed:", e);
@@ -1471,6 +1472,7 @@ export default function LiveSessionController({
       scheduleWrapup();
       startVisionSend();
     } catch (err) {
+      isRunningRef.current = false;
       console.error("[live] Failed to start:", err);
       useSessionStore.getState().logTiming(`live: start error — ${(err as Error).message}`);
       useSessionStore.getState().endSpan(connectSpanId);
@@ -1590,7 +1592,13 @@ export default function LiveSessionController({
 
   useEffect(() => {
     if (phase === "roasting") {
-      mockMode ? startMockSession() : startLiveSession();
+      const startPromise = mockMode ? startMockSession() : startLiveSession();
+      void startPromise.catch((err: unknown) => {
+        isRunningRef.current = false;
+        console.error("[live] Unhandled startup failure:", err);
+        useSessionStore.getState().setError("Live session failed to start. Please try again.");
+        useSessionStore.getState().setPhase("idle", "ERROR");
+      });
     } else if (phase === "stopped") {
       stopLiveSession();
     }

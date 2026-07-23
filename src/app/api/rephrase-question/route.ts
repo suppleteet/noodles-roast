@@ -3,6 +3,8 @@ import { ROAST_MODEL } from "@/lib/constants";
 import { PERSONAS, DEFAULT_PERSONA, PERSONA_IDS, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import { generateText } from "@/lib/llmClient";
+import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 interface RephraseRequest {
   question: string;
@@ -28,7 +30,13 @@ function wordCount(s: string): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as RephraseRequest;
+    const body = await readLimitedJson<RephraseRequest>(req, 100_000);
+    if (typeof body.question !== "string" || body.question.length === 0 || body.question.length > 500) {
+      return NextResponse.json({ error: "Invalid question" }, { status: 400 });
+    }
+    if (body.model !== undefined && !isRoastModelId(body.model)) {
+      return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
+    }
     const model = body.model ?? ROAST_MODEL;
     const personaId: PersonaId = PERSONA_IDS.includes(body.persona) ? body.persona : DEFAULT_PERSONA;
     const persona = PERSONAS[personaId];
@@ -83,6 +91,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ rephrased: finalQuestion });
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[rephrase-question]", message);
     // Return fallback — caller will use original question text

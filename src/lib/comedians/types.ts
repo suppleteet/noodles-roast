@@ -20,7 +20,13 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   1-4s while a roast is being written, so there's never dead air. Not injected
  *   into the prompt. Keep them a few words long and lead with a soft/voiced
  *   sound (a vowel, an "Mm/Oh/Yeah" hum) — the breath beat before each is added
- *   in code, so don't bake in a leading "...". (Toast has its own pool.)
+ *   in code, so don't bake in a leading "...". (Toast has its own pool, in
+ *   toastPrompts.ts.)
+ * - echoFillers → an alternate filler style: repeat the user's answer back once
+ *   as active listening, then bridge into the joke. Each line MUST contain the
+ *   "{answer}" token (replaced with the user's words at delivery). Keep them
+ *   declarative, not question-shaped. Chance of using one vs a plain filler is
+ *   the global ECHO_FILLER_PROBABILITY (scriptLines.ts).
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.
@@ -42,6 +48,10 @@ export interface PersonaConfig {
    *  (covers LLM latency so there's no dead air). Spoken verbatim, not sent to
    *  the LLM. See the field docs above for the soft-onset / no-leading-"..." rule. */
   fillers: string[];
+  /** Echo-style fillers: repeat the user's answer back once as active listening,
+   *  then bridge into the joke. Every entry MUST contain the "{answer}" token.
+   *  See the field docs above. */
+  echoFillers: string[];
 }
 
 /** One pool of canned video-call intro lines. `early` (5-9am) and `late`

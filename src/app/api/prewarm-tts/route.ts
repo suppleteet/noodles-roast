@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import WebSocket from "ws";
-import { ELEVENLABS_VOICE_ID, TOAST_VOICE_ID } from "@/lib/constants";
+import {
+  DEFAULT_ELEVENLABS_MODEL_ID,
+  ELEVENLABS_VOICE_ID,
+  TOAST_VOICE_ID,
+} from "@/lib/constants";
+
+const PREWARM_COOLDOWN_MS = 30_000;
+const nextAllowedByClient = new Map<string, number>();
 
 /**
  * POST /api/prewarm-tts — Best-effort warm-up of the ElevenLabs synthesis path.
@@ -26,11 +33,24 @@ export async function POST(req: Request) {
   }
 
   const wantToast = new URL(req.url).searchParams.get("voice") === "toast";
+  const forwardedFor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const clientKey = `${forwardedFor || "local"}:${wantToast ? "toast" : "roast"}`;
+  const now = Date.now();
+  if ((nextAllowedByClient.get(clientKey) ?? 0) > now) {
+    return NextResponse.json({ ok: true, cached: true });
+  }
+  nextAllowedByClient.set(clientKey, now + PREWARM_COOLDOWN_MS);
+  if (nextAllowedByClient.size > 500) {
+    for (const [key, nextAllowed] of nextAllowedByClient) {
+      if (nextAllowed <= now) nextAllowedByClient.delete(key);
+    }
+  }
   const voiceId = wantToast
     ? process.env.ELEVENLABS_TOAST_VOICE_ID?.trim() || TOAST_VOICE_ID
     : process.env.ELEVENLABS_VOICE_ID?.trim() || ELEVENLABS_VOICE_ID;
   const host = process.env.ELEVENLABS_API_HOST?.trim() || "api.elevenlabs.io";
-  const modelId = process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_turbo_v2_5";
+  const modelId =
+    process.env.ELEVENLABS_MODEL_ID?.trim() || DEFAULT_ELEVENLABS_MODEL_ID;
 
   const params = new URLSearchParams({
     model_id: modelId,
@@ -58,8 +78,8 @@ export async function POST(req: Request) {
 
     try {
       ws = new WebSocket(url);
-    } catch (e) {
-      finish(false, (e as Error).message);
+    } catch {
+      finish(false, "connection_failed");
       return;
     }
 
@@ -81,9 +101,9 @@ export async function POST(req: Request) {
         );
         ws.send(JSON.stringify({ text: "warm", flush: true }));
         ws.send(JSON.stringify({ text: "" }));
-      } catch (e) {
+      } catch {
         clearTimeout(cap);
-        finish(false, (e as Error).message);
+        finish(false, "send_failed");
       }
     });
 
@@ -92,7 +112,7 @@ export async function POST(req: Request) {
         const msg = JSON.parse(data.toString()) as { audio?: string; error?: string };
         if (msg.error) {
           clearTimeout(cap);
-          finish(false, msg.error);
+          finish(false, "provider_error");
           return;
         }
         // First audio chunk = the synthesis pipeline is hot. Done warming.
@@ -105,9 +125,9 @@ export async function POST(req: Request) {
       }
     });
 
-    ws.on("error", (err) => {
+    ws.on("error", () => {
       clearTimeout(cap);
-      finish(false, (err as Error).message);
+      finish(false, "connection_failed");
     });
   });
 }

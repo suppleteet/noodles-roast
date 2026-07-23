@@ -5,6 +5,7 @@ import {
   ROAST_OPENER_SPEED_CAP,
   ROAST_OPENER_STYLE_CAP,
 } from "@/lib/voiceMotionPresets";
+import { kvetch } from "@/lib/comedians/kvetch";
 
 const DEFAULT_SNAPSHOT = {
   activePersona: "kvetch" as const,
@@ -279,7 +280,7 @@ describe("prefetchCannedOpener", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends Kvetch startup TTS with non-rising text and final opener voice settings", async () => {
+  it("sends Kvetch startup TTS with a canned opener and final opener voice settings", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, body: null });
     vi.stubGlobal("fetch", fetchMock);
     useSessionStore.setState({
@@ -294,8 +295,10 @@ describe("prefetchCannedOpener", () => {
     const opener = prefetchCannedOpener();
 
     expect(opener).not.toBeNull();
-    expect(opener?.text).toMatch(/tell me your name\.$/i);
-    expect(opener?.text).not.toMatch(/\?$/);
+    // The opener is one of kvetch's clean canned intros (each ends on a
+    // who-are-you ask, enforced by personas.test.ts).
+    const clean = kvetch.cannedIntros.clean;
+    expect([...clean.anytime, ...clean.early, ...clean.late]).toContain(opener?.text);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tts-ws",
       expect.objectContaining({ method: "POST" }),

@@ -116,8 +116,7 @@ export const kvetch: PersonaConfig = {
       ],
     },
   },
-  // Spoken while a roast is being written. Grumpy, impatient, deadpan — an old
-  // man making you wait while he thinks.
+  // Spoken while a roast is being written, like a grumpy man thinking out loud.
   fillers: [
     "Mm, alright.",
     "Hm, uh huh.",
@@ -126,5 +125,11 @@ export const kvetch: PersonaConfig = {
     "uhhh huh",
     "Right, right",
     "Ahhhh, okay",
+  ],
+  // Echo fillers — repeat the answer back, dismissive and unimpressed. {answer} required.
+  echoFillers: [
+    "{answer}, huh.",
+    "{answer}. Gotcha.",
+    "{answer}, you say.",
   ],
 };

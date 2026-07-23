@@ -9,6 +9,8 @@ import { getSession, getContextInstructions, sendMessage, compactStableContext }
 import { QuotaError, ModelUnavailableError } from "@/lib/llmClient";
 import { generateText, type UserPart } from "@/lib/llmClient";
 import { trimObservations } from "@/lib/visionDiff";
+import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 export type JokeContext =
   | "greeting"
@@ -115,7 +117,13 @@ function buildUserText(body: GenerateJokeRequest, taskPreamble?: string): string
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as GenerateJokeRequest;
+    const body = await readLimitedJson<GenerateJokeRequest>(req);
+    if (body.imageBase64 !== undefined && !isValidImageBase64(body.imageBase64)) {
+      return NextResponse.json({ error: "Invalid or oversized image" }, { status: 413 });
+    }
+    if (body.model !== undefined && !isRoastModelId(body.model)) {
+      return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
+    }
     const model = body.model ?? ROAST_MODEL;
 
     // Try to use an existing chat session
@@ -147,7 +155,7 @@ export async function POST(req: NextRequest) {
         userParts.push({ inlineData: { mimeType: "image/jpeg", data: body.imageBase64 } });
       }
 
-      rawText = await sendMessage(body.sessionId!, userParts, 512) ?? "";
+      rawText = await sendMessage(body.sessionId!, userParts, 1024) ?? "";
     } else {
       // ── Stateless fallback: full system prompt on every request ──
       const personaId: PersonaId = PERSONA_IDS.includes(body.persona)
@@ -177,7 +185,8 @@ export async function POST(req: NextRequest) {
         model,
         systemPrompt,
         userParts,
-        maxOutputTokens: 512,
+        maxOutputTokens: 1024,
+        reasoningProfile: "creative",
         forceJsonObject: true,
       });
     }
@@ -203,10 +212,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(response);
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     if (err instanceof QuotaError) {
       console.error("[generate-joke] QUOTA:", err.message);
       return NextResponse.json(
-        { error: "quota_exceeded", provider: err.provider, detail: err.message },
+        { error: "quota_exceeded", provider: err.provider },
         { status: 402 }
       );
     }
@@ -221,10 +233,9 @@ export async function POST(req: NextRequest) {
         { status: 503 }
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[generate-joke]", message);
+    console.error("[generate-joke]", err);
     return NextResponse.json(
-      { error: "Joke generation failed", detail: message },
+      { error: "Joke generation failed" },
       { status: 500 }
     );
   }

@@ -18,6 +18,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { generateText } from "@/lib/llmClient";
 import { sanitizeFilename, fallbackName, FILENAME_PREFIX } from "@/lib/videoNaming";
+import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 interface NameVideoRequest {
   /** Recent transcript lines, role-prefixed (e.g. "puppet: ..." / "user: ...") */
@@ -82,7 +84,10 @@ ${examples}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as NameVideoRequest;
+    const body = await readLimitedJson<NameVideoRequest>(req, 250_000);
+    if (body.model !== undefined && !isRoastModelId(body.model)) {
+      return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
+    }
     const userName = body.userName ?? null;
     const experienceType: "roast" | "toast" =
       body.experienceType === "toast" ? "toast" : "roast";
@@ -122,6 +127,9 @@ export async function POST(req: NextRequest) {
       sanitizeFilename(raw, experienceType) ?? fallbackName(userName, experienceType);
     return NextResponse.json({ filename, source: filename === raw ? "llm" : "llm-sanitized" });
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error("[name-video] failed:", err);
     return NextResponse.json({ filename: fallbackName(null), source: "error-fallback" });
   }

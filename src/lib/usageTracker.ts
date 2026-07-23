@@ -1,3 +1,5 @@
+import { DEFAULT_ELEVENLABS_MODEL_ID } from "@/lib/constants";
+
 export type LlmProvider = "gemini" | "openai" | "anthropic";
 
 export interface LlmUsageEntry {
@@ -49,8 +51,12 @@ const llmUsageEntries: LlmUsageEntry[] = [];
 const ttsUsageEntries: TtsUsageEntry[] = [];
 
 const MODEL_PRICE_PER_MILLION: Record<string, { input: number; output: number }> = {
+  "gemini-3.6-flash": { input: 1.5, output: 7.5 },
   "gemini-3.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
   "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
+  "gpt-5.6-terra": { input: 2.5, output: 15 },
+  "gpt-5.6-luna": { input: 1, output: 6 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5 },
@@ -154,7 +160,7 @@ export function recordTtsUsage(input: {
     ts: Date.now(),
     route: input.route,
     provider: "elevenlabs",
-    model: input.model ?? "eleven_turbo_v2_5",
+    model: input.model ?? DEFAULT_ELEVENLABS_MODEL_ID,
     characters,
     estimatedCostUsd: estimateTtsCostUsd(characters),
   };

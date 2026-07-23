@@ -6,9 +6,11 @@
  */
 
 import WebSocket from "ws";
-import { ELEVENLABS_VOICE_ID } from "@/lib/constants";
+import {
+  DEFAULT_ELEVENLABS_MODEL_ID,
+  ELEVENLABS_VOICE_ID,
+} from "@/lib/constants";
 
-const DEFAULT_EL_MODEL_ID = "eleven_turbo_v2_5";
 const EL_OUTPUT_FORMAT = "pcm_24000";
 const DEFAULT_CHUNK_LENGTH_SCHEDULE = [120, 160, 250, 290];
 
@@ -39,7 +41,7 @@ interface ElTtsStreamOptions {
 }
 
 export function getElevenLabsModelId(): string {
-  return process.env.ELEVENLABS_MODEL_ID?.trim() || DEFAULT_EL_MODEL_ID;
+  return process.env.ELEVENLABS_MODEL_ID?.trim() || DEFAULT_ELEVENLABS_MODEL_ID;
 }
 
 function getElevenLabsHost(): string {

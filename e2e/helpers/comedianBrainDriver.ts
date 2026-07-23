@@ -54,7 +54,7 @@ export class ComedianBrainDriver extends LiveSessionMock {
   private async _injectSpeedConfig(): Promise<void> {
     await this.page.addInitScript(() => {
       (window as unknown as Record<string, unknown>).__COMEDIAN_CONFIG__ = {
-        answerWaitMs: 80,
+        answerWaitMs: 300,
         answerSilenceMs: 30,
         unfinalizedAnswerSilenceMs: 80,
         maxProds: 1,

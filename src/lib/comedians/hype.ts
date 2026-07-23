@@ -99,4 +99,10 @@ export const hype: PersonaConfig = {
     "Right, right, let me line this up.",
     "Oh, we're going somewhere, hold on.",
   ],
+  // Echo fillers — fire the answer back with arena hype. {answer} required.
+  echoFillers: [
+    "{answer}?! Okay, okay!",
+    "{answer} — let's GO.",
+    "{answer}. Oh, we're cooking now.",
+  ],
 };

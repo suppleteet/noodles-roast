@@ -30,9 +30,9 @@ import {
   type ComedyQuestion,
 } from "@/lib/questionBank";
 import { TOAST_QUESTION_BANK, drunkWrongName } from "@/lib/toastQuestionBank";
+import { TOAST_FILLER_LINES } from "@/lib/toastPrompts";
 import { pickCannedIntro } from "@/lib/comedians/types";
 import {
-  ECHO_FILLER_TEMPLATES,
   ECHO_FILLER_PROBABILITY,
   QUESTION_BRIDGES,
   CONFIRM_DENIED_LINE,
@@ -43,7 +43,6 @@ import {
   TECHNICAL_DIFFICULTIES_LINES,
   NOISE_ANSWER_LINES,
   TOAST_NOISE_ANSWER_LINES,
-  TOAST_FILLER_LINES,
   TOAST_GREETINGS,
   TOAST_CONFIRM_ECHO_TEMPLATES,
   TOAST_CONFIRM_TAIL_FILLERS,
@@ -61,6 +60,8 @@ import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
 import { PERSONAS, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import { voiceSettingsForRoastOpener } from "@/lib/voiceMotionPresets";
+
+const CONTEXTUAL_QUESTION_TIMEOUT_MS = 5_000;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ export interface ComedianBrainDeps {
   getAmbientContext: () => import("@/store/useSessionStore").AmbientContext | null;
   /** Optional async local culture/vibe line (filled after geolocation). */
   getTownFlavor: () => string | null;
-  /** LLM model ID for joke generation (e.g. "gemini-3.5-flash", "gpt-5.4-mini"). */
+  /** LLM model ID for joke generation (e.g. "gemini-3.6-flash", "gpt-5.6-terra"). */
   getRoastModel: () => string;
   /** Latency experiment: when true (roast only), the greeting is an instant canned
    *  video-call intro that doubles as the name question — no LLM, no vision wait. */
@@ -333,6 +334,21 @@ export class ComedianBrain {
   private preQueuedQuestion: ComedyQuestion | null = null;
   /** Rephrased text resolved during pre-queue. Null = rephrase didn't finish in time → fall back to original at enterAskQuestion. */
   private preQueuedRephrasedText: string | null = null;
+  /**
+   * One shared contextual-question request. Delivery can start it early, but
+   * enterAskQuestion owns the result. Keeping the promise here prevents the
+   * old race where enterAskQuestion launched request B while prefetched request
+   * A was still pending, then A leaked into the following question cycle.
+   */
+  private contextualQuestionRequest: {
+    abort: AbortController;
+    result: Promise<{
+      question: string;
+      jokeContext: string;
+      fallback?: boolean;
+    } | null>;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
   private rephraseAbort: AbortController | null = null;
   private answerBuffer = "";
   /** True once Gemini Live sent inputTranscription with finished=true for this answer turn. */
@@ -1463,6 +1479,12 @@ export class ComedianBrain {
         this.deps.logTiming("brain: pre-queue rephrase not ready — using original");
       }
     } else {
+      // Delivery may already have started the contextual request. Consume that
+      // exact request regardless of the counter reset performed by prefetch.
+      if (this.contextualQuestionRequest) {
+        this._generateContextualQuestion();
+        return;
+      }
       // Interleave bank questions with contextual/vision questions.
       // After every bank question, generate a contextual one (what do you do in that office?).
       const bankAvailable = this._nextValidQuestion();
@@ -1863,13 +1885,17 @@ export class ComedianBrain {
     return "restate";
   }
 
-  // The "thinking" filler pool is per-persona — edit `fillers` in
-  // src/lib/comedians/*.ts (Toast uses TOAST_FILLER_LINES). The echo-filler
-  // mechanism (ECHO_FILLER_TEMPLATES / ECHO_FILLER_PROBABILITY) stays global in
-  // src/lib/scriptLines.ts.
+  // Filler pools are per-character: Roast personas carry `fillers` + `echoFillers`
+  // in src/lib/comedians/*.ts; Toast uses TOAST_FILLER_LINES (toastPrompts.ts).
+  // Only the echo-vs-plain cadence knob (ECHO_FILLER_PROBABILITY) stays global.
   /** The active persona's "thinking" filler lines (src/lib/comedians/*.ts). */
   private _roastFillers(): string[] {
     return PERSONAS[this.deps.getPersona()].fillers;
+  }
+
+  /** The active persona's echo-filler templates (each contains "{answer}"). */
+  private _echoFillers(): string[] {
+    return PERSONAS[this.deps.getPersona()].echoFillers;
   }
 
   // Meta-complaints about the comedian's own behavior — never echo these.
@@ -1937,9 +1963,8 @@ export class ComedianBrain {
       if (wordCount(cleaned) < 1) {
         return fillers[Math.floor(Math.random() * fillers.length)];
       }
-      const tpl = ECHO_FILLER_TEMPLATES[
-        Math.floor(Math.random() * ECHO_FILLER_TEMPLATES.length)
-      ];
+      const echo = this._echoFillers();
+      const tpl = echo[Math.floor(Math.random() * echo.length)];
       return tpl.replaceAll("{answer}", cleaned);
     }
     return fillers[Math.floor(Math.random() * fillers.length)];
@@ -2756,12 +2781,66 @@ export class ComedianBrain {
   /** Generate a contextual question via LLM based on what we see + know. */
   private _generateContextualQuestion(): void {
     this.deps.setMotion("thinking", 0.6);
-    this.deps.logTiming("brain: generating contextual question");
+    const hadPrefetch = this.contextualQuestionRequest !== null;
+    const request = this._getOrStartContextualQuestionRequest();
+    this.deps.logTiming(
+      hadPrefetch
+        ? "brain: awaiting pre-fetched contextual question"
+        : "brain: generating contextual question",
+    );
+
+    void request.result.then((data) => {
+      // Cancellation or a newer request replaced this one.
+      if (this.contextualQuestionRequest !== request) return;
+      this.contextualQuestionRequest = null;
+      if (this.state !== "ask_question") return;
+      if (!data?.question) {
+        this._queueContextualFallbackQuestion();
+        return;
+      }
+      const questionText = data.question;
+      // The route returns a FIXED fallback ("So what's going on with you?")
+      // when its LLM call fails or overflows — `fallback: true` flags it. That
+      // generic line reads canned (and during an outage every cycle returns it,
+      // so the puppet asked it three times in a row in a real session). Divert
+      // to a fresh bank question whenever the route fell back OR we've already
+      // asked this question.
+      if (data.fallback || this._questionAlreadyAsked(questionText)) {
+        const bankQ = this._nextValidQuestion();
+        if (bankQ) {
+          this.askedQuestionIds.add(bankQ.id);
+          this.currentQuestion = bankQ;
+          this._queueQuestionWithBridge(this._pickQuestionText(bankQ));
+          this.deps.logTiming(
+            `brain: contextual question ${data.fallback ? "fell back" : "repeated"} — using bank "${bankQ.id}" instead`,
+          );
+          return;
+        }
+      }
+      this.currentQuestion = {
+        id: `generated_${Date.now()}`,
+        question: questionText,
+        jokeContext: data.jokeContext,
+        prodLines: CONTEXTUAL_QUESTION_PRODS,
+      };
+      this._queueQuestionWithBridge(questionText);
+      this.deps.logTiming(`brain: contextual question — "${questionText}"`);
+    });
+  }
+
+  private _getOrStartContextualQuestionRequest(): NonNullable<
+    ComedianBrain["contextualQuestionRequest"]
+  > {
+    if (this.contextualQuestionRequest) return this.contextualQuestionRequest;
 
     const observations = this.deps.getObservations();
     const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
-
-    fetch("/api/generate-question", {
+    const abort = new AbortController();
+    const timeout = setTimeout(
+      () => abort.abort(),
+      CONTEXTUAL_QUESTION_TIMEOUT_MS,
+    );
+    const result = fetch("/api/generate-question", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2776,50 +2855,36 @@ export class ComedianBrain {
         style: this.deps.getLlmQuestions?.() ? "simple" : "open",
         imageBase64: frame,
       }),
+      signal: abort.signal,
     })
       .then((r) => r.json())
-      .then((data: { question: string; jokeContext: string; fallback?: boolean }) => {
-        if (this.state !== "ask_question") return; // stale
-        const questionText = data.question;
-        // The route returns a FIXED fallback ("So what's going on with you?")
-        // when its LLM call fails or overflows — `fallback: true` flags it. That
-        // generic line reads canned (and during an outage every cycle returns it,
-        // so the puppet asked it three times in a row in a real session). Divert
-        // to a fresh bank question whenever the route fell back OR we've already
-        // asked this exact question.
-        if (data.fallback || this._questionAlreadyAsked(questionText)) {
-          const bankQ = this._nextValidQuestion();
-          if (bankQ) {
-            this.askedQuestionIds.add(bankQ.id);
-            this.currentQuestion = bankQ;
-            this._queueQuestionWithBridge(this._pickQuestionText(bankQ));
-            this.deps.logTiming(
-              `brain: contextual question ${data.fallback ? "fell back" : "repeated"} — using bank "${bankQ.id}" instead`,
-            );
-            return;
-          }
-        }
-        this.currentQuestion = {
-          id: `generated_${Date.now()}`,
-          question: questionText,
-          jokeContext: data.jokeContext,
-          prodLines: CONTEXTUAL_QUESTION_PRODS,
-        };
-        this._queueQuestionWithBridge(questionText);
-        this.deps.logTiming(`brain: contextual question — "${questionText}"`);
-      })
-      .catch(() => {
-        if (this.state !== "ask_question") return;
-        // Fallback — ask where they are
-        const fallback = CONTEXTUAL_FALLBACK_QUESTION;
-        this.currentQuestion = {
-          id: "generated_fallback",
-          question: fallback,
-          jokeContext: "Location and environment roast.",
-          prodLines: CONTEXTUAL_FALLBACK_PRODS,
-        };
-        this._queueQuestionWithBridge(fallback);
-      });
+      .then(
+        (data: { question?: string; jokeContext?: string; fallback?: boolean }) =>
+          data.question
+            ? {
+                question: data.question,
+                jokeContext: data.jokeContext ?? "Contextual answer roast.",
+                fallback: data.fallback,
+              }
+            : null,
+      )
+      .catch(() => null)
+      .finally(() => clearTimeout(timeout));
+
+    const request = { abort, result, timeout };
+    this.contextualQuestionRequest = request;
+    return request;
+  }
+
+  private _queueContextualFallbackQuestion(): void {
+    const fallback = CONTEXTUAL_FALLBACK_QUESTION;
+    this.currentQuestion = {
+      id: "generated_fallback",
+      question: fallback,
+      jokeContext: "Location and environment roast.",
+      prodLines: CONTEXTUAL_FALLBACK_PRODS,
+    };
+    this._queueQuestionWithBridge(fallback);
   }
 
   private _cancelRephrase(): void {
@@ -2833,6 +2898,11 @@ export class ComedianBrain {
   private _clearPreQueue(): void {
     this.preQueuedQuestion = null;
     this.preQueuedRephrasedText = null;
+    if (this.contextualQuestionRequest) {
+      clearTimeout(this.contextualQuestionRequest.timeout);
+      this.contextualQuestionRequest.abort.abort();
+      this.contextualQuestionRequest = null;
+    }
   }
 
   /**
@@ -2845,7 +2915,7 @@ export class ComedianBrain {
    */
   private _preQueueNextQuestion(): void {
     if (this.visionOnlyMode) return;
-    if (this.preQueuedQuestion) return;
+    if (this.preQueuedQuestion || this.contextualQuestionRequest) return;
 
     // Dev experiment: llmQuestions on → pre-fetch every question from the LLM (repeat-aware).
     const useLlmQuestions = this.deps.getLlmQuestions?.() === true && this.askedQuestionIds.size >= 1;
@@ -2917,46 +2987,13 @@ export class ComedianBrain {
 
   private _preFetchContextualQuestion(): void {
     this.deps.logTiming("brain: pre-fetching contextual question");
-    const observations = this.deps.getObservations();
-    const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
-
-    fetch("/api/generate-question", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: this.deps.getRoastModel(),
-        persona: this.deps.getPersona(),
-        observations,
-        setting: this.deps.getVisionSetting(),
-        // Uncapped — re-asking a volunteered fact reads as not listening.
-        knownFacts: this._getAllKnownFacts(),
-        conversationSoFar: this._getLedgerContext(),
-        previousQuestions: this._getPreviousQuestionTexts(),
-        style: this.deps.getLlmQuestions?.() ? "simple" : "open",
-        imageBase64: frame,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data: { question: string; jokeContext: string }) => {
-        if (!data?.question) return;
-        if (this.preQueuedQuestion) return; // raced — keep whichever landed first
-        // Route-level LLM failure returns a fixed fallback question — don't
-        // pre-queue a repeat; enterAskQuestion will pick a bank question instead.
-        if (this._questionAlreadyAsked(data.question)) {
-          this.deps.logTiming("brain: pre-fetched contextual is a repeat — discarding");
-          return;
-        }
-        this.preQueuedQuestion = {
-          id: `generated_${Date.now()}`,
-          question: data.question,
-          jokeContext: data.jokeContext,
-          prodLines: ["Come on, I'm waiting.", "I asked you a question."],
-        };
-        // Contextual question is freshly written for this moment — skip the rephrase pass.
-        this.preQueuedRephrasedText = data.question;
-        this.deps.logTiming(`brain: pre-fetched contextual — "${data.question.slice(0, 40)}"`);
-      })
-      .catch(() => {});
+    const request = this._getOrStartContextualQuestionRequest();
+    void request.result.then((data) => {
+      if (this.contextualQuestionRequest !== request || !data?.question) return;
+      this.deps.logTiming(
+        `brain: pre-fetched contextual ready — "${data.question.slice(0, 40)}"`,
+      );
+    });
   }
 
   /** Speculatively generate the next pipeline joke while the current one plays. */
@@ -3042,7 +3079,8 @@ export class ComedianBrain {
     // delivery), skip vision_react and ask it. Avoids inserting a 5-7s vision joke between
     // the answer's roast and the next question. Vision interrupt still fires
     // when there's nothing queued — see refresh of previousObservations below.
-    const hasQueuedNext = !!this.preQueuedQuestion;
+    const hasQueuedNext =
+      !!this.preQueuedQuestion || !!this.contextualQuestionRequest;
     if (hasQueuedNext) {
       const current = this.deps.getObservations();
       // Refresh observation baseline so the next genuine vision_react isn't
@@ -3474,10 +3512,34 @@ export class ComedianBrain {
     return this.ledger.filter((e) => e.type === "question").map((e) => e.text);
   }
 
-  /** Exact-text repeat check (case-insensitive) against every question asked so far. */
+  /**
+   * Repeat check against every question asked so far. Strip host-added bridge
+   * phrases first: "Okay okay. You live alone?" and "You live alone?" are the
+   * same question even though the ledger text differs.
+   */
   private _questionAlreadyAsked(text: string): boolean {
-    const needle = text.trim().toLowerCase();
-    return this._getPreviousQuestionTexts().some((q) => q.trim().toLowerCase() === needle);
+    const normalize = (value: string): string => {
+      let normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/^[\s"'“”]+/, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+      for (const bridge of [...QUESTION_BRIDGES].sort((a, b) => b.length - a.length)) {
+        const bridgeLead = bridge
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim();
+        if (normalized.startsWith(`${bridgeLead} `)) {
+          normalized = normalized.slice(bridgeLead.length).trim();
+          break;
+        }
+      }
+      return normalized;
+    };
+
+    const needle = normalize(text);
+    return this._getPreviousQuestionTexts().some((q) => normalize(q) === needle);
   }
 
   /** Full ledger summary for throwback references — all facts learned so far. */

@@ -23,20 +23,14 @@ import type { PersonaId } from "@/lib/personas";
  */
 
 // ─── Filler while a joke is being written ───────────────────────────────────
-// The per-persona "thinking" filler pool (the old NONWORD_FILLERS) now lives on
-// each comedian: `fillers` in src/lib/comedians/*.ts, so each character thinks
-// out loud in its own voice. Toast uses TOAST_FILLER_LINES below. The echo-filler
-// mechanism (repeat the user's answer) stays global, right here.
+// The spoken filler POOLS now live with their character:
+//   - Roast "thinking" fillers + echo templates → `fillers` / `echoFillers` per
+//     comedian in src/lib/comedians/*.ts.
+//   - Toast's drunk fillers → TOAST_FILLER_LINES in src/lib/toastPrompts.ts.
+// Only the cross-persona cadence knob stays global here:
 
-// Echo fillers — repeat the user's whole answer once, then bridge into the joke.
-// Keep these declarative (not question-shaped) so they sound like active listening.
-export const ECHO_FILLER_TEMPLATES = [
-  "{answer}, huh. Okay.",
-  "{answer}, you say. Interesting.",
-  "{answer}. Hm, alright.",
-];
-
-/** Chance (0-1) of using an echo filler instead of a non-word filler when eligible. */
+/** Chance (0-1) of using an echo filler (repeat the user's answer) instead of a
+ *  plain "thinking" filler, when the answer is short/complete enough to echo. */
 export const ECHO_FILLER_PROBABILITY = 0.35;
 
 // ─── Canned intros (instant opener — doubles as the "name" question) ────────
@@ -167,20 +161,9 @@ export const TOAST_GREETINGS = [
   "…and she goes, NO, and I'm like — *clink* — oh shit, hi! You're here! Welcome welcome.",
 ];
 
-/** Drunk-thinking fillers — same role as the per-persona `fillers`
- *  (src/lib/comedians/*.ts) but for a woman who is genuinely WASTED.
- *  Meandering, slurry-adjacent, repeating herself, losing the thread. */
-export const TOAST_FILLER_LINES = [
-  "Hmm, where was I, where was I, what was I —",
-  "Oh god, oh god — okay — let me think let me think.",
-  "Wait wait wait, lemme — what?",
-  "Okay so, okay so — hold that thought, hold that.",
-  "Mm, yeah, no, no totally, totally, totally.",
-  "Right, right right right, okay, *sip*.",
-  "Oh that's good, okay — okay — hang on, hang on.",
-  "I LOVE that — wait, what?",
-  "Mm-hm, mm-HM. Yeah. Yeah no, totally.",
-];
+// Toast's drunk-thinking fillers moved to `TOAST_FILLER_LINES` in
+// src/lib/toastPrompts.ts (alongside the rest of the Toast character), to match
+// the per-persona `fillers` in src/lib/comedians/*.ts.
 
 /** Toast's version of the watchdog goodbye — fully wasted apology, ends the
  *  session in voice. */

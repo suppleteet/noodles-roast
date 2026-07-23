@@ -99,4 +99,10 @@ export const sweetheart: PersonaConfig = {
     "Mm, alright now, hold on.",
     "Oh, let me see, sweetheart.",
   ],
+  // Echo fillers — coo the answer back, warm before the kill-shot. {answer} required.
+  echoFillers: [
+    "{answer}, aw, I love that.",
+    "{answer}, you say. How sweet.",
+    "{answer}. Oh honey, okay.",
+  ],
 };

@@ -16,8 +16,11 @@ test.describe("Comedian Brain — Full Flow", () => {
   test("greeting TTS fires within 3s of session start", async ({ page }) => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
+    await page.goto("/");
     const startMs = Date.now();
-    await startRoasting(page, driver);
+    await page.getByRole("button", { name: /roast me/i }).click();
+    await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
+    await driver.waitForConnect();
 
     const req = await driver.waitForTtsRequest(5000);
     const elapsed = Date.now() - startMs;
@@ -110,7 +113,7 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
 // ─── Silence handling ─────────────────────────────────────────────────────────
 
 test.describe("Comedian Brain — Silence Handling", () => {
-  test("prod line plays after answerWaitMs silence (fast config: 80ms)", async ({ page }) => {
+  test("prod line plays after answerWaitMs silence (fast config: 300ms)", async ({ page }) => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
     await startRoasting(page, driver);

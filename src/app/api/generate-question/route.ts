@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { PERSONA_IDS, DEFAULT_PERSONA, PERSONAS, type PersonaId } from "@/lib/personas";
 import { generateText, type UserPart } from "@/lib/llmClient";
+import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
+import { isRoastModelId } from "@/lib/modelCatalog";
 
 interface GenerateQuestionRequest {
   persona: PersonaId;
@@ -19,7 +21,13 @@ interface GenerateQuestionRequest {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as GenerateQuestionRequest;
+    const body = await readLimitedJson<GenerateQuestionRequest>(req);
+    if (body.imageBase64 !== undefined && !isValidImageBase64(body.imageBase64)) {
+      return NextResponse.json({ error: "Invalid or oversized image" }, { status: 413 });
+    }
+    if (body.model !== undefined && !isRoastModelId(body.model)) {
+      return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
+    }
     const model = body.model ?? ROAST_MODEL;
     const personaId: PersonaId = PERSONA_IDS.includes(body.persona) ? body.persona : DEFAULT_PERSONA;
     const persona = PERSONAS[personaId];
@@ -157,6 +165,9 @@ Return ONLY a JSON object: { "question": "the question text", "jokeContext": "hi
       fallback: parsedFailed || tooLong,
     });
   } catch (err) {
+    if (err instanceof ApiRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error("[generate-question]", err);
     return NextResponse.json({ question: "So what's going on with you?", jokeContext: "General roast.", fallback: true });
   }

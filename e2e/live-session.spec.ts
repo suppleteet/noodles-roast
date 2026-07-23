@@ -53,7 +53,7 @@ test.describe("Startup", () => {
     expect(req.voiceSettings).toMatchObject({
       style: 0.25,
       speed: 0.88,
-      stability: 0.852,
+      stability: 0.632,
     });
   });
 });
