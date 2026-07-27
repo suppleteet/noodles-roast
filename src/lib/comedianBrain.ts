@@ -3816,6 +3816,15 @@ export class ComedianBrain {
             jokeSinks.clear();
             onError();
             return true;
+          } else if (event.type === "error" && event.error === "model_unavailable") {
+            const failedModel = (event.failedModel as string) || this.deps.getRoastModel();
+            this.deps.logTiming(
+              `brain: MODEL_UNAVAILABLE ${failedModel} (stream) — brain-busted exit`,
+            );
+            for (const s of jokeSinks.values()) s.cancel();
+            jokeSinks.clear();
+            this._enterTechnicalDifficultiesExit(failedModel);
+            return true;
           } else if (event.type === "meta") {
             metaSeen = true;
             onMeta(

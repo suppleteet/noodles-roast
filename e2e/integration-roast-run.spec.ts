@@ -42,6 +42,7 @@ const HARD_RULE_KEYWORDS: { rule: string; words: RegExp }[] = [
 ];
 
 const RUN = process.env.RUN_INTEGRATION_TEST === "1";
+const TEST_MODEL = process.env.INTEGRATION_ROAST_MODEL;
 
 test.describe("Integration Roast Run", () => {
   test.skip(!RUN, "Set RUN_INTEGRATION_TEST=1 to run (real LLM calls cost money).");
@@ -79,6 +80,10 @@ test.describe("Integration Roast Run", () => {
     page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
     await page.goto("/");
+    if (TEST_MODEL) {
+      await page.getByTestId("roast-model-select").selectOption(TEST_MODEL);
+      console.log(`[integration] selected model: ${TEST_MODEL}`);
+    }
     await page.getByRole("button", { name: /roast me/i }).click();
     await driver.waitForConnect();
 

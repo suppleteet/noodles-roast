@@ -175,6 +175,7 @@ export default function LandingScreen() {
         {IS_DEV && (
           <>
             <select
+              data-testid="roast-model-select"
               value={roastModel}
               onChange={(e) => setRoastModel(e.target.value as RoastModelId)}
               className="mb-2 w-full rounded-xl border border-orange-300/25 bg-white/10 px-3 py-2 font-mono text-sm text-orange-200 outline-none transition-colors hover:border-orange-300/50"

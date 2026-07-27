@@ -147,7 +147,7 @@ function MainApp() {
     if (getFreshLiveTokenPromise()) return;
     const { burnIntensity: bi, activePersona: ap } = useSessionStore.getState();
     tokenPrefetchStartedAtRef.current = Date.now();
-    tokenPromiseRef.current = fetch("/api/live-token", {
+    const tokenPromise = fetch("/api/live-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ burnIntensity: bi, persona: ap }),
@@ -160,10 +160,13 @@ function MainApp() {
       })
       .catch((e) => {
         console.warn("[token-prefetch] failed:", e);
-        tokenPromiseRef.current = null;
-        tokenPrefetchStartedAtRef.current = null;
+        if (tokenPromiseRef.current === tokenPromise) {
+          tokenPromiseRef.current = null;
+          tokenPrefetchStartedAtRef.current = null;
+        }
         throw e;
       });
+    tokenPromiseRef.current = tokenPromise;
   }
 
   function getFreshLiveTokenPromise(): Promise<string> | null {
@@ -178,6 +181,37 @@ function MainApp() {
     return promise;
   }
 
+  /**
+   * Startup resources are single-session. In particular, Gemini ephemeral
+   * tokens must not be reused after a model-trouble restart, and a comedian
+   * chat session is tied to the model selected when it was created.
+   */
+  function resetStartupPrefetches(): void {
+    tokenPromiseRef.current = null;
+    tokenPrefetchStartedAtRef.current = null;
+
+    const abandonedSession = comedianSessionPromiseRef.current;
+    comedianSessionPromiseRef.current = null;
+    if (abandonedSession) {
+      void abandonedSession
+        .then((sessionId) => {
+          if (!sessionId) return;
+          return fetch("/api/comedian-session", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+        })
+        .catch(() => {
+          // Best-effort cleanup; server TTL is the final safety net.
+        });
+    }
+
+    warmupGreetingPromiseRef.current = null;
+    warmupGreetingAudioRef.current = null;
+    warmupCannedOpenerRef.current = null;
+  }
+
   /** Pre-create the comedian chat session at button press — settings are locked
    *  once the user taps Start, and this is the longest cold path, so firing it
    *  here overlaps it with the permission grant. Resolves to null on failure;
@@ -186,7 +220,7 @@ function MainApp() {
     if (sessionMode !== "conversation" || mockModeRef.current) return;
     if (comedianSessionPromiseRef.current) return;
     const s = useSessionStore.getState();
-    comedianSessionPromiseRef.current = fetch("/api/comedian-session", {
+    const comedianSessionPromise = fetch("/api/comedian-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -205,9 +239,12 @@ function MainApp() {
       })
       .catch((e) => {
         console.warn("[comedian-session-prefetch] failed:", e);
-        comedianSessionPromiseRef.current = null;
+        if (comedianSessionPromiseRef.current === comedianSessionPromise) {
+          comedianSessionPromiseRef.current = null;
+        }
         return null;
       });
+    comedianSessionPromiseRef.current = comedianSessionPromise;
   }
 
   /**
@@ -388,10 +425,7 @@ function MainApp() {
 
     const enteredIdleFromSession = prev !== null && prev !== "idle";
     if (enteredIdleFromSession) {
-      tokenPromiseRef.current = null;
-      tokenPrefetchStartedAtRef.current = null;
-      warmupGreetingPromiseRef.current = null;
-      comedianSessionPromiseRef.current = null;
+      resetStartupPrefetches();
     }
     if (sessionMode === "conversation" && !mockMode) {
       ensureLiveTokenPrefetch();
@@ -633,13 +667,12 @@ function MainApp() {
   useEffect(() => {
     if (phase === "stopped" && pendingMockRestartRef.current) {
       pendingMockRestartRef.current = false;
+      resetStartupPrefetches();
       setPhase("requesting-permissions", "SESSION_RESTART");
     }
     if (phase === "stopped" && pendingModelFallbackRestartRef.current) {
       pendingModelFallbackRestartRef.current = false;
-      warmupGreetingPromiseRef.current = null;
-      warmupGreetingAudioRef.current = null;
-      warmupCannedOpenerRef.current = null;
+      resetStartupPrefetches();
       // Auto-restart with the already-swapped model (running synchronously here
       // beats LiveSessionController.stopLiveSession's async share navigation).
       setPhase("requesting-permissions", "SESSION_RESTART");
@@ -827,9 +860,7 @@ function MainApp() {
           onAccept={() => {
             // Swap to the suggested model and restart the session with it.
             acceptModelFallback();
-            warmupGreetingPromiseRef.current = null;
-            warmupGreetingAudioRef.current = null;
-            warmupCannedOpenerRef.current = null;
+            resetStartupPrefetches();
             if (phase === "roasting") {
               // Bounce roasting → stopped (LiveSessionController teardown) →
               // requesting-permissions (effect above auto-restarts on new model).

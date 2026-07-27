@@ -56,6 +56,100 @@ test.describe("Startup", () => {
       stability: 0.632,
     });
   });
+
+  test("model-trouble restart creates fresh Terra startup resources", async ({ page }) => {
+    const driver = new ComedianBrainDriver(page);
+    await driver.setup();
+
+    const sessionModels: string[] = [];
+    let liveTokenRequests = 0;
+    let sessionSequence = 0;
+    await page.route("/api/live-token", async (route) => {
+      liveTokenRequests++;
+      await route.fallback();
+    });
+    await page.route("/api/comedian-session", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+        return;
+      }
+      const body = route.request().postDataJSON() as { model?: string };
+      sessionModels.push(body.model ?? "");
+      sessionSequence++;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sessionId: `restart-test-${sessionSequence}` }),
+      });
+    });
+
+    let failedOnce = false;
+    await page.route("/api/generate-speak", async (route) => {
+      const body = route.request().postDataJSON() as { model?: string };
+      if (!failedOnce && body.model === "gemini-3.6-flash") {
+        failedOnce = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body:
+            `data: ${JSON.stringify({
+              type: "error",
+              error: "model_unavailable",
+              failedModel: "gemini-3.6-flash",
+              suggestedFallback: "gemini-3.5-flash",
+            })}\n\n` +
+            `data: ${JSON.stringify({ type: "done" })}\n\n`,
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body:
+          `data: ${JSON.stringify({
+            type: "joke",
+            text: "Fresh model, fresh insult.",
+            motion: "deadpan",
+            intensity: 0.7,
+            score: 7,
+          })}\n\n` +
+          `data: ${JSON.stringify({ type: "meta", relevant: true })}\n\n` +
+          `data: ${JSON.stringify({ type: "done" })}\n\n`,
+      });
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: /roast me/i }).click();
+    await driver.waitForBrainState("wait_answer", 10_000);
+    await driver.simulateAnswer("My name is Alex");
+
+    await expect(
+      page.getByRole("heading", { name: "His brain glitched out" }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // Reproduce accepting only after teardown has already reached `stopped`.
+    // This exercises the non-roasting modal branch, where stale resources used
+    // to survive and poison the replacement session.
+    await page.getByRole("button", { name: "End Session" }).click({ force: true });
+    await expect(page.getByRole("button", { name: "Start Session" })).toBeVisible();
+    const liveTokenRequestsBeforeRestart = liveTokenRequests;
+
+    await page.getByRole("button", { name: "Start Over" }).click();
+
+    await expect.poll(() => sessionModels).toContain("gpt-5.6-terra");
+    await expect.poll(() => liveTokenRequests).toBeGreaterThan(
+      liveTokenRequestsBeforeRestart,
+    );
+    await driver.waitForBrainState("wait_answer", 10_000);
+    expect(sessionModels).toEqual([
+      "gemini-3.6-flash",
+      "gpt-5.6-terra",
+    ]);
+  });
 });
 
 // ─── TTS pipeline (brain-driven) ──────────────────────────────────────────────

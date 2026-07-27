@@ -6,7 +6,12 @@ import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { JokeContext, JokeResponse } from "@/app/api/generate-joke/route";
 import { getSession, getContextInstructions, sendMessageStream, compactStableContext } from "@/lib/chatSessionStore";
-import { generateTextStream, QuotaError, type UserPart } from "@/lib/llmClient";
+import {
+  generateTextStream,
+  ModelUnavailableError,
+  QuotaError,
+  type UserPart,
+} from "@/lib/llmClient";
 import { trimObservations } from "@/lib/visionDiff";
 import { createStreamingJokeParser } from "@/lib/partialJokeParser";
 import { openElTtsStream, type ElTtsStreamController } from "@/lib/elTtsStream";
@@ -33,6 +38,13 @@ type StreamEvent =
       redirect?: string;
       tags?: string[];
       callback?: { text: string; motion: string; intensity: number };
+    }
+  | { type: "error"; error: "quota_exceeded"; provider: string }
+  | {
+      type: "error";
+      error: "model_unavailable";
+      failedModel: string;
+      suggestedFallback: string;
     }
   | { type: "done" };
 
@@ -401,6 +413,19 @@ export async function POST(req: NextRequest) {
           } catch {
             // ignore
           }
+        } else if (e instanceof ModelUnavailableError) {
+          console.error(
+            "[generate-speak] MODEL_UNAVAILABLE:",
+            e.failedModel,
+            "→",
+            e.suggestedFallback,
+          );
+          safeEnqueue({
+            type: "error",
+            error: "model_unavailable",
+            failedModel: e.failedModel,
+            suggestedFallback: e.suggestedFallback,
+          });
         } else {
           console.error("[generate-speak]", e);
           safeEnqueue({ type: "meta", relevant: true });

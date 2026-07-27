@@ -131,6 +131,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Retry a provider-declared model outage briefly before ending the show.
+ * Returns false when `err` is unrelated. On the final attempt it throws the
+ * structured error consumed by the API/UI fallback path.
+ */
+export async function retryUnavailableModel(
+  model: string,
+  err: unknown,
+  attempt: number,
+): Promise<boolean> {
+  const unavailable = toModelUnavailableError(model, err);
+  if (!unavailable) return false;
+
+  const delayMs = RETRY_DELAYS_MS[attempt];
+  if (delayMs === undefined) throw unavailable;
+  await sleep(delayMs);
+  return true;
+}
+
 function toQuotaError(provider: Provider, err: unknown): QuotaError | null {
   const status = (err as { status?: number }).status;
   const message = err instanceof Error ? err.message : String(err);
@@ -316,9 +335,8 @@ export async function generateText(req: LlmRequest): Promise<string> {
     } catch (err) {
       const quota = toQuotaError(provider, err);
       if (quota) throw quota;
-      if (provider === "gemini") {
-        const unavailable = toModelUnavailableError(req.model, err);
-        if (unavailable) throw unavailable; // do not retry — Google is shedding load
+      if (provider === "gemini" && await retryUnavailableModel(req.model, err, attempt)) {
+        continue;
       }
       if (attempt < RETRY_DELAYS_MS.length && isTransientProviderError(err)) {
         await sleep(RETRY_DELAYS_MS[attempt]);
@@ -457,14 +475,25 @@ export async function* generateTextStream(
     } catch (err) {
       const quota = toQuotaError(provider, err);
       if (quota) throw quota;
-      if (provider === "gemini" && !yielded) {
-        const unavailable = toModelUnavailableError(req.model, err);
-        if (unavailable) throw unavailable;
+      const unavailable =
+        provider === "gemini"
+          ? toModelUnavailableError(req.model, err)
+          : null;
+      if (
+        unavailable &&
+        !yielded &&
+        await retryUnavailableModel(req.model, err, attempt)
+      ) {
+        continue;
       }
       if (!yielded && attempt < RETRY_DELAYS_MS.length && isTransientProviderError(err)) {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;
       }
+      // Never retry after yielding content (that would duplicate the response),
+      // but preserve the structured outage signal so the SSE route can stop
+      // playback and offer a clean model restart.
+      if (unavailable) throw unavailable;
       throw err;
     }
   }

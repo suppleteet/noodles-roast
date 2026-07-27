@@ -20,7 +20,13 @@ import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastProm
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
-import { generateText, generateTextStream, toModelUnavailableError, type UserPart } from "@/lib/llmClient";
+import {
+  generateText,
+  generateTextStream,
+  retryUnavailableModel,
+  toModelUnavailableError,
+  type UserPart,
+} from "@/lib/llmClient";
 import {
   estimateTokenCount,
   estimateUserPartsTokens,
@@ -200,12 +206,14 @@ export async function sendMessage(
 
   if (session.geminiChat) {
     let result;
-    try {
-      result = await session.geminiChat.sendMessage({ message: userParts });
-    } catch (err) {
-      const unavailable = toModelUnavailableError(session.model, err);
-      if (unavailable) throw unavailable;
-      throw err;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        result = await session.geminiChat.sendMessage({ message: userParts });
+        break;
+      } catch (err) {
+        if (await retryUnavailableModel(session.model, err, attempt)) continue;
+        throw err;
+      }
     }
     const text = result.text ?? "";
     const usage = result.usageMetadata;
@@ -262,41 +270,47 @@ export async function* sendMessageStream(
   const userText = userParts.map((p) => ("text" in p ? p.text : "[image]")).join("\n");
 
   if (session.geminiChat) {
-    let stream;
-    try {
-      stream = await session.geminiChat.sendMessageStream({ message: userParts });
-    } catch (err) {
-      const unavailable = toModelUnavailableError(session.model, err);
-      if (unavailable) throw unavailable;
-      throw err;
-    }
-    let accumulated = "";
-    let promptTokenCount: number | undefined;
-    let candidatesTokenCount: number | undefined;
-    let totalTokenCount: number | undefined;
-    for await (const chunk of stream) {
-      if (chunk.usageMetadata) {
-        promptTokenCount = chunk.usageMetadata.promptTokenCount;
-        candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;
-        totalTokenCount = chunk.usageMetadata.totalTokenCount;
+    for (let attempt = 0; ; attempt++) {
+      let yielded = false;
+      try {
+        const stream = await session.geminiChat.sendMessageStream({ message: userParts });
+        let accumulated = "";
+        let promptTokenCount: number | undefined;
+        let candidatesTokenCount: number | undefined;
+        let totalTokenCount: number | undefined;
+        for await (const chunk of stream) {
+          if (chunk.usageMetadata) {
+            promptTokenCount = chunk.usageMetadata.promptTokenCount;
+            candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;
+            totalTokenCount = chunk.usageMetadata.totalTokenCount;
+          }
+          const text = chunk.text ?? "";
+          if (text) {
+            yielded = true;
+            accumulated += text;
+            yield text;
+          }
+        }
+        recordLlmUsage({
+          route: "chatSessionStream",
+          provider: "gemini",
+          model: session.model,
+          inputTokens: promptTokenCount ?? estimateUserPartsTokens(userParts),
+          outputTokens: candidatesTokenCount ?? estimateTokenCount(accumulated),
+          exact: Boolean(totalTokenCount),
+        });
+        session.history.push({ role: "user", content: userText });
+        session.history.push({ role: "assistant", content: accumulated });
+        return;
+      } catch (err) {
+        if (!yielded && await retryUnavailableModel(session.model, err, attempt)) {
+          continue;
+        }
+        const unavailable = toModelUnavailableError(session.model, err);
+        if (unavailable) throw unavailable;
+        throw err;
       }
-      const text = chunk.text ?? "";
-      if (text) {
-        accumulated += text;
-        yield text;
-      }
     }
-    recordLlmUsage({
-      route: "chatSessionStream",
-      provider: "gemini",
-      model: session.model,
-      inputTokens: promptTokenCount ?? estimateUserPartsTokens(userParts),
-      outputTokens: candidatesTokenCount ?? estimateTokenCount(accumulated),
-      exact: Boolean(totalTokenCount),
-    });
-    session.history.push({ role: "user", content: userText });
-    session.history.push({ role: "assistant", content: accumulated });
-    return;
   }
 
   // Non-Gemini: replay capped history
