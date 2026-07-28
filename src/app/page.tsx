@@ -16,7 +16,7 @@ import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
-import { useDevUnlock, toggleDevUnlock } from "@/lib/devUnlock";
+import { useDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
 
 const ShareScreen = dynamic(() => import("@/components/ui/ShareScreen"), { ssr: false });
@@ -850,10 +850,6 @@ function MainApp() {
           <LlmLogPanel />
         </div>
       )}
-      {process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_BUILD_TIME && (
-        <BuildTimeStamp />
-      )}
-
       {modelUnavailable && (
         <ModelFallbackPrompt
           suggestedFallback={modelUnavailable.suggestedFallback}
@@ -922,78 +918,6 @@ function ModelFallbackPrompt({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * Build-time stamp in the bottom-right corner. Five quick taps within 2.5
- * seconds toggle the dev-features unlock (flips a localStorage flag — see
- * src/lib/devUnlock.ts). On unlock/lock a short toast confirms which state
- * we're in. The 5-tap gesture is hard to trigger by accident on a phone
- * while keeping the prod UI uncluttered.
- */
-function BuildTimeStamp() {
-  const tapsRef = useRef<number[]>([]);
-  const toastTimerRef = useRef<number | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
-
-  // Clear pending toast timeout on unmount so React doesn't warn about
-  // setState on an unmounted component if the user navigates away during
-  // the 2s display window.
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  if (!buildTime) return null;
-
-  function handleTap() {
-    const now = Date.now();
-    const windowMs = 2500;
-    const recent = tapsRef.current.filter((t) => now - t < windowMs);
-    recent.push(now);
-    tapsRef.current = recent;
-    if (recent.length >= 5) {
-      tapsRef.current = [];
-      const nowUnlocked = toggleDevUnlock();
-      setToast(nowUnlocked ? "Dev mode unlocked" : "Dev mode locked");
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-      }
-      toastTimerRef.current = window.setTimeout(() => {
-        setToast(null);
-        toastTimerRef.current = null;
-      }, 2000);
-    }
-  }
-
-  return (
-    <div className="fixed bottom-2 right-3 z-50 flex flex-col items-end gap-1">
-      {toast && (
-        <div className="rounded-md bg-orange-600/90 px-2 py-1 text-[10px] font-bold text-white shadow-lg sm:text-xs">
-          {toast}
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={handleTap}
-        className="select-none text-[10px] text-white/40 transition-colors hover:text-white/70 sm:text-xs"
-      >
-        {new Date(buildTime).toLocaleString("en-US", {
-          // Pin to Pacific so server (UTC) and client render the same string —
-          // otherwise the SSR'd build stamp lands as GMT and only flips to local
-          // after hydration. en-US format + Los_Angeles tz gives PST/PDT
-          // automatically depending on date.
-          timeZone: "America/Los_Angeles",
-          timeZoneName: "short",
-        })}
-      </button>
     </div>
   );
 }
