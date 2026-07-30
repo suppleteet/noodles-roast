@@ -1,7 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// debugMode is true by default in page.tsx. A button press is still required to start.
-// These tests mock the APIs needed for that flow to succeed.
+// Debug UI starts locked. These tests mock the APIs needed for the session flow.
 
 test.beforeEach(async ({ page }) => {
   // Fake webcam + mic so getUserMedia succeeds
@@ -70,11 +69,16 @@ test("debug checkbox toggles back to landing screen", async ({ page }) => {
   });
 
   await page.goto("/");
+  await expect(page.getByRole("checkbox", { name: "debug" })).toHaveCount(0);
+  await page.getByTestId("build-timestamp").click();
+  await expect(page.getByRole("checkbox", { name: "debug" })).toBeChecked();
   await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 
   // Uncheck debug → should return to idle/landing
-  await page.getByRole("checkbox", { name: "debug" }).uncheck();
+  // A plain click is intentional: relocking removes the checkbox immediately,
+  // so locator.uncheck() would keep waiting for a now-unmounted input.
+  await page.getByRole("checkbox", { name: "debug" }).click();
   await expect(page.getByRole("button", { name: /roast me/i })).toBeVisible({ timeout: 5000 });
 });
 
@@ -95,7 +99,7 @@ test("landing Roast Me button starts a session", async ({ page }) => {
   });
 
   await page.goto("/");
-  // Landing screen is shown on page load (debug mode, but no auto-start)
+  // Landing screen is shown on page load with debug UI still locked.
   await expect(page.getByRole("button", { name: /roast me/i })).toBeVisible({ timeout: 5000 });
 
   // Click Roast Me → session starts → HUD appears

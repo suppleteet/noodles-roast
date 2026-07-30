@@ -92,6 +92,7 @@ test.describe("Real live startup", () => {
     });
 
     await page.goto("/");
+    await page.getByTestId("build-timestamp").click();
     await page.getByTestId("roast-model-select").selectOption(TEST_MODEL);
     await page
       .getByRole("checkbox", { name: "Share my location (just for jokes)" })

@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }) => {
   (page as unknown as Record<string, unknown>)["_errors"] = errors;
 
   await page.goto("/");
+  await page.getByTestId("build-timestamp").click();
 });
 
 function getErrors(page: import("@playwright/test").Page): string[] {

@@ -80,6 +80,7 @@ test.describe("Integration Roast Run", () => {
     page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
     await page.goto("/");
+    await page.getByTestId("build-timestamp").click();
     if (TEST_MODEL) {
       await page.getByTestId("roast-model-select").selectOption(TEST_MODEL);
       console.log(`[integration] selected model: ${TEST_MODEL}`);

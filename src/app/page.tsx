@@ -16,7 +16,7 @@ import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
-import { useDevUnlock } from "@/lib/devUnlock";
+import { lockDevUi, unlockDevUi, useDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
 
 const ShareScreen = dynamic(() => import("@/components/ui/ShareScreen"), { ssr: false });
@@ -29,6 +29,15 @@ const LiveSessionController = dynamic(() => import("@/components/session/LiveSes
 const RigEditMode = dynamic(() => import("@/engine/ui/RigEditMode"), { ssr: false });
 
 const LIVE_TOKEN_PREFETCH_MAX_AGE_MS = 2 * 60 * 1000;
+const BUILD_TIMESTAMP = process.env.NEXT_PUBLIC_BUILD_TIMESTAMP ?? "local";
+
+function formatBuildTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.toISOString().slice(0, 16).replace("T", " ")}Z`;
+}
+
+const BUILD_TIMESTAMP_LABEL = formatBuildTimestamp(BUILD_TIMESTAMP);
 
 interface DebugUsageSnapshot {
   llm: {
@@ -90,12 +99,6 @@ function MainApp() {
   const acceptModelFallback = useSessionStore((s) => s.acceptModelFallback);
   const IS_DEV = useDevUnlock();
   const [debugMode, setDebugMode] = useState(false);
-  // Auto-enable debug overlays the first time IS_DEV becomes true (dev build
-  // hydrates, or user taps the build stamp to unlock). User can still toggle
-  // off manually via the dev controls — we only flip on the false→true edge.
-  useEffect(() => {
-    if (IS_DEV) setDebugMode(true);
-  }, [IS_DEV]);
   const [mockMode, setMockMode] = useState(false);
   const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
   const lastNonZeroUsageRef = useRef<DebugUsageSnapshot | null>(null);
@@ -645,7 +648,17 @@ function MainApp() {
 
   function handleDebugToggle(checked: boolean) {
     setDebugMode(checked);
-    if (!checked) { setMockMode(false); mockModeRef.current = false; setPhase("idle", "DEBUG_TOGGLE"); }
+    if (!checked) {
+      setMockMode(false);
+      mockModeRef.current = false;
+      lockDevUi();
+      setPhase("idle", "DEBUG_TOGGLE");
+    }
+  }
+
+  function handleBuildTimestampClick() {
+    unlockDevUi();
+    setDebugMode(true);
   }
 
   function handleMockToggle(checked: boolean) {
@@ -685,6 +698,16 @@ function MainApp() {
 
   return (
     <main className="relative h-dvh bg-black flex items-center justify-center overflow-hidden">
+      <button
+        type="button"
+        onClick={handleBuildTimestampClick}
+        data-testid="build-timestamp"
+        aria-label="Open developer tools"
+        title={`Build ${BUILD_TIMESTAMP}`}
+        className="fixed bottom-2 right-3 z-[70] rounded px-1.5 py-1 font-mono text-[9px] text-white/25 transition-colors hover:bg-white/5 hover:text-white/65 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 md:text-[10px]"
+      >
+        {BUILD_TIMESTAMP_LABEL}
+      </button>
       {/* Debug / mock toggles — dev only */}
       {IS_DEV && (
         <div className="absolute top-3 right-3 z-50 flex items-center gap-3 text-white/50 text-xs select-none">
