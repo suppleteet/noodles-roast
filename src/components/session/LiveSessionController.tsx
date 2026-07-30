@@ -31,9 +31,10 @@ import {
 } from "@/lib/greetingPrefetch";
 import { voiceSettingsForMotion, gainForMotion } from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
-import type {
-  TranscriptRepairRequest,
-  TranscriptRepairResult,
+import {
+  isTranscriptRepairResult,
+  type TranscriptRepairRequest,
+  type TranscriptRepairResult,
 } from "@/lib/transcriptRepair";
 
 /**
@@ -1316,7 +1317,11 @@ export default function LiveSessionController({
         if (!response.ok) {
           throw new Error(`Transcript repair failed (${response.status})`);
         }
-        return (await response.json()) as TranscriptRepairResult;
+        const result: unknown = await response.json();
+        if (!isTranscriptRepairResult(result)) {
+          throw new Error("Transcript repair returned malformed data");
+        }
+        return result;
       },
       replaceLatestUserTranscript: (text) =>
         useSessionStore.getState().replaceLatestUserTranscript(text),

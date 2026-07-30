@@ -4,6 +4,8 @@ import type { BrainState } from "@/lib/comedianBrainConfig";
 import { COMEDIAN_CONFIG } from "@/lib/comedianConfig";
 import { PERSONAS } from "@/lib/personas";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
+import type { ComedyQuestion } from "@/lib/questionBank";
+import type { TranscriptRepairResult } from "@/lib/transcriptRepair";
 
 // Override latency experiment flags so tests run the full greeting/pre_generate flow
 vi.mock("@/lib/comedianConfig", async (importOriginal) => {
@@ -398,6 +400,39 @@ describe("ComedianBrain — stop()", () => {
     brain.stop();
     const lastState = getStates(deps).at(-1);
     expect(lastState).toBeNull();
+  });
+
+  it("does not start joke generation when an in-flight repair aborts", async () => {
+    const repairTranscript: NonNullable<ComedianBrainDeps["repairTranscript"]> =
+      vi.fn((_request, signal) =>
+        new Promise<TranscriptRepairResult>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        }),
+      );
+    const deps = makeDeps({ repairTranscript });
+    const brain = new ComedianBrain(deps) as unknown as {
+      currentQuestion: ComedyQuestion | null;
+      enterGenerating: (answer: string) => void;
+      stop: () => void;
+    };
+    brain.currentQuestion = {
+      id: "job",
+      question: "What do you do for a living?",
+      jokeContext: "Profession roast",
+      prodLines: ["Well?", "Job?"],
+    };
+
+    brain.enterGenerating("I'm a dennis");
+    expect(repairTranscript).toHaveBeenCalledOnce();
+    brain.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

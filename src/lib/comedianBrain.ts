@@ -534,6 +534,10 @@ export class ComedianBrain {
     this._cancelSpeculative();
     this._cancelHopper();
     this._cancelRephrase();
+    // Invalidate async delivery callbacks before aborting repair. The abort
+    // rejection can settle immediately and must not restart generation after
+    // teardown while the internal state still reads "generating".
+    this.deliveryGeneration++;
     this.transcriptRepairAbort?.abort();
     this.transcriptRepairAbort = null;
     this.deps.setBrainState(null);
@@ -2174,6 +2178,67 @@ export class ComedianBrain {
     return wordCount(stripped) >= 3 ? stripped : text;
   }
 
+  private _startAnswerFiller(rawAnswer: string, shouldRepair: boolean): string | undefined {
+    if (COMEDIAN_CONFIG.skipFiller || this.fillerFiredForAnswer) return undefined;
+    this.fillerFiredForAnswer = true;
+    // Do not echo an answer that may be misheard. The first filler is
+    // nonverbal while repair runs; later fillers are nonverbal by design.
+    this.fillerAnswerForPump = shouldRepair ? "" : rawAnswer;
+    this.fillerLineCount = 0;
+    this.fillerLastText = null;
+    this.fillerFirstText = null;
+    this.fillerResumeAfterTranscriptRepair = false;
+    this.fillerPumpActive = true;
+    [this.fillerMotion, this.fillerIntensity] =
+      inferFillerMotionFromAnswer(rawAnswer);
+    this._queueNextPumpFiller();
+    return "filler sound";
+  }
+
+  private _requestTranscriptRepair(
+    request: TranscriptRepairRequest,
+    repairTranscript: NonNullable<ComedianBrainDeps["repairTranscript"]>,
+    proceed: (answer: string, repair?: TranscriptRepairResult) => void,
+  ): void {
+    this.transcriptRepairAbort?.abort();
+    const abort = new AbortController();
+    this.transcriptRepairAbort = abort;
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = (repair?: TranscriptRepairResult) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if (this.transcriptRepairAbort === abort) this.transcriptRepairAbort = null;
+      const answer = repair?.changed && repair.text.trim()
+        ? repair.text.trim()
+        : request.transcript;
+      proceed(answer, repair);
+    };
+
+    this.deps.logTiming(
+      `brain: checking STT transcript — "${request.transcript.slice(0, 80)}"`,
+    );
+    timeout = setTimeout(() => {
+      abort.abort();
+      this.deps.logTiming(
+        `brain: STT repair timed out (${COMEDIAN_CONFIG.transcriptRepairTimeoutMs}ms) — using original`,
+      );
+      finish();
+    }, COMEDIAN_CONFIG.transcriptRepairTimeoutMs);
+
+    void repairTranscript(request, abort.signal)
+      .then((repair) => finish(repair))
+      .catch((error: unknown) => {
+        if (!settled) {
+          this.deps.logTiming(
+            `brain: STT repair unavailable — using original (${error instanceof Error ? error.name : "error"})`,
+          );
+        }
+        finish();
+      });
+  }
+
   private enterGenerating(rawAnswer: string): void {
     this._transition("generating");
     this.deliveryGeneration++;
@@ -2186,30 +2251,7 @@ export class ComedianBrain {
       !!this.deps.repairTranscript &&
       shouldAttemptTranscriptRepair(rawAnswer, questionId, knownFacts);
 
-    // Start the filler pump — keeps audio flowing while the LLM generates so there's no dead
-    // pause. _queueNextPumpFiller waits COMEDIAN_CONFIG.fillerBreathMs of silence (the breath
-    // beat), then queues each filler; the next breath is scheduled on each drain event. The
-    // pre-react beat and inter-filler gaps both come from that timer. Pump stops when the first
-    // joke arrives.
-    let fillerAlreadySaid: string | undefined;
-    if (!COMEDIAN_CONFIG.skipFiller && !this.fillerFiredForAnswer) {
-      this.fillerFiredForAnswer = true;
-      // Do not echo an answer that may be misheard. The first filler is
-      // nonverbal while repair runs; later fillers are nonverbal by design.
-      this.fillerAnswerForPump = shouldRepair ? "" : rawAnswer;
-      this.fillerLineCount = 0;
-      this.fillerLastText = null;
-      this.fillerFirstText = null;
-      this.fillerResumeAfterTranscriptRepair = false;
-      this.fillerPumpActive = true;
-      // Infer puppet's reaction motion once from the answer — drives ALL fillers in the
-      // stack so the puppet's body language matches how it's processing what was said
-      // (smug at an insult, conspiratorial at a short factual answer, etc.).
-      [this.fillerMotion, this.fillerIntensity] = inferFillerMotionFromAnswer(rawAnswer);
-      // LLM context — keep generic; the exact filler word doesn't matter for joke prompting.
-      fillerAlreadySaid = "filler sound";
-      this._queueNextPumpFiller();
-    }
+    const fillerAlreadySaid = this._startAnswerFiller(rawAnswer, shouldRepair);
 
     const proceed = (answer: string, repair?: TranscriptRepairResult) => {
       if (this.deliveryGeneration !== generation || this.state !== "generating") return;
@@ -2232,28 +2274,11 @@ export class ComedianBrain {
       }
     };
 
-    if (!shouldRepair || !this.deps.repairTranscript) {
+    const repairTranscript = this.deps.repairTranscript;
+    if (!shouldRepair || !repairTranscript) {
       proceed(rawAnswer);
       return;
     }
-
-    this.transcriptRepairAbort?.abort();
-    const abort = new AbortController();
-    this.transcriptRepairAbort = abort;
-    let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const finish = (repair?: TranscriptRepairResult) => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      if (this.transcriptRepairAbort === abort) {
-        this.transcriptRepairAbort = null;
-      }
-      const answer = repair?.changed && repair.text.trim()
-        ? repair.text.trim()
-        : rawAnswer;
-      proceed(answer, repair);
-    };
 
     const request: TranscriptRepairRequest = {
       transcript: rawAnswer,
@@ -2261,31 +2286,8 @@ export class ComedianBrain {
       questionId,
       knownFacts,
       conversationSoFar: this._getLedgerContext(),
-      // Transcript repair is a small utility task, not comedy writing. Keep it on
-      // the fast vision model so choosing a richer roast model does not add another
-      // heavy call to the turn-taking critical path.
-      model: VISION_MODEL,
     };
-    this.deps.logTiming(`brain: checking STT transcript — "${rawAnswer.slice(0, 80)}"`);
-    timeout = setTimeout(() => {
-      abort.abort();
-      this.deps.logTiming(
-        `brain: STT repair timed out (${COMEDIAN_CONFIG.transcriptRepairTimeoutMs}ms) — using original`,
-      );
-      finish();
-    }, COMEDIAN_CONFIG.transcriptRepairTimeoutMs);
-
-    void this.deps
-      .repairTranscript(request, abort.signal)
-      .then((repair) => finish(repair))
-      .catch((error: unknown) => {
-        if (!settled) {
-          this.deps.logTiming(
-            `brain: STT repair unavailable — using original (${error instanceof Error ? error.name : "error"})`,
-          );
-        }
-        finish();
-      });
+    this._requestTranscriptRepair(request, repairTranscript, proceed);
   }
 
   private _captureToastName(answer: string): void {

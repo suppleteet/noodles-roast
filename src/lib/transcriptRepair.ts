@@ -4,7 +4,6 @@ export interface TranscriptRepairRequest {
   questionId: string;
   knownFacts: string[];
   conversationSoFar: string[];
-  model: string;
 }
 
 export interface TranscriptRepairCandidate {
@@ -40,6 +39,15 @@ const NEGATION_WORDS = new Set([
   "cant",
   "cannot",
   "wont",
+]);
+const NUMBER_WORDS = new Set([
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+  "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+  "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
+  "thousand", "million", "billion", "first", "second", "third", "fourth",
+  "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh",
+  "twelfth", "dozen", "couple",
 ]);
 
 function cleanText(value: string): string {
@@ -78,8 +86,37 @@ function hasNegation(value: string): boolean {
   return tokens(value).some((token) => NEGATION_WORDS.has(token));
 }
 
-function numberTokens(value: string): string[] {
-  return value.match(/\d+(?:\.\d+)?/g) ?? [];
+function numberMeaningTokens(value: string): string[] {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[’']/g, "")
+      .match(/[a-z]+|\d+(?:\.\d+)?/g) ?? []
+  )
+    .filter((token) => /^\d/.test(token) || NUMBER_WORDS.has(token))
+    .map((token) => (/^\d/.test(token) ? `digit:${token}` : `word:${token}`));
+}
+
+function hasNumberMeaning(value: string): boolean {
+  return numberMeaningTokens(value).length > 0;
+}
+
+export function isTranscriptRepairResult(
+  value: unknown,
+): value is TranscriptRepairResult {
+  if (typeof value !== "object" || value === null) return false;
+  // JSON boundary: every property is checked before this record is trusted.
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.text === "string" &&
+    record.text.length <= 500 &&
+    typeof record.changed === "boolean" &&
+    typeof record.confidence === "number" &&
+    Number.isFinite(record.confidence) &&
+    record.confidence >= 0 &&
+    record.confidence <= 1 &&
+    (record.reason === undefined || typeof record.reason === "string")
+  );
 }
 
 function knownName(knownFacts: string[]): string | null {
@@ -103,7 +140,7 @@ export function shouldAttemptTranscriptRepair(
   const original = cleanText(transcript);
   if (original.length < 2 || original.length > 500) return false;
   if (questionId === "name" && !knownName(knownFacts)) return false;
-  if (questionId === "age" && /^\D*\d{1,3}\D*$/.test(original)) return false;
+  if (questionId === "age" && hasNumberMeaning(original)) return false;
   if (
     questionId === "single" &&
     /^(yes|yeah|yep|yup|no|nah|nope|single|married|divorced|taken)$/i.test(
@@ -157,15 +194,15 @@ export function chooseTranscriptRepair(
 
   // Never let correction introduce/remove a denial or alter explicit numbers.
   if (hasNegation(original) !== hasNegation(corrected)) return unchanged;
-  if (numberTokens(original).join("|") !== numberTokens(corrected).join("|")) {
+  if (
+    numberMeaningTokens(original).join("|") !==
+    numberMeaningTokens(corrected).join("|")
+  ) {
     return unchanged;
   }
 
-  // A repair is an edit, not a paraphrase. Allow one changed word for short
-  // answers and at most ~35% token edits for longer speech.
-  const longest = Math.max(originalTokens.length, correctedTokens.length);
-  const maxEdits = Math.max(1, Math.ceil(longest * 0.35));
-  if (tokenEditDistance(originalTokens, correctedTokens) > maxEdits) {
+  // A repair is one obvious phonetic/segmentation edit, never a rewrite.
+  if (tokenEditDistance(originalTokens, correctedTokens) > 1) {
     return unchanged;
   }
   const lengthRatio = corrected.length / Math.max(1, original.length);
