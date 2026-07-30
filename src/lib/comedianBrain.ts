@@ -2521,7 +2521,8 @@ export class ComedianBrain {
           this.deps.setMotion("energetic", 0.8);
         }
 
-        if (meta.tags?.length) this._addLedger("answer", answer, meta.tags);
+        const answerTags = this._sanitizeAnswerTags(answer, meta.tags ?? []);
+        if (answerTags.length) this._addLedger("answer", answer, answerTags);
 
         if (meta.callback) {
           this.deps.queueSpeak(
@@ -2605,7 +2606,8 @@ export class ComedianBrain {
 
     // Log tags to ledger
     if (response.tags?.length) {
-      this._addLedger("answer", answer, response.tags);
+      const answerTags = this._sanitizeAnswerTags(answer, response.tags);
+      if (answerTags.length) this._addLedger("answer", answer, answerTags);
     }
 
     let queued = 0;
@@ -3593,6 +3595,30 @@ export class ComedianBrain {
     return [...facts, ...answers];
   }
 
+  /** Prevent a one-turn STT mistake from silently renaming the user. The joke
+   * model may tag "I'm Martin from home" as name:Martin when the speaker
+   * actually said "I'm working from home". A conflicting name is accepted only
+   * for the authored name question or an explicit "my name is/call me" correction. */
+  private _sanitizeAnswerTags(answer: string, tags: string[]): string[] {
+    const establishedName = [...this.ledger]
+      .reverse()
+      .flatMap((entry) => [...entry.tags].reverse())
+      .find((tag) => /^name\s*:/i.test(tag));
+    if (!establishedName || this.currentQuestion?.id === "name") return tags;
+
+    const explicitNameCorrection = /\b(?:my name(?:'s|\s+is)?|call me)\b/i.test(answer);
+    if (explicitNameCorrection) return tags;
+
+    const establishedValue = establishedName
+      .replace(/^name\s*:\s*/i, "")
+      .trim()
+      .toLowerCase();
+    return tags.filter((tag) => {
+      const match = tag.match(/^name\s*:\s*(.+)$/i);
+      return !match || match[1].trim().toLowerCase() === establishedValue;
+    });
+  }
+
   /** Last N delivered joke texts across the whole session — sent as a hard
    *  do-not-repeat list. conversationSoFar only carries the last 6 ledger
    *  entries, so without this the LLM loses sight of jokes told a few cycles
@@ -3659,7 +3685,8 @@ export class ComedianBrain {
 
   /** Full ledger summary for throwback references — all facts learned so far. */
   /**
-   * Maximum personal facts (excluding current location) included in `knownFacts` per joke
+   * Maximum recent personal facts (excluding the stable name and current
+   * location) included in `knownFacts` per joke
    * generation call. Without this cap the prompt accumulates the entire
    * dossier ("name, age, job, hobby, kids...") and the LLM starts reciting
    * the list instead of riffing on what just happened. 2 = current topic +
@@ -3676,8 +3703,18 @@ export class ComedianBrain {
       }
     }
     const deduped = [...new Set(facts)];
-    // Cap to the most recent N — bias toward what just happened.
-    const capped = deduped.slice(-ComedianBrain.MAX_KNOWN_FACTS);
+    // Identity is a stable anchor, not a throwback. Always carry the most
+    // recently established name so a later STT error cannot rename the user.
+    const establishedName = [...deduped]
+      .reverse()
+      .find((fact) => /^name\s*:/i.test(fact));
+    // Cap the remaining recent facts — bias toward what just happened.
+    const recentFacts = deduped
+      .filter((fact) => !/^name\s*:/i.test(fact))
+      .slice(-ComedianBrain.MAX_KNOWN_FACTS);
+    const capped = establishedName
+      ? [establishedName, ...recentFacts]
+      : recentFacts;
 
     // Current location is always included if known. It's geo-derived flavor,
     // not a residence/origin fact they told us, so it doesn't count against

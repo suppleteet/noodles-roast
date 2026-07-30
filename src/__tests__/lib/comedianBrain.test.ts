@@ -653,4 +653,81 @@ describe("ComedianBrain", () => {
       expect(facts).not.toContain("hometown:Seattle");
     });
   });
+
+  describe("established name handling", () => {
+    type PrivateBrain = {
+      ledger: Array<{
+        type: "answer";
+        text: string;
+        timestamp: number;
+        tags: string[];
+      }>;
+      currentQuestion: ComedyQuestion | null;
+      _getThrowbackContext(): string[];
+      _sanitizeAnswerTags(answer: string, tags: string[]): string[];
+    };
+
+    function namedBrain(): PrivateBrain {
+      const brain = new ComedianBrain(makeDeps()) as unknown as PrivateBrain;
+      brain.ledger = [
+        {
+          type: "answer",
+          text: "My name is Tyler",
+          timestamp: Date.now(),
+          tags: ["name:Tyler"],
+        },
+        {
+          type: "answer",
+          text: "I have a wife, two kids, and a dog",
+          timestamp: Date.now(),
+          tags: ["relationship:married", "kids:2", "pet:dog"],
+        },
+      ];
+      return brain;
+    }
+
+    it("always carries the established name alongside capped recent facts", () => {
+      const brain = namedBrain();
+
+      expect(brain._getThrowbackContext()).toEqual([
+        "name:Tyler",
+        "kids:2",
+        "pet:dog",
+      ]);
+    });
+
+    it("rejects a conflicting name tag on a non-name answer", () => {
+      const brain = namedBrain();
+      brain.currentQuestion = {
+        id: "generated_work",
+        question: "Do you work from home?",
+        jokeContext: "Work roast.",
+        prodLines: [],
+      };
+
+      expect(
+        brain._sanitizeAnswerTags(
+          "I'm Martin from home right now",
+          ["name:Martin", "work_location:home"],
+        ),
+      ).toEqual(["work_location:home"]);
+    });
+
+    it("allows an explicit name correction", () => {
+      const brain = namedBrain();
+      brain.currentQuestion = {
+        id: "generated_work",
+        question: "Do you work from home?",
+        jokeContext: "Work roast.",
+        prodLines: [],
+      };
+
+      expect(
+        brain._sanitizeAnswerTags(
+          "No, my name is Martin",
+          ["name:Martin"],
+        ),
+      ).toEqual(["name:Martin"]);
+    });
+  });
 });

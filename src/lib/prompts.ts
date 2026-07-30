@@ -215,6 +215,7 @@ similar word, treat the established word as the real answer. Examples:
   - current_location known as "Woodacre", user's answer says "Woodwicker" → roast "Woodacre" as where they are right now, not where they live.
   - KNOWN FACT name:"Aleks", answer says "I'm Alex" → roast "Aleks", not "Alex".
   - User said "I'm a dentist" earlier, now answers a follow-up with "dennis" → "dentist".
+  - KNOWN FACT name:"Tyler", work-from-home answer says "I'm Martin from home" → hear "I'm working from home"; do NOT rename them Martin.
 Do NOT roast obvious STT garbage as if it's a real word the user said. Pick the
 most plausible word in context and roll with that.
 

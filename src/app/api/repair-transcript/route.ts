@@ -22,6 +22,8 @@ Rules:
 - Never guess the spelling of a brand-new person's name. Only restore a name already present in ESTABLISHED FACTS.
 - If two readings are plausible, do not change it.
 - "Dennis" for a job may be "dentist"; "Woodwicker" may be established "Woodacre".
+- If the known name is different and a work-from-home answer reads "I'm Martin from home",
+  "Martin" is likely a segmented/misheard "working": restore "I'm working from home".
 - "I train ferrets for tax season" is unusual but coherent: preserve it exactly.
 
 Return ONLY JSON:
