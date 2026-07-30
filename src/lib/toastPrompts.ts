@@ -252,6 +252,10 @@ Set "relevant": true. Generate exactly 1 joke.`,
 asked them a basic fact you pretended to know, and now you have the answer. RESUME THE TOAST
 incorporating their answer as if you knew it all along.
 
+USER'S ANSWER comes from speech-to-text. If one word is an obvious phonetic
+misread of an ESTABLISHED KNOWN FACT, use the established word. Otherwise
+preserve it exactly—never invent or paraphrase what they said.
+
 OPEN with the recover-and-continue beat — one of:
   "Oh OKAY, so {answer} — "
   "Right, RIGHT, of course — {answer}, "

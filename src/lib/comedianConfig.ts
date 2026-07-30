@@ -14,6 +14,7 @@ const defaults = {
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   rephraseTimeoutMs: 1200,       // inline question-rephrase race cap. 450ms never beat a cold LLM, so questions shipped generic/impersonal (no name) and read canned. Higher = personalization lands; worst case is this much dead air before the bridged-original fallback.
+  transcriptRepairTimeoutMs: 2200, // conservative STT repair; nonverbal filler masks this wait, then raw transcript wins on timeout
   visionIntervalMs: 5000,        // how often vision analyze fires
   greetingVisionTimeoutMs: 1500, // max wait for prefetched vision greeting before speaking an instant fallback — the real greeting chains after the fallback when it lands, so firing this is cheap
   firstSpeechBeatMs: 250,        // brief reveal beat before first TTS; keep TTFS low while avoiding an abrupt entrance

@@ -387,6 +387,22 @@ describe("transcript history", () => {
     const history = useSessionStore.getState().transcriptHistory;
     expect(history[0].groupId).not.toBe(history[1].groupId);
   });
+
+  it("replaces only the latest user transcript and persists the correction", () => {
+    useSessionStore.getState().pushTranscriptEntry("user", "My name is Alex");
+    useSessionStore.getState().pushTranscriptEntry("puppet", "Alex. Sure.");
+    useSessionStore.getState().pushTranscriptEntry("user", "I'm a dennis");
+
+    useSessionStore.getState().replaceLatestUserTranscript("I'm a dentist");
+
+    const history = useSessionStore.getState().transcriptHistory;
+    expect(history.map((entry) => entry.text)).toEqual([
+      "My name is Alex",
+      "Alex. Sure.",
+      "I'm a dentist",
+    ]);
+    expect(JSON.parse(localStorage.getItem("roastie-transcript") ?? "[]")).toEqual(history);
+  });
 });
 
 describe("timeline spans", () => {

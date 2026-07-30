@@ -108,6 +108,69 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
     await driver.waitForStateVisited("generating", 5000);
   });
 
+  test("uses a high-confidence STT repair for the joke and saved transcript", async ({ page }) => {
+    const driver = new ComedianBrainDriver(page);
+    await driver.setup();
+    await startRoasting(page, driver);
+
+    // The first bank question is always the user's name. Novel names cannot be
+    // inferred safely, so complete that cycle unchanged and exercise repair on
+    // the next semantic question.
+    await driver.waitForBrainState("wait_answer", 10000);
+    await driver.simulateAnswer("My name is Alex");
+    await driver.waitForBrainStateOneOf(["generating", "delivering"], 5000);
+    await driver.waitForBrainState("wait_answer", 10000);
+
+    driver.clearJokeRequests();
+    driver.mockNextTranscriptRepair({
+      text: "I'm a dentist",
+      changed: true,
+      confidence: 0.98,
+      reason: "Likely phonetic substitution in a job answer.",
+    }, 1600);
+    await driver.startStateTracking();
+    await driver.simulateAnswer("I'm a dennis");
+    await driver.waitForStateVisited("generating", 5000);
+
+    await expect.poll(() => {
+      const request = driver
+        .getJokeRequests()
+        .find((candidate) => candidate.context === "answer_roast");
+      return request?.userAnswer;
+    }).toBe("I'm a dentist");
+
+    await expect.poll(async () =>
+      page.evaluate(() => {
+        const history = JSON.parse(
+          localStorage.getItem("roastie-transcript") ?? "[]",
+        ) as Array<{ role: string; text: string }>;
+        return history.filter((entry) => entry.role === "user").at(-1)?.text;
+      }),
+    ).toBe("I'm a dentist");
+
+    const repairWindow = await page.evaluate(() => {
+      const log = JSON.parse(
+        localStorage.getItem("roastie-timing-log") ?? "[]",
+      ) as string[];
+      const start = log.findLastIndex((line) =>
+        line.includes("brain: checking STT transcript")
+      );
+      const end = log.findIndex(
+        (line, index) => index > start && line.includes("brain: STT repaired"),
+      );
+      return {
+        start,
+        end,
+        fillers: log
+          .slice(start, end + 1)
+          .filter((line) => line.includes("brain: filler[")),
+      };
+    });
+    expect(repairWindow.start).toBeGreaterThanOrEqual(0);
+    expect(repairWindow.end).toBeGreaterThan(repairWindow.start);
+    expect(repairWindow.fillers).toHaveLength(1);
+  });
+
 });
 
 // ─── Silence handling ─────────────────────────────────────────────────────────

@@ -31,6 +31,10 @@ import {
 } from "@/lib/greetingPrefetch";
 import { voiceSettingsForMotion, gainForMotion } from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
+import type {
+  TranscriptRepairRequest,
+  TranscriptRepairResult,
+} from "@/lib/transcriptRepair";
 
 /**
  * Remove asterisk-wrapped stage directions (e.g. "*sip*", "*clink*", "*gestures*")
@@ -1299,6 +1303,23 @@ export default function LiveSessionController({
       setBrainState: (s) => useSessionStore.getState().setBrainState(s),
       setCurrentQuestion: (q) => useSessionStore.getState().setCurrentQuestion(q),
       setUserAnswer: (a) => useSessionStore.getState().setUserAnswer(a),
+      repairTranscript: async (
+        request: TranscriptRepairRequest,
+        signal: AbortSignal,
+      ): Promise<TranscriptRepairResult> => {
+        const response = await fetch("/api/repair-transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+          signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Transcript repair failed (${response.status})`);
+        }
+        return (await response.json()) as TranscriptRepairResult;
+      },
+      replaceLatestUserTranscript: (text) =>
+        useSessionStore.getState().replaceLatestUserTranscript(text),
       logTiming: (e) => useSessionStore.getState().logTiming(e),
       logLlm: (dir, label, text) => useSessionStore.getState().pushLlmLog(dir, label, text),
       setError: (e) => useSessionStore.getState().setError(e),

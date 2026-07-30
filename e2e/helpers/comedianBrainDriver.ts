@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { LiveSessionMock } from "./liveSessionMock";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import type { BrainState } from "@/lib/comedianBrainConfig";
+import type { TranscriptRepairResult } from "@/lib/transcriptRepair";
 
 export type JokeApiRequest = {
   context: string;
@@ -36,6 +37,10 @@ export class ComedianBrainDriver extends LiveSessionMock {
   private jokeRequests: JokeApiRequest[] = [];
   private jokeResponseQueue: Partial<JokeResponse>[] = [];
   private defaultJokeResponse: Partial<JokeResponse> = DEFAULT_JOKE_RESPONSE;
+  private transcriptRepairQueue: Array<{
+    response: TranscriptRepairResult;
+    delayMs: number;
+  }> = [];
 
   constructor(page: Page) {
     super(page);
@@ -45,6 +50,7 @@ export class ComedianBrainDriver extends LiveSessionMock {
     await super.setup();
     await this._mockGenerateJokeRoute();
     await this._mockGenerateSpeakRoute();
+    await this._mockTranscriptRepairRoute();
     await this._injectSpeedConfig();
   }
 
@@ -124,6 +130,26 @@ export class ComedianBrainDriver extends LiveSessionMock {
     });
   }
 
+  private async _mockTranscriptRepairRoute(): Promise<void> {
+    await this.page.route("/api/repair-transcript", async (route) => {
+      const body = route.request().postDataJSON() as { transcript?: string };
+      const queued = this.transcriptRepairQueue.shift();
+      if (queued?.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, queued.delayMs));
+      }
+      const response = queued?.response ?? {
+        text: body.transcript ?? "",
+        changed: false,
+        confidence: 1,
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(response),
+      });
+    });
+  }
+
   // ─── Joke API control ─────────────────────────────────────────────────────────
 
   /** Override the next joke API response */
@@ -134,6 +160,13 @@ export class ComedianBrainDriver extends LiveSessionMock {
   /** Queue a sequence of joke API responses */
   mockJokeResponseSequence(responses: Partial<JokeResponse>[]): void {
     this.jokeResponseQueue = [...responses];
+  }
+
+  mockNextTranscriptRepair(
+    response: TranscriptRepairResult,
+    delayMs = 0,
+  ): void {
+    this.transcriptRepairQueue.push({ response, delayMs });
   }
 
   /** Wait for the next /api/generate-joke request */

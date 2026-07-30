@@ -270,6 +270,7 @@ interface SessionState {
   incrementLaughCount: () => void;
   recordVisionFrame: (smiling: boolean) => void;
   pushTranscriptEntry: (role: "user" | "puppet", text: string, opts?: { append?: boolean }) => void;
+  replaceLatestUserTranscript: (text: string) => void;
   timelineSpans: TimelineSpan[];
   beginSpan: (row: TimelineRow, label: string, color?: string) => string;
   endSpan: (id: string) => void;
@@ -453,6 +454,15 @@ export const useSessionStore = create<SessionState>((set) => ({
           ? last.groupId
           : `g-${ts}-${Math.random().toString(36).slice(2, 8)}`;
       const next = [...s.transcriptHistory.slice(-199), { role, text, ts, groupId }];
+      try { localStorage.setItem("roastie-transcript", JSON.stringify(next)); } catch { /* ignore */ }
+      return { transcriptHistory: next };
+    }),
+  replaceLatestUserTranscript: (text) =>
+    set((s) => {
+      const index = s.transcriptHistory.findLastIndex((entry) => entry.role === "user");
+      if (index < 0) return s;
+      const next = [...s.transcriptHistory];
+      next[index] = { ...next[index], text };
       try { localStorage.setItem("roastie-transcript", JSON.stringify(next)); } catch { /* ignore */ }
       return { transcriptHistory: next };
     }),
