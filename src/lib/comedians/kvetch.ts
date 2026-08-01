@@ -118,13 +118,13 @@ export const kvetch: PersonaConfig = {
   },
   // Spoken while a roast is being written, like a grumpy man thinking out loud.
   fillers: [
-    "Mm, alright.",
-    "Hm, uh huh.",
-    "Yep, yep",
-    "Mm-hm, Mm-hm",
-    "uhhh huh",
-    "Right, right",
-    "Ahhhh, okay",
+    "Right. Give me a second.",
+    "Okay, that's bleak.",
+    "Of course. Let me work with that.",
+    "Sure, sure. I'm finding the damage.",
+    "Well, that tracks. Hold on.",
+    "Alright. There's something wrong here.",
+    "Yeah, I heard you. One second.",
   ],
   // Echo fillers — repeat the answer back, dismissive and unimpressed. {answer} required.
   echoFillers: [

@@ -26,6 +26,46 @@ interface VoiceDelta {
   speed?: number;
 }
 
+export type VoiceContinuityMode = "inherit" | "smooth";
+
+/**
+ * Resolve the next line's voice profile against the line already in the audio
+ * queue. Fillers inherit the exact prior profile; generated jokes may move
+ * toward their requested delivery, but only by a bounded amount at the
+ * boundary. This keeps one performer sounding like one performer while still
+ * allowing the joke's energy to build after the handoff.
+ */
+export function voiceSettingsForContinuity(
+  target: VoiceSettings,
+  previous: VoiceSettings | null,
+  mode?: VoiceContinuityMode,
+): VoiceSettings {
+  if (!previous || !mode) return target;
+  if (mode === "inherit") return { ...previous };
+
+  const step = (from: number, to: number, maxDelta: number): number =>
+    clamp(to, from - maxDelta, from + maxDelta);
+
+  return {
+    ...target,
+    stability: step(previous.stability, target.stability, 0.1),
+    similarity_boost: step(previous.similarity_boost, target.similarity_boost, 0.05),
+    style: step(previous.style, target.style, 0.1),
+    speed: step(previous.speed, target.speed, 0.05),
+  };
+}
+
+/** Match the voice-profile transition for playback gain as well. */
+export function gainForContinuity(
+  target: number,
+  previous: number | null,
+  mode?: VoiceContinuityMode,
+): number {
+  if (previous === null || !mode) return target;
+  if (mode === "inherit") return previous;
+  return clamp(target, previous - 0.08, previous + 0.08);
+}
+
 const MOTION_DELTAS: Record<MotionState, VoiceDelta> = {
   // Drier, slightly slower — superior sneer.
   smug: { stability: -0.15, style: -0.05, speed: -0.06 },

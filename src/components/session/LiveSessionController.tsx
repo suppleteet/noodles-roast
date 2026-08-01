@@ -2,7 +2,12 @@
 import { useEffect, useRef, useCallback } from "react";
 import { GoogleGenAI, Modality } from "@google/genai";
 import type { Session, LiveServerMessage } from "@google/genai";
-import { useSessionStore, pickDifferentModel, type RoastModelId } from "@/store/useSessionStore";
+import {
+  useSessionStore,
+  pickDifferentModel,
+  type RoastModelId,
+  type VoiceSettings,
+} from "@/store/useSessionStore";
 import type { WebcamCaptureHandle } from "./WebcamCapture";
 import type { VideoRecorderHandle } from "@/components/recording/VideoRecorder";
 import { useMicCapture } from "@/components/audio/useMicCapture";
@@ -29,29 +34,32 @@ import {
   prefetchCannedOpener,
   type CannedOpenerPrefetch,
 } from "@/lib/greetingPrefetch";
-import { voiceSettingsForMotion, gainForMotion } from "@/lib/voiceMotionPresets";
+import {
+  voiceSettingsForMotion,
+  gainForMotion,
+  voiceSettingsForContinuity,
+  gainForContinuity,
+  type VoiceContinuityMode,
+} from "@/lib/voiceMotionPresets";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import {
   isTranscriptRepairResult,
   type TranscriptRepairRequest,
   type TranscriptRepairResult,
 } from "@/lib/transcriptRepair";
+import { sanitizeSpokenText } from "@/lib/spokenText";
 
-/**
- * Remove asterisk-wrapped stage directions (e.g. "*sip*", "*clink*", "*gestures*")
- * before any text reaches TTS or the transcript. No persona should ever SPEAK
- * these — ElevenLabs would pronounce the word literally ("sip"). Toast's bank
- * questions embed them for on-page rhythm and now play verbatim (rephrase is
- * skipped for Toast), so this is the single guaranteed place to drop them.
- * Surrounding em-dash pauses are preserved so the drunk cadence survives.
- */
-function stripStageDirections(text: string): string {
-  return text
-    .replace(/\*[^*\n]*\*/g, "")        // drop *sip* / *clink* / *gestures* tokens
-    .replace(/\s*—\s*—\s*/g, " — ")     // collapse a "— —" left by a removed mid-clause token
-    .replace(/[ \t]{2,}/g, " ")          // collapse runs of spaces the removal left behind
-    .replace(/[ \t]+([.,!?;:])/g, "$1")  // tidy any space stranded before punctuation
-    .trim();
+type SpeechHandoff = "filler" | "filler-to-joke";
+
+interface SpeechQueueOptions {
+  skipTranscript?: boolean;
+  voiceContinuity?: VoiceContinuityMode;
+  handoff?: SpeechHandoff;
+}
+
+interface SpeechProfile {
+  voice: VoiceSettings;
+  gain: number;
 }
 
 interface Props {
@@ -99,6 +107,8 @@ export default function LiveSessionController({
   const visionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const rotateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapupHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapupFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const laughDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const smileDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,6 +143,14 @@ export default function LiveSessionController({
   // Vocal continuity: last text spoken by puppet — passed as previous_text to ElevenLabs so
   // each TTS request inherits the intonation/prosody of what came before.
   const lastSpokenTextRef = useRef<string>("");
+  const lastQueuedVoiceSettingsRef = useRef<VoiceSettings | null>(null);
+  const lastQueuedGainRef = useRef<number | null>(null);
+  // Queue-time context can include speech that is later cancelled. Track what
+  // actually reached the Web Audio timeline so cancellation restores honest
+  // continuity context instead of conditioning EL on words nobody heard.
+  const lastAudibleTextRef = useRef<string>("");
+  const lastAudibleVoiceSettingsRef = useRef<VoiceSettings | null>(null);
+  const lastAudibleGainRef = useRef<number | null>(null);
 
   // Audio pipeline hooks
   const playback = usePcmPlayback();
@@ -205,15 +223,39 @@ export default function LiveSessionController({
 
   // ─── Brain helpers ────────────────────────────────────────────────────────────
 
+  function resolveSpeechProfile(
+    motion?: MotionState,
+    intensity?: number,
+    voiceOverride?: Partial<VoiceSettings>,
+    continuity?: VoiceContinuityMode,
+  ): SpeechProfile {
+    const baseVoice = useSessionStore.getState().voiceSettings;
+    const motionVoice = voiceSettingsForMotion(baseVoice, motion, intensity);
+    const targetVoice = voiceOverride ? { ...motionVoice, ...voiceOverride } : motionVoice;
+    const voice = voiceSettingsForContinuity(
+      targetVoice,
+      lastQueuedVoiceSettingsRef.current,
+      continuity,
+    );
+    const gain = gainForContinuity(
+      gainForMotion(motion, intensity),
+      lastQueuedGainRef.current,
+      continuity,
+    );
+    lastQueuedVoiceSettingsRef.current = voice;
+    lastQueuedGainRef.current = gain;
+    return { voice, gain };
+  }
+
   function queueSpeak(
     text: string,
     motion?: MotionState,
     intensity?: number,
     appendToPrev?: boolean,
-    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
-    options?: { skipTranscript?: boolean },
+    voiceOverride?: Partial<VoiceSettings>,
+    options?: SpeechQueueOptions,
   ): void {
-    text = stripStageDirections(text);
+    text = sanitizeSpokenText(text);
     if (!text.trim() || !isRunningRef.current) return;
     if (!options?.skipTranscript) {
       useSessionStore.getState().pushTranscriptEntry("puppet", text.trim(), { append: appendToPrev });
@@ -225,10 +267,21 @@ export default function LiveSessionController({
     // then update lastSpokenTextRef immediately so the NEXT queueSpeak gets the right context.
     const previousText = lastSpokenTextRef.current;
     lastSpokenTextRef.current = text.trim();
+    const profile = resolveSpeechProfile(
+      motion,
+      intensity,
+      voiceOverride,
+      options?.voiceContinuity,
+    );
 
     // Fire TTS fetch NOW; starts generating audio while previous joke is still playing.
     // Playback streams chunks as soon as this line reaches the front of the chain.
-    const audioBuffer = prefetchTts(text.trim(), gen, previousText, motion, intensity, voiceOverride);
+    const audioBuffer = prefetchTts(text.trim(), gen, previousText, profile, {
+      motion,
+      intensity,
+      continuity: options?.voiceContinuity,
+      handoff: options?.handoff,
+    });
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
       if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
@@ -237,7 +290,19 @@ export default function LiveSessionController({
       useSessionStore.getState().logTiming(
         `tts: "${text.trim().slice(0, 60)}" prev="${prevTail}"`,
       );
-      await scheduleFromPrefetch(audioBuffer, gen, gainForMotion(motion, intensity));
+      const queued = await scheduleFromPrefetch(audioBuffer, gen, profile, {
+        text: text.trim(),
+        handoff: options?.handoff,
+      });
+      if (!queued && audioBuffer.failed && isRunningRef.current && ttsGenerationRef.current === gen) {
+        // The WS route previously translated EL failures into a normal `done`,
+        // silently dropping the whole line. Use the independent REST transport
+        // as a no-delay failover while the chain remains blocked on this turn.
+        useSessionStore.getState().logTiming(
+          `tts: stream produced no audio — REST failover "${text.trim().slice(0, 40)}"`,
+        );
+        await scheduleRestFallback(text.trim(), gen, profile, options?.handoff);
+      }
     });
   }
 
@@ -251,7 +316,11 @@ export default function LiveSessionController({
   function openJokeStream(
     motion: MotionState,
     intensity: number,
-    options?: { appendToPrev?: boolean },
+    options?: {
+      appendToPrev?: boolean;
+      voiceContinuity?: VoiceContinuityMode;
+      handoff?: "filler-to-joke";
+    },
   ): {
     pushAudio: (b64: string) => void;
     finalize: (text: string) => void;
@@ -268,8 +337,10 @@ export default function LiveSessionController({
     const gen = ttsGenerationRef.current;
     wasDrainedRef.current = false;
     const audio = new TtsChunkBuffer();
+    const profile = resolveSpeechProfile(motion, intensity, undefined, options?.voiceContinuity);
     const sinkOpenedAt = Date.now();
     let firstAudioLogged = false;
+    let finalizedText = "";
     const ttsSpanId = useSessionStore.getState().beginSpan("tts", `stream:${motion}`);
     let spanEnded = false;
     const endSpan = () => {
@@ -286,10 +357,19 @@ export default function LiveSessionController({
       }
       useSessionStore.getState().setActiveMotionState(motion, intensity);
       useSessionStore.getState().logTiming(
-        `tts-stream: motion=${motion} intensity=${intensity.toFixed(2)}`,
+        `tts-stream: motion=${motion} intensity=${intensity.toFixed(2)} continuity=${options?.voiceContinuity ?? "none"}`,
       );
       try {
-        await scheduleFromPrefetch(audio, gen, gainForMotion(motion, intensity));
+        const queued = await scheduleFromPrefetch(audio, gen, profile, {
+          get text() { return finalizedText; },
+          handoff: options?.handoff,
+        });
+        if (!queued && audio.failed && finalizedText) {
+          useSessionStore.getState().logTiming(
+            `tts-stream: no audio — REST failover "${finalizedText.slice(0, 40)}"`,
+          );
+          await scheduleRestFallback(finalizedText, gen, profile, options?.handoff);
+        }
       } finally {
         endSpan();
       }
@@ -313,14 +393,15 @@ export default function LiveSessionController({
         // Do NOT mark `audio.done` here, or scheduleFromPrefetch will exit
         // before the remaining chunks arrive and the joke gets cut off.
         if (text.trim()) {
+          finalizedText = text.trim();
           useSessionStore
             .getState()
             .pushTranscriptEntry("puppet", text.trim(), { append: options?.appendToPrev });
           lastSpokenTextRef.current = text.trim();
         }
       },
-      endAudio() {
-        audio.finish(false);
+      endAudio(failed = false) {
+        audio.finish(failed || !firstAudioLogged);
       },
       cancel() {
         audio.finish(true);
@@ -333,6 +414,9 @@ export default function LiveSessionController({
     ttsGenerationRef.current++;
     ttsChainRef.current = Promise.resolve();
     playback.flush();
+    lastSpokenTextRef.current = lastAudibleTextRef.current;
+    lastQueuedVoiceSettingsRef.current = lastAudibleVoiceSettingsRef.current;
+    lastQueuedGainRef.current = lastAudibleGainRef.current;
     useSessionStore.getState().setIsSpeaking(false);
   }
 
@@ -351,7 +435,7 @@ export default function LiveSessionController({
     // Merged over resolved settings when the line is RE-synthesized (failed or
     // stalled buffer). The opener passes its style cap here — a real session
     // lost it on the watchdog path and the re-synthesized opener screeched.
-    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+    voiceOverride?: Partial<VoiceSettings>,
   ): void {
     // NOTE: `buffer` was synthesized upstream (greeting prefetch in page.tsx) from
     // the original text, so stripping here only sanitizes the TRANSCRIPT, not the
@@ -359,7 +443,7 @@ export default function LiveSessionController({
     // whose prompt forbids stage directions — so there's nothing to mismatch. The
     // failed-buffer fallback below re-routes through queueSpeak, which synthesizes
     // from this stripped text directly.
-    text = stripStageDirections(text);
+    text = sanitizeSpokenText(text);
     if (!text.trim() || !isRunningRef.current) return;
     if (buffer.failed) {
       // TTS prefetch errored — fall back to legacy queueSpeak.
@@ -371,6 +455,7 @@ export default function LiveSessionController({
     const gen = ttsGenerationRef.current;
     const previousText = lastSpokenTextRef.current;
     lastSpokenTextRef.current = text.trim();
+    const profile = resolveSpeechProfile(motion, intensity, voiceOverride);
 
     // Watchdog: a prefetched buffer that never receives audio (hung /api/tts-ws,
     // EL WS that silently dies before the first chunk) leaves scheduleFromPrefetch
@@ -400,7 +485,7 @@ export default function LiveSessionController({
       useSessionStore.getState().logTiming(
         `tts-prefetched: "${text.trim().slice(0, 60)}" chunks=${buffer.chunks.length} done=${buffer.done} prev="${prevTail}"`,
       );
-      await scheduleFromPrefetch(buffer, gen, gainForMotion(motion, intensity));
+      await scheduleFromPrefetch(buffer, gen, profile, { text: text.trim() });
     });
   }
 
@@ -429,9 +514,13 @@ export default function LiveSessionController({
     text: string,
     gen: number,
     previousText?: string,
-    motion?: MotionState,
-    intensity?: number,
-    voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+    profile?: SpeechProfile,
+    meta?: {
+      motion?: MotionState;
+      intensity?: number;
+      continuity?: VoiceContinuityMode;
+      handoff?: SpeechHandoff;
+    },
   ): TtsChunkBuffer {
     const audio = new TtsChunkBuffer();
     if (!isRunningRef.current) {
@@ -449,16 +538,11 @@ export default function LiveSessionController({
     void (async () => {
       const startedAt = Date.now();
       let firstAudioLogged = false;
+      let streamFailed = false;
       try {
-        // Base voice comes from the store for BOTH experiences so the debug
-        // VoiceSliders drive playback live. Toast's drunk defaults are seeded
-        // into the store by setExperienceType when she's picked.
-        const baseVoice = useSessionStore.getState().voiceSettings;
-        const motionMerged = voiceSettingsForMotion(baseVoice, motion, intensity);
-        // voiceOverride wins last — used to slow fillers below the base speed.
-        const mergedVoice = voiceOverride ? { ...motionMerged, ...voiceOverride } : motionMerged;
+        const mergedVoice = profile?.voice ?? useSessionStore.getState().voiceSettings;
         useSessionStore.getState().logTiming(
-          `tts-request: motion=${motion ?? "none"} intensity=${(intensity ?? 0.7).toFixed(2)} stability=${mergedVoice.stability.toFixed(2)} style=${mergedVoice.style.toFixed(2)} speed=${mergedVoice.speed.toFixed(2)}`,
+          `tts-request: motion=${meta?.motion ?? "none"} intensity=${(meta?.intensity ?? 0.7).toFixed(2)} stability=${mergedVoice.stability.toFixed(2)} style=${mergedVoice.style.toFixed(2)} speed=${mergedVoice.speed.toFixed(2)} continuity=${meta?.continuity ?? "none"}${meta?.handoff ? ` handoff=${meta.handoff}` : ""}`,
         );
         const resp = await fetch("/api/tts-ws", {
           method: "POST",
@@ -498,7 +582,11 @@ export default function LiveSessionController({
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             try {
-              const event = JSON.parse(line.slice(6)) as { type: string; chunk?: string };
+              const event = JSON.parse(line.slice(6)) as {
+                type: string;
+                chunk?: string;
+                message?: string;
+              };
               if (event.type === "audio" && event.chunk) {
                 if (!firstAudioLogged) {
                   firstAudioLogged = true;
@@ -507,13 +595,21 @@ export default function LiveSessionController({
                   );
                 }
                 audio.push(event.chunk);
+              } else if (event.type === "error") {
+                streamFailed = true;
+                useSessionStore.getState().logTiming(
+                  `tts: stream error ${event.message ?? "unknown"} "${text.slice(0, 32)}"`,
+                );
               }
             } catch { /* malformed SSE line */ }
           }
         }
 
         endSpan();
-        audio.finish();
+        // A nominally completed stream with zero PCM is still a failed line.
+        // Mark it failed so queueSpeak uses the REST transport instead of
+        // silently advancing the show with missing speech.
+        audio.finish(streamFailed || !firstAudioLogged);
       } catch (e) {
         endSpan();
         audio.finish(true);
@@ -533,8 +629,9 @@ export default function LiveSessionController({
   async function scheduleFromPrefetch(
     audio: TtsChunkBuffer,
     gen: number,
-    gain = 1,
-  ): Promise<void> {
+    profile: SpeechProfile,
+    meta: { text: string; handoff?: SpeechHandoff },
+  ): Promise<boolean> {
     let cursor = 0;
     let queuedAny = false;
 
@@ -552,12 +649,14 @@ export default function LiveSessionController({
           await new Promise<void>((resolve) =>
             setTimeout(resolve, COMEDIAN_CONFIG.firstSpeechBeatMs),
           );
-          if (ttsGenerationRef.current !== gen || !isRunningRef.current) return;
+          if (ttsGenerationRef.current !== gen || !isRunningRef.current) return false;
         }
-        playback.enqueueChunk(audio.chunks[cursor], gain);
+        const queuedBehindMs = !queuedAny ? playback.getPlaybackRemainingMs() : 0;
+        playback.enqueueChunk(audio.chunks[cursor], profile.gain);
         cursor++;
         if (!queuedAny) {
           queuedAny = true;
+          markSpeechScheduled(meta.text, profile, meta.handoff, queuedBehindMs, gen);
           useSessionStore.getState().setPuppetRevealed(true);
           recordTtfs();
           useSessionStore.getState().setIsSpeaking(true);
@@ -569,6 +668,76 @@ export default function LiveSessionController({
     }
 
     if (ttsGenerationRef.current !== gen) playback.flush();
+    return queuedAny;
+  }
+
+  function markSpeechScheduled(
+    text: string,
+    profile: SpeechProfile,
+    handoff: SpeechHandoff | undefined,
+    queuedBehindMs: number,
+    gen: number,
+  ): void {
+    if (handoff) {
+      useSessionStore.getState().logTiming(
+        `audio-handoff: ${handoff} queuedBehind=${Math.round(queuedBehindMs)}ms scheduler=serialized continuity=${handoff === "filler" ? "inherit" : "smooth"}`,
+      );
+    }
+    const commitAudibleContext = () => {
+      if (!isRunningRef.current || ttsGenerationRef.current !== gen) return;
+      if (text) lastAudibleTextRef.current = text;
+      lastAudibleVoiceSettingsRef.current = profile.voice;
+      lastAudibleGainRef.current = profile.gain;
+    };
+    if (queuedBehindMs <= 1) commitAudibleContext();
+    else window.setTimeout(commitAudibleContext, Math.ceil(queuedBehindMs));
+  }
+
+  async function scheduleRestFallback(
+    text: string,
+    gen: number,
+    profile: SpeechProfile,
+    handoff?: SpeechHandoff,
+  ): Promise<boolean> {
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voiceSettings: profile.voice,
+          experienceType: useSessionStore.getState().experienceType,
+        }),
+      });
+      if (!response.ok || ttsGenerationRef.current !== gen || !isRunningRef.current) {
+        useSessionStore.getState().logTiming(
+          `tts: REST failover failed status=${response.status} "${text.slice(0, 32)}"`,
+        );
+        return false;
+      }
+      const encoded = await response.arrayBuffer();
+      if (!firstSpeechRecordedRef.current) {
+        useSessionStore.getState().setPuppetRevealed(true);
+        startVideoRecordingIfNeeded();
+        await new Promise<void>((resolve) => setTimeout(resolve, COMEDIAN_CONFIG.firstSpeechBeatMs));
+      }
+      if (ttsGenerationRef.current !== gen || !isRunningRef.current) return false;
+      const queuedBehindMs = playback.getPlaybackRemainingMs();
+      await playback.decodeAndEnqueue(encoded, profile.gain);
+      markSpeechScheduled(text, profile, handoff, queuedBehindMs, gen);
+      useSessionStore.getState().setPuppetRevealed(true);
+      recordTtfs();
+      useSessionStore.getState().setIsSpeaking(true);
+      useSessionStore.getState().logTiming(
+        `tts: REST failover queued ${encoded.byteLength} bytes "${text.slice(0, 32)}"`,
+      );
+      return true;
+    } catch (error) {
+      useSessionStore.getState().logTiming(
+        `tts: REST failover error — ${(error as Error).message}`,
+      );
+      return false;
+    }
   }
 
   /**
@@ -1202,6 +1371,11 @@ export default function LiveSessionController({
     ttsChainRef.current = Promise.resolve();
     ttsGenerationRef.current++; // increment (not reset) — invalidates any in-flight TTS from prior session
     lastSpokenTextRef.current = ""; // reset vocal continuity context for new session
+    lastQueuedVoiceSettingsRef.current = null;
+    lastQueuedGainRef.current = null;
+    lastAudibleTextRef.current = "";
+    lastAudibleVoiceSettingsRef.current = null;
+    lastAudibleGainRef.current = null;
 
     userSpeakingSpanRef.current = null;
     geminiWaitingSpanRef.current = null;
@@ -1275,13 +1449,10 @@ export default function LiveSessionController({
     // Build ComedianBrain
     brainRef.current = new ComedianBrain({
       queueSpeak,
-      // Keep jokes and questions on the same ElevenLabs path. The streamed
-      // joke-audio path opened EL on the server (/api/generate-speak), while
-      // questions used queueSpeak -> /api/tts-ws. That made the joke->question
-      // handoff sound like a different delivery mode. With no openJokeStream
-      // hook, joke text still streams from /api/generate-speak, then every
-      // spoken line is synthesized through queueSpeak with the same previousText
-      // and voice-settings merge.
+      // Keep generated jokes and scripted speech on the same browser TTS path.
+      // This is the continuity invariant: filler, joke, question, and closing
+      // all share one previous-text chain, one resolved voice profile, and one
+      // serialized Web Audio scheduler.
       cancelSpeech,
       isQueueEmpty: () => playback.isQueueEmpty(),
       setMotion: (state, intensity) =>
@@ -1353,18 +1524,27 @@ export default function LiveSessionController({
         const store = useSessionStore.getState();
         const pauseMs = COMEDIAN_CONFIG.wrapupPostLinePauseMs;
         const fadeMs = 600;
+        const wrapupDrainedAt = Date.now();
         store.logTiming(
           `live: wrapup complete — holding ${pauseMs}ms before fade, then stopping`,
         );
 
-        // Beat of silence: hold the puppet on stage for a few seconds after the goodbye,
-        // then quick fade to black, then phase transition.
-        setTimeout(() => {
+        // Preserve a short button on the goodbye, then use the existing visual
+        // fade. 350ms hold + 600ms fade + 50ms transition lands the stopped
+        // phase about one second after the audio scheduler reports the final
+        // sample drained, without stopping the recorder before the fade.
+        wrapupHoldTimerRef.current = setTimeout(() => {
           if (!isRunningRef.current) return;
+          useSessionStore.getState().logTiming(
+            `live: wrapup fade started ${Date.now() - wrapupDrainedAt}ms after final drain`,
+          );
           useSessionStore.getState().setIsEnding(true);
           useSessionStore.getState().setPuppetRevealed(false);
-          setTimeout(() => {
+          wrapupFadeTimerRef.current = setTimeout(() => {
             if (useSessionStore.getState().phase === "roasting") {
+              useSessionStore.getState().logTiming(
+                `live: phase stopped ${Date.now() - wrapupDrainedAt}ms after final drain`,
+              );
               useSessionStore.getState().setPhase("stopped", "SESSION_TIMEOUT");
             }
           }, fadeMs + 50);
@@ -1530,6 +1710,8 @@ export default function LiveSessionController({
     stopVisionSend();
     if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
     if (wrapupTimerRef.current) { clearTimeout(wrapupTimerRef.current); wrapupTimerRef.current = null; }
+    if (wrapupHoldTimerRef.current) { clearTimeout(wrapupHoldTimerRef.current); wrapupHoldTimerRef.current = null; }
+    if (wrapupFadeTimerRef.current) { clearTimeout(wrapupFadeTimerRef.current); wrapupFadeTimerRef.current = null; }
 
     cancelSpeech();
     micRecordingDisconnectRef.current?.();
@@ -1579,7 +1761,7 @@ export default function LiveSessionController({
     }
 
     // Auto-save transcript for debugging
-    saveTranscript(store);
+    saveTranscript(useSessionStore.getState());
   }
 
   function saveTranscript(store: ReturnType<typeof useSessionStore.getState>): void {

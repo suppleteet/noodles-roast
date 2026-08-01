@@ -59,7 +59,10 @@ import { diffObservations } from "@/lib/visionDiff";
 import type { JokeResponse, JokeItem } from "@/app/api/generate-joke/route";
 import { PERSONAS, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
-import { voiceSettingsForRoastOpener } from "@/lib/voiceMotionPresets";
+import {
+  voiceSettingsForRoastOpener,
+  type VoiceContinuityMode,
+} from "@/lib/voiceMotionPresets";
 import {
   shouldAttemptTranscriptRepair,
   type TranscriptRepairRequest,
@@ -90,7 +93,7 @@ export interface JokeStreamSink {
   finalize: (text: string) => void;
   /** Signal that EL has finished producing audio for this joke. Closes
    *  the audio buffer so the playback chain can advance to the next item. */
-  endAudio: () => void;
+  endAudio: (failed?: boolean) => void;
   cancel: () => void;
 }
 
@@ -105,6 +108,10 @@ export interface ComedianBrainDeps {
     intensity?: number,
     appendToPrev?: boolean,
     voiceOverride?: Partial<import("@/store/useSessionStore").VoiceSettings>,
+    options?: {
+      voiceContinuity?: VoiceContinuityMode;
+      handoff?: "filler" | "filler-to-joke";
+    },
   ) => void;
   /**
    * Streaming-TTS variant: when present, the brain enables server-side joke
@@ -115,10 +122,20 @@ export interface ComedianBrainDeps {
   openJokeStream?: (
     motion: MotionState,
     intensity: number,
-    options?: { appendToPrev?: boolean },
+    options?: {
+      appendToPrev?: boolean;
+      voiceContinuity?: VoiceContinuityMode;
+      handoff?: "filler-to-joke";
+    },
   ) => JokeStreamSink;
   /** Base voice settings for streaming TTS (sent server-side as baseVoiceSettings). */
   getVoiceSettings?: () => import("@/store/useSessionStore").VoiceSettings;
+  /** Last queued speech context, used to make server-streamed joke audio sound
+   *  like a continuation of the filler/question synthesized in the browser. */
+  getSpeechContext?: () => {
+    previousText: string;
+    previousVoiceSettings: import("@/store/useSessionStore").VoiceSettings | null;
+  };
   cancelSpeech: () => void;
   isQueueEmpty: () => boolean;
   setMotion: (state: MotionState, intensity: number) => void;
@@ -470,6 +487,15 @@ export class ComedianBrain {
    *  flips true, drain events during wrapup are just the bridge phrase finishing — firing
    *  session end then would cut the closing line off mid-sentence when it eventually arrives. */
   private wrapupClosingQueued = false;
+  /** Closing generation starts when the controller requests wrapup, while the
+   *  final spoken line is still playing, then is consumed on enterWrapup. */
+  private wrapupPrefetch: Promise<JokeResponse | null> | null = null;
+  private wrapupPrefetchRequested = false;
+  private wrapupPrefetchStatus: "idle" | "deferred" | "pending" | "ready" | "failed" = "idle";
+  private wrapupPrefetchStartedAt = 0;
+  /** Multi-turn chat requests must not overlap. This flips only after the
+   *  active answer-roast request (including fallback) has settled. */
+  private answerGenerationSettled = true;
 
   // Deps
   private readonly deps: ComedianBrainDeps;
@@ -517,6 +543,11 @@ export class ComedianBrain {
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
     this.wrapupClosingQueued = false;
+    this.wrapupPrefetch = null;
+    this.wrapupPrefetchRequested = false;
+    this.wrapupPrefetchStatus = "idle";
+    this.wrapupPrefetchStartedAt = 0;
+    this.answerGenerationSettled = true;
     this.modelTroubleExited = false;
 
     // Latency experiment: skip greeting entirely
@@ -587,6 +618,11 @@ export class ComedianBrain {
     if (this.pendingWrapup || this.state === "wrapup") return;
     this.pendingWrapup = true;
     this.deps.logTiming("brain: wrapup requested — will route to wrapup at next transition");
+    // Use the remaining playback of the final joke as free preparation time.
+    // The Aug 1 production session left 5.37s of final TTS unused, then waited
+    // another 3.52s between "Right then" and the generated closing line.
+    this.wrapupPrefetchRequested = true;
+    this._prepareWrapup();
     // No immediate-enter shortcut. Previously this cut the user off mid-answer (state
     // was wait_answer/prodding when the wrapup timer fired). The flag will be picked up
     // at the next safe transition — _onDeliveringDrained, enterCheckVision, or
@@ -2136,29 +2172,23 @@ export class ComedianBrain {
       if (isFirst) this.fillerFirstText = filler;
       this.fillerLastText = filler;
       this.fillerLineCount++;
-      // INTONATION CONTINUITY: thread the prior delivery's motion through to the
-      // filler voice instead of a fixed FILLER_VOICE_MOTION constant. The filler
-      // sits between the question (or prior joke) and the upcoming joke — locking
-      // it to "energetic" made it jump moods. Now: filler reads as a damped echo
-      // of the last joke's vibe ("she's still in smug-mode, still thinking it
-      // through"). Damped intensity (× 0.6) keeps the filler quieter than the
-      // joke that spawned it. Falls back to "thinking" on the first cycle of the
-      // session — measured, not expressive — since lastJokeMotion is empty then.
+      // INTONATION CONTINUITY: fillers inherit the exact queued voice profile and
+      // playback gain from the prior question/joke. The old forced 0.70 speed +
+      // 0.65 stability profile stretched tiny non-words into garbled audio, then
+      // jumped back to full-speed joke delivery. Body motion still reflects the
+      // answer independently; only the voice stays in the performer's register.
       const fillerVoiceMotion = (this.lastJokeMotion ?? "thinking") as import("@/lib/motionStates").MotionState;
-      const fillerVoiceIntensity = Math.max(0.3, (this.lastJokeIntensity ?? 0.7) * 0.6);
-      // STABILITY CLAMP: motion deltas push stability DOWN (more expressive).
-      // Toast's base voice already runs at stability 0.4 — adding a smug delta
-      // (-0.15) drops it to 0.27, and short fillers like "Mm-hm, mm-HM" warble
-      // at that level. The voiceOverride wins last; pin stability to 0.65 so
-      // fillers stay LEGIBLE while still inheriting the prior joke's style/speed
-      // direction. Speed override 0.7 stays for the unhurried "thinking-out-loud"
-      // beat; joke that follows returns to base speed for the punchline pop.
-      this.deps.queueSpeak(filler, fillerVoiceMotion, fillerVoiceIntensity, false, {
-        speed: 0.7,
-        stability: 0.65,
-      });
+      const fillerVoiceIntensity = this.lastJokeIntensity ?? 0.7;
+      this.deps.queueSpeak(
+        filler,
+        fillerVoiceMotion,
+        fillerVoiceIntensity,
+        false,
+        undefined,
+        { voiceContinuity: "inherit", handoff: "filler" },
+      );
       this.deps.logTiming(
-        `brain: filler[${this.fillerLineCount}] (voice=${fillerVoiceMotion}@${fillerVoiceIntensity.toFixed(2)}, body=${this.fillerMotion}, speed=0.7, stability=0.65) — "${filler}"`,
+        `brain: filler[${this.fillerLineCount}] (voice=${fillerVoiceMotion}@${fillerVoiceIntensity.toFixed(2)}, body=${this.fillerMotion}, continuity=inherit) — "${filler}"`,
       );
     }, COMEDIAN_CONFIG.fillerBreathMs);
     // The next filler is scheduled when the queue drains (see onTtsQueueDrained "generating").
@@ -2419,6 +2449,7 @@ export class ComedianBrain {
     conversationSoFar: string[],
     fillerAlreadySaid?: string,
   ): void {
+    this.answerGenerationSettled = false;
     let jokesQueued = 0;
     let metaHandled = false;
     const gen = this.deliveryGeneration; // snapshot — stale callbacks check this
@@ -2446,11 +2477,12 @@ export class ComedianBrain {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         const isFirstJoke = jokesQueued === 0;
+        let firstJokeFollowsFiller = false;
         if (isFirstJoke) {
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
           // chain. _stopFillerPump also cancels a pending breath (pumpTimer) so no further
           // filler queues ahead of the joke. The joke text itself stays unmodified.
-          this._stopFillerPump();
+          firstJokeFollowsFiller = this._stopFillerPump().fillerQueued;
           // Retarget puppet body language to anticipate the joke's mood while the last
           // filler audio is still draining. The motion-inferred-from-user-answer pose
           // (smug/conspiratorial/etc.) was a reaction to the user; this swaps to the
@@ -2480,6 +2512,10 @@ export class ComedianBrain {
             deliveredJoke.motion as import("@/lib/motionStates").MotionState,
             deliveredJoke.intensity,
             appendToPrev,
+            undefined,
+            firstJokeFollowsFiller
+              ? { voiceContinuity: "smooth", handoff: "filler-to-joke" }
+              : undefined,
           );
         }
         if (COMEDIAN_CONFIG.singleJokeMode) this.pipelinePreviousJokes.push(deliveredJoke.text);
@@ -2502,6 +2538,7 @@ export class ComedianBrain {
             // A joke already streamed and is playing — don't queue the redirect on top of it.
             // The joke addressed the irrelevancy; let it finish and advance normally.
             this.deps.logTiming("brain: irrelevant but joke already delivered — advancing (no redirect)");
+            this._markAnswerGenerationSettled();
             return;
           }
           // No joke played yet — redirect immediately
@@ -2512,6 +2549,7 @@ export class ComedianBrain {
           this.deps.queueSpeak(meta.redirect, "smug", 0.7);
           this._addLedger("joke", meta.redirect, []);
           this._transition("redirecting");
+          this._markAnswerGenerationSettled();
           return;
         }
 
@@ -2549,10 +2587,20 @@ export class ComedianBrain {
           }).then((response) => {
             if (this.deliveryGeneration !== gen) return;
             if (this.state !== "generating" && this.state !== "delivering") return;
+            this._markAnswerGenerationSettled();
             this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
+          }).catch(() => {
+            this._markAnswerGenerationSettled();
           });
           return;
         }
+
+        this._markAnswerGenerationSettled();
+
+        // Once wrapup preparation has been requested, don't launch hopper,
+        // pipeline, or next-question chat work that can contend with the cached
+        // closing request on the same multi-turn session.
+        if (this.wrapupPrefetchRequested) return;
 
         // Bonus hopper joke is intentionally NOT fired here — the streaming API already
         // returns 1-2 jokes per answer (jokesPerAnswer.max=2). Adding a third joke pads
@@ -2584,7 +2632,10 @@ export class ComedianBrain {
           conversationSoFar,
         }).then((response) => {
           if (this.state !== "generating") return;
+          this._markAnswerGenerationSettled();
           this.enterDelivering(answer, response ?? { relevant: true, jokes: [] }, fillerAlreadySaid);
+        }).catch(() => {
+          this._markAnswerGenerationSettled();
         });
       },
       this.generationAbort?.signal,
@@ -2593,6 +2644,7 @@ export class ComedianBrain {
   }
 
   private enterDelivering(answer: string, response: JokeResponse, fillerAlreadySaid?: string): void {
+    this._markAnswerGenerationSettled();
     this._transition("delivering");
     this.deps.setMotion("energetic", 0.8);
 
@@ -3246,6 +3298,88 @@ export class ComedianBrain {
   private static readonly WRAPUP_GENERATION_TIMEOUT_MS = 6000;
   // Closing lines (WRAPUP_FALLBACK / WRAPUP_BRIDGES) live in src/lib/scriptLines.ts.
 
+  private _markAnswerGenerationSettled(): void {
+    if (this.answerGenerationSettled) return;
+    this.answerGenerationSettled = true;
+    if (this.wrapupPrefetchRequested) this._prepareWrapup();
+  }
+
+  /**
+   * Prepare the closing line before enterWrapup, normally while the final roast
+   * is still playing. Multi-turn chat calls are serialized: if an answer-roast
+   * request is still open, the closing is deferred until its meta/fallback path
+   * settles rather than racing two messages through one chat session.
+   */
+  private _prepareWrapup(): void {
+    if (!this.wrapupPrefetchRequested || this.wrapupPrefetch) return;
+    // A timer can fire while the user is still answering or while an unrelated
+    // vision/question turn owns the chat session. Wait for the final delivery
+    // (or enterWrapup fallback path) so the closing includes the latest facts.
+    if (this.state !== "generating" && this.state !== "delivering" && this.state !== "wrapup") {
+      if (this.wrapupPrefetchStatus !== "deferred") {
+        this.wrapupPrefetchStatus = "deferred";
+        this.deps.logTiming(`brain: wrapup prefetch deferred — state=${this.state}`);
+      }
+      return;
+    }
+    if (!this.answerGenerationSettled) {
+      if (this.wrapupPrefetchStatus !== "deferred") {
+        this.wrapupPrefetchStatus = "deferred";
+        this.deps.logTiming("brain: wrapup prefetch deferred — answer generation still active");
+      }
+      return;
+    }
+
+    // The set is ending. Cancel future-material work before using the shared
+    // comedian chat for the closing line.
+    this._cancelHopper();
+    this._cancelPipelinePrefetch();
+    this._cancelRephrase();
+
+    const knownFacts = this._getThrowbackContext();
+    const conversation = this._getLedgerContext();
+    const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
+    this.wrapupPrefetchStatus = "pending";
+    this.wrapupPrefetchStartedAt = Date.now();
+    this.deps.logTiming("brain: wrapup prefetch started during final playback");
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let timedOut = false;
+    const timeoutResult = new Promise<JokeResponse | null>((resolve) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        this.wrapupPrefetchStatus = "failed";
+        this.deps.logTiming("brain: wrapup prefetch timeout — fallback armed");
+        resolve(null);
+      }, ComedianBrain.WRAPUP_GENERATION_TIMEOUT_MS);
+    });
+    const generated = this._generateJoke({
+      context: "wrapup",
+      stateless: true,
+      knownFacts,
+      conversationSoFar: conversation,
+      observations: this.deps.getObservations(),
+      imageBase64: frame,
+      maxJokes: 1,
+    }).then((response) => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) return response;
+      const closing = response?.jokes?.[0];
+      this.wrapupPrefetchStatus = closing?.text.trim() ? "ready" : "failed";
+      this.deps.logTiming(
+        `brain: wrapup prefetch ${this.wrapupPrefetchStatus} in ${Date.now() - this.wrapupPrefetchStartedAt}ms`,
+      );
+      return response;
+    }).catch(() => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) return null;
+      this.wrapupPrefetchStatus = "failed";
+      this.deps.logTiming("brain: wrapup prefetch error — fallback armed");
+      return null;
+    });
+    this.wrapupPrefetch = Promise.race([generated, timeoutResult]);
+  }
+
   private enterWrapup(): void {
     this.pendingWrapup = false;
     this._clearTimers();
@@ -3269,11 +3403,15 @@ export class ComedianBrain {
       this.deps.logTiming(`brain: wrapup bridge — "${bridge}"`);
     }
 
-    const knownFacts = this._getThrowbackContext();
-    const conversation = this._getLedgerContext();
-    const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
-
-    this.deps.logTiming("brain: → wrapup — generating closing line");
+    this.wrapupPrefetchRequested = true;
+    this._prepareWrapup();
+    const closingPromise = this.wrapupPrefetch ?? Promise.resolve(null);
+    const ageMs = this.wrapupPrefetchStartedAt > 0
+      ? Date.now() - this.wrapupPrefetchStartedAt
+      : 0;
+    this.deps.logTiming(
+      `brain: → wrapup — consuming closing prefetch (${this.wrapupPrefetchStatus}, age=${ageMs}ms)`,
+    );
 
     let resolved = false;
     const queueClosing = (text: string, motion: MotionState = "smug", intensity = 0.8): void => {
@@ -3287,22 +3425,7 @@ export class ComedianBrain {
       this.wrapupClosingQueued = true;
     };
 
-    // Safety net: if the LLM hangs, queue the fallback so the session can still end.
-    const timeout = setTimeout(() => {
-      if (resolved) return;
-      this.deps.logTiming("brain: wrapup generation timeout — using fallback");
-      queueClosing(WRAPUP_FALLBACK);
-    }, ComedianBrain.WRAPUP_GENERATION_TIMEOUT_MS);
-
-    this._generateJoke({
-      context: "wrapup",
-      knownFacts,
-      conversationSoFar: conversation,
-      observations: this.deps.getObservations(),
-      imageBase64: frame,
-      maxJokes: 1,
-    }).then((response) => {
-      clearTimeout(timeout);
+    closingPromise.then((response) => {
       const closing = response?.jokes?.[0];
       if (closing && closing.text.trim()) {
         this.deps.logTiming(`brain: wrapup closing — "${closing.text.slice(0, 60)}"`);
@@ -3312,7 +3435,6 @@ export class ComedianBrain {
         queueClosing(WRAPUP_FALLBACK);
       }
     }).catch(() => {
-      clearTimeout(timeout);
       this.deps.logTiming("brain: wrapup generation error — using fallback");
       queueClosing(WRAPUP_FALLBACK);
     });
@@ -3841,6 +3963,7 @@ export class ComedianBrain {
   ): void {
     const streamingTtsEnabled = !!this.deps.openJokeStream;
     const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
+    const speechContext = streamingTtsEnabled ? this.deps.getSpeechContext?.() : undefined;
     /** Per-joke audio sinks, keyed by index from the server SSE stream. */
     const jokeSinks: Map<number, JokeStreamSink> = new Map();
     /** Whether the brain has emitted a transcript entry for this joke yet. */
@@ -3875,6 +3998,8 @@ export class ComedianBrain {
         townFlavor: this.deps.getTownFlavor()?.trim() || undefined,
         streamingTts: streamingTtsEnabled,
         baseVoiceSettings,
+        previousText: speechContext?.previousText || undefined,
+        previousVoiceSettings: speechContext?.previousVoiceSettings ?? undefined,
       }),
     })
       .then(async (resp) => {
@@ -3913,11 +4038,22 @@ export class ComedianBrain {
             const intensity = (event.intensity as number) ?? 0.7;
             const appendToPrev = index > 0;
             jokeAppendState.set(index, appendToPrev);
+            // Motion/intensity are known at joke-start, earlier than the full
+            // joke event. Stop the filler breath/pump now so no acknowledgement
+            // can be appended behind audio that is already streaming in.
+            const fillerQueued = index === 0
+              ? this._stopFillerPump().fillerQueued
+              : false;
             try {
               const sink = this.deps.openJokeStream!(
                 motion as MotionState,
                 intensity,
-                { appendToPrev },
+                {
+                  appendToPrev,
+                  ...(fillerQueued
+                    ? { voiceContinuity: "smooth" as const, handoff: "filler-to-joke" as const }
+                    : {}),
+                },
               );
               jokeSinks.set(index, sink);
             } catch (err) {
@@ -3935,7 +4071,7 @@ export class ComedianBrain {
             const index = (event.index as number) ?? 0;
             const sink = jokeSinks.get(index);
             if (sink) {
-              sink.endAudio();
+              sink.endAudio(event.failed === true);
               jokeSinks.delete(index);
             }
           } else if (event.type === "joke") {
@@ -4061,6 +4197,9 @@ export class ComedianBrain {
       knownFacts?: string[];
       maxJokes?: number;
       imageBase64?: string;
+      /** Avoid contending with an in-flight multi-turn chat request. The caller
+       *  must provide the conversation/known-fact context explicitly. */
+      stateless?: boolean;
     },
     signal?: AbortSignal,
   ): Promise<JokeResponse | null> {
@@ -4079,7 +4218,7 @@ export class ComedianBrain {
           model: this.deps.getRoastModel(),
           ...params,
           experienceType: this._getExperienceType(),
-          sessionId: this.deps.getSessionId(),
+          sessionId: params.stateless ? undefined : this.deps.getSessionId(),
           persona: this.deps.getPersona(),
           burnIntensity: this.deps.getBurnIntensity(),
           contentMode: this.deps.getContentMode(),

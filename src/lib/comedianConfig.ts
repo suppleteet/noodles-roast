@@ -39,7 +39,7 @@ const defaults = {
   // Session length
   wrapupAfterMs: 180_000,      // after this elapsed, brain routes to wrapup at next ask_question
   wrapupGuardMs: 170_000,      // skip session rotation if elapsed exceeds this — wrapup is imminent
-  wrapupPostLinePauseMs: 2500, // dead air after the closing line finishes — comedian "exits the stage" before fade
+  wrapupPostLinePauseMs: 350,  // short button after the last word; 600ms fade + transition makes stop ≈1s after drain
 
   // Dev voice notes (gesture-triggered)
   devNotesEnabled: false,      // thumbs-down pauses brain, starts recording; thumbs-up resumes
@@ -66,10 +66,10 @@ const defaults = {
   // rather than baking a leading "..." into the text — EL rendered the ellipsis flatly and
   // spiked the attack on the word after it. The pump waits this long, then queues the filler.
   fillerBreathMs: 240,
-  // Cap is also the user-facing dead-air budget when the LLM hangs: at ~2-3s per filler,
-  // a stack of 4 ≈ 10s of fillers before the 10s generationTimeoutMs watchdog fires. Lower
-  // is snappier on hangs but risks a real audible pause for slow-but-healthy generations.
-  fillerMaxStack: 4,
+  // Two lexical acknowledgements cover normal generation without turning one
+  // answer into a stack of generic noises. The generation watchdog owns a true
+  // provider hang; fillers should preserve character, not conceal ten seconds.
+  fillerMaxStack: 2,
 
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
   // within this window, abort it and run the brain-busted exit: the comedian says (in

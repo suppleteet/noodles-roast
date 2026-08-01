@@ -67,7 +67,9 @@ export async function POST(req: NextRequest) {
         onError: (err) => {
           console.error("[tts-ws]", err);
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`),
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "error", message: "tts_failed" })}\n\n`,
+            ),
           );
           controller.close();
         },
