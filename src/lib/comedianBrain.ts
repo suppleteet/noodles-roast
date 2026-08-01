@@ -3393,14 +3393,16 @@ export class ComedianBrain {
     this._transition("wrapup");
     this.deps.setMotion("smug", 0.8);
 
-    // Bridge phrase fills the ~2-3s LLM generation gap so the user hears speech the moment
-    // the comedian "starts wrapping up" instead of staring at silence. Queued synchronously
-    // so its TTS fetch happens in parallel with the closing-line generation.
-    if (!COMEDIAN_CONFIG.skipScriptedLines) {
+    // Only bridge when the closing is still pending. When prefetch finished
+    // during the final joke, go straight to the sign-off instead of inserting
+    // a redundant "Right then" beat before an already-ready line.
+    if (!COMEDIAN_CONFIG.skipScriptedLines && this.wrapupPrefetchStatus !== "ready") {
       const bridge =
         WRAPUP_BRIDGES[Math.floor(Math.random() * WRAPUP_BRIDGES.length)];
       this.deps.queueSpeak(bridge, "smug", 0.7);
       this.deps.logTiming(`brain: wrapup bridge — "${bridge}"`);
+    } else if (this.wrapupPrefetchStatus === "ready") {
+      this.deps.logTiming("brain: wrapup bridge skipped — closing ready");
     }
 
     this.wrapupPrefetchRequested = true;
@@ -4204,6 +4206,7 @@ export class ComedianBrain {
     signal?: AbortSignal,
   ): Promise<JokeResponse | null> {
     try {
+      const { stateless = false, ...requestParams } = params;
       {
         const bits: string[] = [];
         if (params.question) bits.push(`Q:"${params.question}"`);
@@ -4216,9 +4219,9 @@ export class ComedianBrain {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.deps.getRoastModel(),
-          ...params,
+          ...requestParams,
           experienceType: this._getExperienceType(),
-          sessionId: params.stateless ? undefined : this.deps.getSessionId(),
+          sessionId: stateless ? undefined : this.deps.getSessionId(),
           persona: this.deps.getPersona(),
           burnIntensity: this.deps.getBurnIntensity(),
           contentMode: this.deps.getContentMode(),
