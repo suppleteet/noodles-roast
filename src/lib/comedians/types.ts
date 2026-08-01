@@ -16,17 +16,14 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   when the cannedIntro toggle is on. Every line must END by asking who the
  *   user is or telling them to give their name — the opener doubles as the
  *   name question.
- * - fillers → short "thinking" lines spoken (not LLM-generated) to cover the
- *   1-4s while a roast is being written, so there's never dead air. Not injected
- *   into the prompt. Keep them a few words long and lead with a soft/voiced
- *   sound (a vowel, an "Mm/Oh/Yeah" hum) — the breath beat before each is added
+ * - fillers → brief, low-information conversational backchannels spoken
+ *   (not LLM-generated) to cover the 1-4s while a roast is being written. They
+ *   acknowledge without evaluating, paraphrasing, or sounding like a reply.
+ *   Lead with a soft/voiced sound (an "Mm/Oh/Yeah" hum) — the breath beat is added
  *   in code, so don't bake in a leading "...". (Toast has its own pool, in
  *   toastPrompts.ts.)
- * - echoFillers → an alternate filler style: repeat the user's answer back once
- *   as active listening, then bridge into the joke. Each line MUST contain the
- *   "{answer}" token (replaced with the user's words at delivery). Keep them
- *   declarative, not question-shaped. Chance of using one vs a plain filler is
- *   the global ECHO_FILLER_PROBABILITY (scriptLines.ts).
+ * - echoFillers → legacy experimental templates. Production sets their chance
+ *   to zero so fillers never repeat or paraphrase the user's answer.
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.

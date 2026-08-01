@@ -11,4 +11,19 @@ describe("sanitizeSpokenText", () => {
     expect(sanitizeSpokenText("Wait — *clink* — what?"))
       .toBe("Wait — what?");
   });
+
+  it("removes a dangling pause before punctuation", () => {
+    expect(sanitizeSpokenText("Wait — *clink*. What?"))
+      .toBe("Wait. What?");
+  });
+
+  it("removes an empty parenthesized direction and punctuation shell", () => {
+    expect(sanitizeSpokenText("(*sigh*). Fine, let's go."))
+      .toBe("Fine, let's go.");
+  });
+
+  it("returns an empty string when the input contains only a direction", () => {
+    expect(sanitizeSpokenText("*long pause*."))
+      .toBe("");
+  });
 });

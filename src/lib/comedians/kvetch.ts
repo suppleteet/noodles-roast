@@ -116,15 +116,16 @@ export const kvetch: PersonaConfig = {
       ],
     },
   },
-  // Spoken while a roast is being written, like a grumpy man thinking out loud.
+  // Low-information backchannels while a roast is being written. Keep these
+  // casual: they acknowledge the user without pretending the joke is ready.
   fillers: [
-    "Right. Give me a second.",
-    "Okay, that's bleak.",
-    "Of course. Let me work with that.",
-    "Sure, sure. I'm finding the damage.",
-    "Well, that tracks. Hold on.",
-    "Alright. There's something wrong here.",
-    "Yeah, I heard you. One second.",
+    "Mm-hmm.",
+    "Uh-huh.",
+    "Yeah, yeah.",
+    "Yep.",
+    "Right, right.",
+    "Mm. Sure.",
+    "I hear you — uh-huh, yeah.",
   ],
   // Echo fillers — repeat the answer back, dismissive and unimpressed. {answer} required.
   echoFillers: [

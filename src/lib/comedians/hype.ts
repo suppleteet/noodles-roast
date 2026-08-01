@@ -91,13 +91,13 @@ export const hype: PersonaConfig = {
   // Spoken while a roast is being written. Even the hype man needs a beat — but
   // he's vibrating with it, loading up the next big one.
   fillers: [
-    "Oh, okay okay okay, hold up.",
-    "Yeah, gimme a second, this is GOOD.",
-    "Mm, alright, lemme cook here.",
-    "Ooh, hang on, I'm loading up.",
-    "Yeah yeah, one sec, here it comes.",
-    "Right, right, let me line this up.",
-    "Oh, we're going somewhere, hold on.",
+    "Yeah, yeah, yeah.",
+    "Oh, okay!",
+    "Mm-hmm — let's go.",
+    "Yep, yep.",
+    "Uh-huh — yeah!",
+    "Okay, okay.",
+    "I hear you — yeah, yeah.",
   ],
   // Echo fillers — fire the answer back with arena hype. {answer} required.
   echoFillers: [

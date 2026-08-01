@@ -26,15 +26,14 @@ import type { BurnIntensity } from "@/lib/prompts";
  * no PersonaConfig. The brain uses these when experienceType === "toast".
  */
 export const TOAST_FILLER_LINES = [
-  "Hmm, where was I, where was I, what was I —",
-  "Oh god, oh god — okay — let me think let me think.",
-  "Wait wait wait, lemme — what?",
-  "Okay so, okay so — hold that thought, hold that.",
-  "Mm, yeah, no, no totally, totally, totally.",
-  "Right, right right right, okay, *sip*.",
-  "Oh that's good, okay — okay — hang on, hang on.",
-  "I LOVE that — wait, what?",
-  "Mm-hm, mm-HM. Yeah. Yeah no, totally.",
+  "Mm-hm, mm-HM. Yeah.",
+  "Uh-huh — yeah, yeah.",
+  "Okay, okay, okay.",
+  "Yep, yep.",
+  "Mm, yeah, totally.",
+  "Right, right, okay.",
+  "I hear you — uh-huh, yeah.",
+  "Oh! Mm-hm.",
 ];
 
 const TOAST_VOICE = `## Your Voice — Toast

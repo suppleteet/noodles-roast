@@ -1999,7 +1999,7 @@ export class ComedianBrain {
 
     // Otherwise the answer is unpunctuated AND not obviously a complete viable answer
     // (e.g. a 2-word fragment like "yeah dude" mid-thought). Skip the echo and let the
-    // non-word filler take over.
+    // stock acknowledgement take over.
     return false;
   }
 
@@ -2010,7 +2010,7 @@ export class ComedianBrain {
 
   private _pickFiller(answer: string): string {
     // Toast skips echo fillers entirely — she's interrupting herself, not
-    // listening attentively. Always uses drunk-thinking non-word fillers.
+    // listening attentively. Always uses drunk-thinking stock acknowledgements.
     if (this._isToast()) {
       return TOAST_FILLER_LINES[
         Math.floor(Math.random() * TOAST_FILLER_LINES.length)
@@ -2021,7 +2021,7 @@ export class ComedianBrain {
       const cleaned = ComedianBrain._stripLeadingHesitation(
         answer.trim().replace(/[.?!,]+$/, "").trim(),
       );
-      // If stripping left us with too little to echo, fall back to non-word filler.
+      // If stripping left us with too little to echo, fall back to a stock acknowledgement.
       if (wordCount(cleaned) < 1) {
         return fillers[Math.floor(Math.random() * fillers.length)];
       }
@@ -2032,8 +2032,8 @@ export class ComedianBrain {
     return fillers[Math.floor(Math.random() * fillers.length)];
   }
 
-  /** Pick a non-word filler avoiding the last one to prevent immediate repeats. */
-  private _pickNonWordFiller(avoid: string | null): string {
+  /** Pick a stock acknowledgement while avoiding immediate repeats. */
+  private _pickStockFiller(avoid: string | null): string {
     const pool0 = this._isToast() ? TOAST_FILLER_LINES : this._roastFillers();
     const opts = pool0.filter((f) => f !== avoid);
     const pool = opts.length > 0 ? opts : pool0;
@@ -2153,12 +2153,12 @@ export class ComedianBrain {
       this.deps.logTiming(`brain: filler pump stopped at max (${COMEDIAN_CONFIG.fillerMaxStack})`);
       return;
     }
-    // First filler can echo the answer; subsequent stacked fillers stay non-word so we don't
+    // First filler can echo the answer; subsequent fillers use the stock bank so we don't
     // repeat the same echo phrase or sound like a broken record.
     const isFirst = this.fillerLineCount === 0;
     const filler = isFirst
       ? this._pickFiller(this.fillerAnswerForPump)
-      : this._pickNonWordFiller(this.fillerLastText);
+      : this._pickStockFiller(this.fillerLastText);
     // Body animation reflects the inferred reaction immediately; the breath happens before voice.
     this.deps.setMotion(this.fillerMotion, this.fillerIntensity);
     // Add the breath ourselves: fillerBreathMs of silence, THEN queue the audio. We DON'T bake
@@ -2174,7 +2174,7 @@ export class ComedianBrain {
       this.fillerLineCount++;
       // INTONATION CONTINUITY: fillers inherit the exact queued voice profile and
       // playback gain from the prior question/joke. The old forced 0.70 speed +
-      // 0.65 stability profile stretched tiny non-words into garbled audio, then
+      // 0.65 stability profile stretched short acknowledgements into garbled audio, then
       // jumped back to full-speed joke delivery. Body motion still reflects the
       // answer independently; only the voice stays in the performer's register.
       const fillerVoiceMotion = (this.lastJokeMotion ?? "thinking") as import("@/lib/motionStates").MotionState;
@@ -2212,7 +2212,7 @@ export class ComedianBrain {
     if (COMEDIAN_CONFIG.skipFiller || this.fillerFiredForAnswer) return undefined;
     this.fillerFiredForAnswer = true;
     // Do not echo an answer that may be misheard. The first filler is
-    // nonverbal while repair runs; later fillers are nonverbal by design.
+    // a stock acknowledgement while repair runs; later fillers stay generic by design.
     this.fillerAnswerForPump = shouldRepair ? "" : rawAnswer;
     this.fillerLineCount = 0;
     this.fillerLastText = null;
@@ -2452,6 +2452,7 @@ export class ComedianBrain {
     this.answerGenerationSettled = false;
     let jokesQueued = 0;
     let metaHandled = false;
+    let fillerContinuityActive = false;
     const gen = this.deliveryGeneration; // snapshot — stale callbacks check this
 
     // Track answer for single-joke pipeline
@@ -2477,12 +2478,11 @@ export class ComedianBrain {
         if (this.deliveryGeneration !== gen) return; // stale stream — ignore
         if (this.state !== "generating" && this.state !== "delivering") return;
         const isFirstJoke = jokesQueued === 0;
-        let firstJokeFollowsFiller = false;
         if (isFirstJoke) {
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
           // chain. _stopFillerPump also cancels a pending breath (pumpTimer) so no further
           // filler queues ahead of the joke. The joke text itself stays unmodified.
-          firstJokeFollowsFiller = this._stopFillerPump().fillerQueued;
+          fillerContinuityActive = this._stopFillerPump().fillerQueued;
           // Retarget puppet body language to anticipate the joke's mood while the last
           // filler audio is still draining. The motion-inferred-from-user-answer pose
           // (smug/conspiratorial/etc.) was a reaction to the user; this swaps to the
@@ -2513,8 +2513,11 @@ export class ComedianBrain {
             deliveredJoke.intensity,
             appendToPrev,
             undefined,
-            firstJokeFollowsFiller
-              ? { voiceContinuity: "smooth", handoff: "filler-to-joke" }
+            fillerContinuityActive
+              ? {
+                  voiceContinuity: "smooth",
+                  handoff: isFirstJoke ? "filler-to-joke" : undefined,
+                }
               : undefined,
           );
         }
@@ -3502,8 +3505,8 @@ export class ComedianBrain {
     const q = this.currentQuestion;
     const conversationSoFar = this._getLedgerContext();
 
-    // Filler will be a non-word sound — tell the generator so the joke doesn't open similarly
-    const fillerAlreadySaid = COMEDIAN_CONFIG.skipFiller ? undefined : "filler sound";
+    // Tell the generator an acknowledgement already played so it does not open similarly.
+    const fillerAlreadySaid = COMEDIAN_CONFIG.skipFiller ? undefined : "brief acknowledgement";
 
     const result = this._generateJoke(
       {

@@ -75,6 +75,17 @@ describe("PersonaConfig shape", () => {
       it("has a valid energy level", () => {
         expect(["low", "medium", "high", "escalating"]).toContain(p.energy);
       });
+
+      it("uses brief low-information filler backchannels", () => {
+        expect(p.fillers.length).toBeGreaterThanOrEqual(5);
+        for (const line of p.fillers) {
+          const words = line.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
+          expect(words.length, `filler is too substantive: "${line}"`).toBeLessThanOrEqual(7);
+          expect(line, `filler sounds like a generated reply: "${line}"`).not.toMatch(
+            /\b(?:give me|let me|thinking|finding|building|loading|hold on|one second|this is|that is|that's|you said)\b/i,
+          );
+        }
+      });
     });
   }
 });

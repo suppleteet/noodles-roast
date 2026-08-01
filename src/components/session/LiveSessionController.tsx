@@ -232,14 +232,23 @@ export default function LiveSessionController({
     const baseVoice = useSessionStore.getState().voiceSettings;
     const motionVoice = voiceSettingsForMotion(baseVoice, motion, intensity);
     const targetVoice = voiceOverride ? { ...motionVoice, ...voiceOverride } : motionVoice;
+    // Continuity-sensitive lines deliberately key off the last profile that
+    // actually reached WebAudio. A failed synthesis must never become the
+    // voice/timbre reference for the next filler or joke.
+    const continuityVoice = continuity
+      ? lastAudibleVoiceSettingsRef.current
+      : lastQueuedVoiceSettingsRef.current;
+    const continuityGain = continuity
+      ? lastAudibleGainRef.current
+      : lastQueuedGainRef.current;
     const voice = voiceSettingsForContinuity(
       targetVoice,
-      lastQueuedVoiceSettingsRef.current,
+      continuityVoice,
       continuity,
     );
     const gain = gainForContinuity(
       gainForMotion(motion, intensity),
-      lastQueuedGainRef.current,
+      continuityGain,
       continuity,
     );
     lastQueuedVoiceSettingsRef.current = voice;
@@ -294,14 +303,26 @@ export default function LiveSessionController({
         text: text.trim(),
         handoff: options?.handoff,
       });
+      let delivered = queued;
       if (!queued && audioBuffer.failed && isRunningRef.current && ttsGenerationRef.current === gen) {
         // The WS route previously translated EL failures into a normal `done`,
         // silently dropping the whole line. Use the independent REST transport
         // as a no-delay failover while the chain remains blocked on this turn.
         useSessionStore.getState().logTiming(
-          `tts: stream produced no audio — REST failover "${text.trim().slice(0, 40)}"`,
+          `tts: stream incomplete — REST failover "${text.trim().slice(0, 40)}"`,
         );
-        await scheduleRestFallback(text.trim(), gen, profile, options?.handoff);
+        delivered = await scheduleRestFallback(text.trim(), gen, profile, options?.handoff);
+      }
+      if (!delivered && ttsGenerationRef.current === gen) {
+        // Roll back only when this is still the newest queued context. If a
+        // later line is already prefetched its own snapshot must remain intact.
+        if (lastSpokenTextRef.current === text.trim()) {
+          lastSpokenTextRef.current = lastAudibleTextRef.current;
+        }
+        if (lastQueuedVoiceSettingsRef.current === profile.voice) {
+          lastQueuedVoiceSettingsRef.current = lastAudibleVoiceSettingsRef.current;
+          lastQueuedGainRef.current = lastAudibleGainRef.current;
+        }
       }
     });
   }
@@ -635,6 +656,17 @@ export default function LiveSessionController({
     let cursor = 0;
     let queuedAny = false;
 
+    // Treat each streamed line as a transaction. Scheduling partial PCM before
+    // the upstream stream is known-good makes recovery impossible: retrying
+    // repeats the prefix, while advancing silently drops the rest of the line.
+    // Most buffers finish while prior speech is playing, so this integrity gate
+    // usually adds no audible delay and guarantees REST failover can replace the
+    // complete line without overlap or truncation.
+    while (!audio.done && isRunningRef.current && ttsGenerationRef.current === gen) {
+      await audio.waitForUpdate();
+    }
+    if (audio.failed || !audio.done) return false;
+
     while (isRunningRef.current && ttsGenerationRef.current === gen) {
       while (cursor < audio.chunks.length) {
         // Before queueing the very first chunk of the session: reveal the
@@ -664,7 +696,6 @@ export default function LiveSessionController({
       }
 
       if (audio.done) break;
-      await audio.waitForUpdate();
     }
 
     if (ttsGenerationRef.current !== gen) playback.flush();
@@ -1828,6 +1859,8 @@ export default function LiveSessionController({
       stopVisionSend();
       if (rotateTimerRef.current) clearTimeout(rotateTimerRef.current);
       if (wrapupTimerRef.current) clearTimeout(wrapupTimerRef.current);
+      if (wrapupHoldTimerRef.current) clearTimeout(wrapupHoldTimerRef.current);
+      if (wrapupFadeTimerRef.current) clearTimeout(wrapupFadeTimerRef.current);
       if (userSpeakingTimerRef.current) clearTimeout(userSpeakingTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

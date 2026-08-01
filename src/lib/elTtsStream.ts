@@ -162,7 +162,7 @@ export function streamElTts({
   ws.on("close", () => {
     if (!closed) {
       closed = true;
-      onDone();
+      onError(new Error("ElevenLabs WS closed before final audio"));
     }
   });
 
@@ -328,7 +328,7 @@ export function openElTtsStream({
   ws.on("close", () => {
     if (!closed) {
       closed = true;
-      onDone();
+      onError(new Error("ElevenLabs WS closed before final audio"));
     }
   });
 
