@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useSessionStore } from "@/store/useSessionStore";
 import type { ContentMode, RoastModelId } from "@/store/useSessionStore";
 import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monetizationCatalog";
@@ -46,6 +47,50 @@ export default function LandingScreen() {
   const [hydrated, setHydrated] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
   const [paymentBusy, setPaymentBusy] = useState<RoastPassSku | "redeem" | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<PuppetProfile["id"]>("roasty");
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const profileRefs = useRef<Record<PuppetProfile["id"], HTMLButtonElement | null>>({
+    roasty: null,
+    toastie: null,
+  });
+
+  const selectedProfile =
+    PUPPET_PROFILES.find((profile) => profile.id === selectedProfileId) ?? PUPPET_PROFILES[0];
+
+  function selectProfile(profile: PuppetProfile, behavior: ScrollBehavior = "smooth"): void {
+    setSelectedProfileId(profile.id);
+    setExperienceType(profile.experienceType);
+    const card = profileRefs.current[profile.id];
+    if (typeof card?.scrollIntoView === "function") {
+      card.scrollIntoView({
+        behavior,
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }
+
+  function handleCarouselScroll(): void {
+    const carousel = carouselRef.current;
+    if (!carousel) return;
+    const center = carousel.getBoundingClientRect().left + carousel.clientWidth / 2;
+    let nearest = selectedProfile;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const profile of PUPPET_PROFILES) {
+      const card = profileRefs.current[profile.id];
+      if (!card) continue;
+      const rect = card.getBoundingClientRect();
+      const distance = Math.abs(rect.left + rect.width / 2 - center);
+      if (distance < nearestDistance) {
+        nearest = profile;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest.id !== selectedProfileId) {
+      setSelectedProfileId(nearest.id);
+      setExperienceType(nearest.experienceType);
+    }
+  }
 
   async function refreshPaymentStatus(): Promise<MonetizationStatus | null> {
     if (!PAYMENTS_ENABLED) return null;
@@ -56,8 +101,8 @@ export default function LandingScreen() {
   }
 
   // ── Cold-start prewarm ──────────────────────────────────────────────────────
-  // Warm the slow startup paths WHILE the user is still reading the Roast/Toast
-  // buttons, so the first session doesn't eat the latency (a cold first session
+  // Warm the slow startup paths WHILE the user is choosing a Puppet Line profile,
+  // so the first session doesn't eat the latency (a cold first session
   // pushed time-to-first-speech to ~28s in one log). Fire-and-forget; each call
   // is harmless on its own and the post-permission warmup still runs as backstop.
   useEffect(() => {
@@ -173,175 +218,209 @@ export default function LandingScreen() {
   const featured = products.find((product) => product.featured) ?? products[0];
 
   return (
-    <div className="landing-screen">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,22,0.26),transparent_32%),linear-gradient(155deg,#210907_0%,#080302_55%,#000_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-white/[0.035] to-transparent" />
-
-      <header className="landing-call-header">
-        <div>
-          <p className="landing-call-kicker">Roastie video</p>
-          <p className="text-sm font-bold text-white/90">Incoming call</p>
-        </div>
-        <div className="landing-ready-pill">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]" />
-          Ready
-        </div>
+    <div className="landing-screen puppet-line-screen">
+      <div className="pointer-events-none absolute inset-0 bg-[#111214]" />
+      <header className="puppet-line-header">
+        <h1 className="text-4xl font-bold tracking-tight text-white">Puppet Line</h1>
       </header>
 
-      <div className="landing-layout">
-        <section className="landing-identity" aria-labelledby="roastie-title">
-          <div className="landing-avatar-wrap" aria-hidden="true">
-            <div className="landing-avatar-ring" />
-            <div className="landing-avatar">R</div>
+      <main className="puppet-line-main">
+        <section aria-label="Choose a puppet" className="puppet-picker">
+          <div
+            ref={carouselRef}
+            data-testid="puppet-carousel"
+            className="puppet-carousel"
+            onScroll={handleCarouselScroll}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const index = PUPPET_PROFILES.findIndex((profile) => profile.id === selectedProfileId);
+              const delta = event.key === "ArrowRight" ? 1 : -1;
+              const next = PUPPET_PROFILES[Math.max(0, Math.min(PUPPET_PROFILES.length - 1, index + delta))];
+              selectProfile(next);
+            }}
+            tabIndex={0}
+          >
+            {PUPPET_PROFILES.map((profile) => {
+              const selected = profile.id === selectedProfileId;
+              return (
+                <button
+                  key={profile.id}
+                  ref={(node) => { profileRefs.current[profile.id] = node; }}
+                  type="button"
+                  data-testid={`puppet-profile-${profile.id}`}
+                  aria-label={`Select ${profile.name}`}
+                  aria-pressed={selected}
+                  className={`puppet-profile-card ${selected ? "is-selected" : ""}`}
+                  onClick={() => selectProfile(profile)}
+                >
+                  <span className="puppet-profile-portrait">
+                    <Image
+                      src={profile.portraitSrc}
+                      alt=""
+                      width={420}
+                      height={420}
+                      priority
+                      draggable={false}
+                      className="h-full w-full object-cover"
+                    />
+                  </span>
+                  <span className="text-xl font-medium leading-none text-white">{profile.name}</span>
+                </button>
+              );
+            })}
           </div>
-          <p className="mt-5 text-[11px] font-black uppercase tracking-[0.32em] text-orange-300/75">
-            AI comedian
-          </p>
-          <h1 id="roastie-title" className="font-display mt-1 text-5xl leading-none tracking-tight text-orange-50">
-            Roastie
-          </h1>
-          <p className="mt-3 max-w-[280px] text-sm leading-relaxed text-white/55">
-            Your camera. His material. Pick the call you want to answer.
-          </p>
+          <div className="puppet-profile-dots" aria-label="Puppet selection">
+            {PUPPET_PROFILES.map((profile) => (
+              <button
+                key={profile.id}
+                type="button"
+                aria-label={`Show ${profile.name}`}
+                className={profile.id === selectedProfileId ? "is-selected" : ""}
+                onClick={() => selectProfile(profile)}
+              />
+            ))}
+          </div>
         </section>
 
-      <div className="landing-actions">
-        {error && (
-          <div className="mb-6 rounded-xl border border-red-500/50 bg-red-950/70 px-5 py-3 text-sm text-red-100">
-            {error}
-          </div>
-        )}
-
-        {IS_DEV && (
-          <>
-            <select
-              data-testid="roast-model-select"
-              value={roastModel}
-              onChange={(e) => setRoastModel(e.target.value as RoastModelId)}
-              className="mb-2 w-full rounded-xl border border-orange-300/25 bg-white/10 px-3 py-2 font-mono text-sm text-orange-200 outline-none transition-colors hover:border-orange-300/50"
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.id} value={m.id} className="bg-gray-950 text-white">
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <label className="mb-2 flex cursor-pointer items-center gap-2 font-mono text-sm text-purple-200">
-              <input
-                type="checkbox"
-                checked={cannedIntro}
-                onChange={(e) => setCannedIntro(e.target.checked)}
-                className="h-4 w-4 accent-purple-400 cursor-pointer"
-              />
-              Canned intro (instant video-call opener, no LLM greeting)
-            </label>
-            <label className="mb-5 flex cursor-pointer items-center gap-2 font-mono text-sm text-purple-200">
-              <input
-                type="checkbox"
-                checked={llmQuestions}
-                onChange={(e) => setLlmQuestions(e.target.checked)}
-                className="h-4 w-4 accent-purple-400 cursor-pointer"
-              />
-              LLM-generated questions (simple/closed, repeat-aware)
-            </label>
-          </>
-        )}
-
-        <label className="mb-4 flex w-full cursor-pointer select-none items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3.5 transition-colors hover:bg-white/[0.07]">
-          <input
-            type="checkbox"
-            checked={locationConsent}
-            onChange={(e) => setLocationConsent(e.target.checked)}
-            className="h-5 w-5 flex-shrink-0 cursor-pointer rounded accent-orange-500"
-          />
-          <span className="text-left text-sm text-white/62 transition-colors">
-            Share my location (just for jokes)
-          </span>
-        </label>
-
-        <div className="mb-5 grid w-full grid-cols-2 rounded-full border border-white/10 bg-white/10 p-1">
-          {(["clean", "vulgar"] as ContentMode[]).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setContentMode(mode)}
-              className={`rounded-full px-5 py-2 text-sm font-bold capitalize transition-all ${
-                contentMode === mode
-                  ? "bg-orange-100 text-black shadow"
-                  : "text-white/50 hover:text-white/85"
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-
-        {PAYMENTS_ENABLED && (
-          <div className="mb-6 w-full rounded-2xl border border-orange-300/20 bg-orange-950/20 p-3 text-left">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-orange-200/70">
-                Roast Passes
-              </span>
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/70">
-                {paymentStatus?.credits ?? 0} credit{(paymentStatus?.credits ?? 0) === 1 ? "" : "s"}
-              </span>
+        <section className="puppet-line-controls" aria-label="Call options">
+          {error && (
+            <div className="w-full rounded-xl border border-red-500/50 bg-red-950/70 px-4 py-2 text-sm text-red-100">
+              {error}
             </div>
-            {featured && (
-              <button
-                type="button"
-                onClick={() => handleCheckout(featured.sku)}
-                disabled={paymentBusy !== null || paymentStatus?.configured === false}
-                className="mb-2 w-full rounded-xl bg-orange-100 px-4 py-3 text-left text-black transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+          )}
+
+          {IS_DEV && (
+            <div className="grid w-full gap-2">
+              <select
+                data-testid="roast-model-select"
+                value={roastModel}
+                onChange={(event) => setRoastModel(event.target.value as RoastModelId)}
+                className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-2 font-mono text-xs text-white/80 outline-none"
               >
-                <span className="block text-sm font-black">
-                  {featured.name} · {featured.credits} for {formatUsd(featured.amountCents)}
-                </span>
-                <span className="text-xs text-black/60">{featured.description}</span>
-              </button>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              {products.filter((product) => product.sku !== featured?.sku).slice(0, 2).map((product) => (
+                {MODEL_OPTIONS.map((model) => (
+                  <option key={model.id} value={model.id} className="bg-gray-950 text-white">
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+              <label className="flex cursor-pointer items-center gap-2 font-mono text-xs text-purple-200">
+                <input
+                  type="checkbox"
+                  checked={cannedIntro}
+                  onChange={(event) => setCannedIntro(event.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-purple-400"
+                />
+                Legacy canned intro
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 font-mono text-xs text-purple-200">
+                <input
+                  type="checkbox"
+                  checked={llmQuestions}
+                  onChange={(event) => setLlmQuestions(event.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-purple-400"
+                />
+                LLM questions
+              </label>
+            </div>
+          )}
+
+          <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3">
+            <div className="grid grid-cols-2 rounded-full border border-white/10 bg-white/10 p-1">
+              {(["clean", "vulgar"] as ContentMode[]).map((mode) => (
                 <button
-                  key={product.sku}
+                  key={mode}
                   type="button"
-                  onClick={() => handleCheckout(product.sku)}
-                  disabled={paymentBusy !== null || paymentStatus?.configured === false}
-                  className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-left text-xs text-white/70 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => setContentMode(mode)}
+                  className={`rounded-full px-4 py-2 text-sm font-bold capitalize transition-all ${
+                    contentMode === mode
+                      ? "bg-white text-black shadow"
+                      : "text-white/55 hover:text-white"
+                  }`}
                 >
-                  <span className="block font-bold text-white">{formatUsd(product.amountCents)}</span>
-                  <span>{product.credits} credit{product.credits === 1 ? "" : "s"}</span>
+                  {mode}
                 </button>
               ))}
             </div>
-            {paymentStatus?.configured === false && (
-              <p className="mt-3 text-xs text-red-200/80">Square env vars are missing.</p>
-            )}
+            <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-white/65">
+              <input
+                type="checkbox"
+                checked={locationConsent}
+                onChange={(event) => setLocationConsent(event.target.checked)}
+                className="h-5 w-5 cursor-pointer rounded accent-white"
+              />
+              Location
+            </label>
           </div>
-        )}
 
-        <div className="grid w-full grid-cols-2 gap-3">
+          {PAYMENTS_ENABLED && (
+            <div className="w-full rounded-2xl border border-white/10 bg-white/[0.045] p-3 text-left">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-xs font-bold uppercase tracking-[0.2em] text-white/65">Passes</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/70">
+                  {paymentStatus?.credits ?? 0} credit{(paymentStatus?.credits ?? 0) === 1 ? "" : "s"}
+                </span>
+              </div>
+              {featured && (
+                <button
+                  type="button"
+                  onClick={() => handleCheckout(featured.sku)}
+                  disabled={paymentBusy !== null || paymentStatus?.configured === false}
+                  className="mb-2 w-full rounded-xl bg-white px-4 py-3 text-left text-black disabled:opacity-50"
+                >
+                  <span className="block text-sm font-black">
+                    {featured.name} · {featured.credits} for {formatUsd(featured.amountCents)}
+                  </span>
+                  <span className="text-xs text-black/60">{featured.description}</span>
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {products.filter((product) => product.sku !== featured?.sku).slice(0, 2).map((product) => (
+                  <button
+                    key={product.sku}
+                    type="button"
+                    onClick={() => handleCheckout(product.sku)}
+                    disabled={paymentBusy !== null || paymentStatus?.configured === false}
+                    className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-left text-xs text-white/70 disabled:opacity-50"
+                  >
+                    <span className="block font-bold text-white">{formatUsd(product.amountCents)}</span>
+                    <span>{product.credits} credit{product.credits === 1 ? "" : "s"}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button
+            type="button"
+            data-testid="call-selected-puppet"
+            aria-label={`Call ${selectedProfile.name}`}
+            aria-busy={paymentBusy === "redeem"}
             onClick={() => {
-              setExperienceType("roast");
+              setExperienceType(selectedProfile.experienceType);
               void handleStart();
             }}
             disabled={!hydrated || paymentBusy !== null}
-            className="landing-answer-button bg-orange-600 text-white shadow-orange-950/50 hover:bg-orange-500"
+            className="puppet-call-button"
           >
-            {paymentBusy === "redeem" ? "Starting..." : "Roast Me"}
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-9 w-9">
+              <path fill="currentColor" d="M6.6 10.8c3.48-2.15 7.32-2.15 10.8 0l1.26-1.72a1.55 1.55 0 0 1 2.16-.34l1.17.86c.68.5.83 1.45.34 2.13l-2.2 3a1.55 1.55 0 0 1-2.13.36l-1.16-.82a1.52 1.52 0 0 1-.54-1.76 8.85 8.85 0 0 0-8.6 0 1.52 1.52 0 0 1-.54 1.76L6 15.09a1.55 1.55 0 0 1-2.13-.36l-2.2-3a1.54 1.54 0 0 1 .34-2.13l1.17-.86a1.55 1.55 0 0 1 2.16.34L6.6 10.8Z" />
+            </svg>
           </button>
-          <button
-            onClick={() => {
-              setExperienceType("toast");
-              void handleStart();
-            }}
-            disabled={!hydrated || paymentBusy !== null}
-            className="landing-answer-button bg-amber-200 text-amber-950 shadow-amber-900/40 hover:bg-amber-100"
-          >
-            {paymentBusy === "redeem" ? "Starting..." : "Toast Me"}
-          </button>
-        </div>
-      </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
+
+interface PuppetProfile {
+  id: string;
+  name: string;
+  experienceType: "roast" | "toast";
+  portraitSrc: string;
+}
+
+const PUPPET_PROFILES: readonly PuppetProfile[] = [
+  { id: "roasty", name: "Roasty", experienceType: "roast", portraitSrc: "/puppets/roasty.png" },
+  { id: "toastie", name: "Toastie", experienceType: "toast", portraitSrc: "/puppets/toastie.png" },
+];

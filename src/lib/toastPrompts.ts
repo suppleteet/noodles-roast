@@ -243,8 +243,9 @@ frame for one quick warm assumption-shaped observation, then signal you're start
 toast. NOT a roast. NOT mean. Warm. One sentence, max 22 words. End on energy.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
 
-    vision_opening: `TASK: First post-greeting observation. Use what you SEE to land one toast-shaped
-beat about the user — confident drunk-assumption energy. Max 22 words. End on energy.${vulgarSuffix}
+    vision_opening: `TASK: First substantive spoken content of the call. Use what you SEE to land one
+toast-shaped beat about the user — confident drunk-assumption energy. Do not greet, ask a question,
+or refer to an earlier intro. Max 22 words. End on energy.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
 
     answer_roast: `TASK: The user just answered your self-interruption question. You had been mid-toast,

@@ -4,6 +4,7 @@ import { upload } from "@vercel/blob/client";
 import { useSessionStore } from "@/store/useSessionStore";
 import FeedbackBox from "@/components/ui/FeedbackBox";
 import { useDevUnlock } from "@/lib/devUnlock";
+import { recordingPreviewSize } from "@/lib/recordingLayout";
 
 interface SaveVideoResponse {
   folder?: string;
@@ -41,6 +42,8 @@ export default function ShareScreen() {
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoAspectRatio, setVideoAspectRatio] = useState("1 / 1");
+  const [videoDimensions, setVideoDimensions] = useState({ width: 1, height: 1 });
+  const [viewport, setViewport] = useState({ width: 390, height: 844 });
   const [fancyName, setFancyName] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [savedFolder, setSavedFolder] = useState<string | null>(null);
@@ -61,6 +64,25 @@ export default function ShareScreen() {
     [fancyName],
   );
   const hasNativeShare = typeof navigator !== "undefined" && "share" in navigator;
+  const previewSize = useMemo(
+    () => recordingPreviewSize(
+      videoDimensions.width,
+      videoDimensions.height,
+      viewport.width,
+      viewport.height,
+    ),
+    [videoDimensions, viewport],
+  );
+
+  useEffect(() => {
+    const updateViewport = () => setViewport({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
 
   const canNativeShare = useMemo(() => {
     if (!shareBlob || !hasNativeShare) return false;
@@ -145,6 +167,7 @@ export default function ShareScreen() {
   useEffect(() => {
     if (!videoBlob) return;
     setVideoAspectRatio("1 / 1");
+    setVideoDimensions({ width: 1, height: 1 });
     const url = URL.createObjectURL(videoBlob);
     setVideoUrl(url);
     return () => URL.revokeObjectURL(url);
@@ -259,8 +282,8 @@ export default function ShareScreen() {
   const buttonsDisabled = converting || !shareBlob || shareBlob.size === 0;
 
   return (
-    <div data-testid="share-screen" className="flex h-full min-h-0 flex-col items-center justify-start overflow-y-auto bg-[radial-gradient(circle_at_50%_12%,rgba(249,115,22,0.16),transparent_32%),#030201] px-5 py-8 text-center text-white">
-      <div data-testid="share-preview" className="relative mb-6 w-full max-w-sm">
+    <div data-testid="share-screen" className="share-screen flex h-full min-h-0 flex-col items-center justify-start overflow-y-auto bg-[radial-gradient(circle_at_50%_12%,rgba(249,115,22,0.16),transparent_32%),#030201] px-5 py-8 text-center text-white">
+      <div data-testid="share-preview" className="relative mb-4 flex w-full max-w-sm justify-center">
         {IS_DEV && (
           <button
             onClick={handleOpenFolder}
@@ -276,7 +299,11 @@ export default function ShareScreen() {
         <div
           data-testid="share-video-shell"
           className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-gray-950 shadow-2xl shadow-orange-950/30"
-          style={{ aspectRatio: videoAspectRatio }}
+          style={{
+            aspectRatio: videoAspectRatio,
+            width: previewSize.width,
+            height: previewSize.height,
+          }}
         >
           <video
             ref={videoRef}
@@ -285,6 +312,7 @@ export default function ShareScreen() {
               const { videoWidth, videoHeight } = event.currentTarget;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspectRatio(`${videoWidth} / ${videoHeight}`);
+                setVideoDimensions({ width: videoWidth, height: videoHeight });
               }
             }}
             onEnded={() => setPlaying(false)}
@@ -319,7 +347,7 @@ export default function ShareScreen() {
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap justify-center gap-3">
+      <div data-testid="share-actions" className="mb-3 flex flex-wrap justify-center gap-3">
         {hasNativeShare && (
           <button
             onClick={handleShare}

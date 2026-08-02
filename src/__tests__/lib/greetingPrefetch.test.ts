@@ -80,6 +80,13 @@ describe("prefetchParallelVisionAndGreeting", () => {
     const result = await promise;
 
     expect(result?.jokes[0]?.text).toBe(DIRECT_JOKE.jokes[0].text);
+    const request = (fetch as ReturnType<typeof vi.fn>).mock.calls.find((call) =>
+      String(call[0]).includes("/api/generate-joke"),
+    );
+    expect(JSON.parse(String(request?.[1]?.body ?? "{}"))).toMatchObject({
+      context: "vision_opening",
+      imageBase64: "FAKE_IMAGE_BASE64",
+    });
   });
 
   it("settles vision observations into the store even when direct-image won the race", async () => {

@@ -17,6 +17,8 @@ const defaults = {
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   rephraseTimeoutMs: 1200,       // inline question-rephrase race cap. 450ms never beat a cold LLM, so questions shipped generic/impersonal (no name) and read canned. Higher = personalization lands; worst case is this much dead air before the bridged-original fallback.
   transcriptRepairTimeoutMs: 1200, // repair only entity-like answers and never let the utility call dominate turn latency
+  yesNoBranchSelectionWaitMs: 250, // brief cache-hit grace; miss falls through to normal streaming generation
+  yesNoBranchPrefetchTimeoutMs: 6000, // speculative branches are stateless and disposable — never leave them running indefinitely
   visionIntervalMs: 5000,        // how often vision analyze fires
   greetingVisionTimeoutMs: 1500, // max wait for prefetched vision greeting before speaking an instant fallback — the real greeting chains after the fallback when it lands, so firing this is cheap
   firstSpeechBeatMs: 250,        // brief reveal beat before first TTS; keep TTFS low while avoiding an abrupt entrance

@@ -14,11 +14,11 @@ import {
 export type ContentMode = "clean" | "vulgar";
 
 /**
- * Top-level experience the user picks on the landing screen — two side-by-side
- * buttons, "Roast Me" (orange) vs "Toast Me" (champagne). Toast is a parallel
- * experience to the standard roast: a drunk woman at a wedding mic giving a
- * toast to the user, who she's pretending she knows. Same brain state machine,
- * different question bank, prompts, scripted lines, voice, and puppet palette.
+ * Top-level puppet the user picks from the Puppet Line carousel. Roasty maps to
+ * the standard roast experience; Toastie maps to a drunk woman at a wedding mic
+ * giving a toast to the user, who she's pretending she knows. Same brain state
+ * machine, different question bank, prompts, scripted lines, voice, and puppet
+ * palette.
  *
  * In "toast": persona is ignored (one character).
  */
@@ -64,23 +64,13 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 };
 
 /**
- * Toast's starting voice — seeded into `voiceSettings` when the user picks Toast,
- * so the debug VoiceSliders still drive her live. Tuned for DRUNK, not loud:
- *  - LOW stability is what reads as drunk — loose, wandering, slurry, emotional.
- *    (High stability sounds flat/sober/boring; that was the earlier mistake.)
- *    Left high enough that the energetic/laugh motion deltas (−0.2/−0.3) can dip
- *    it further without turning to warble.
- *  - `style` moderate + `use_speaker_boost` OFF keeps her from getting loud or
- *    clipping (speaker-boost was the gain that pushed the cloned voice hot).
- *  - Slower `speed` for the drawl.
+ * Toastie deliberately uses the exact same synthesis profile as Roastie. The
+ * previous low-stability, slowed-down "drunk" profile dipped to the ElevenLabs
+ * stability floor after motion deltas and sounded scratchy/warbled in real
+ * Android sessions. Character comes from the distinct voice and writing, not
+ * degraded synthesis quality.
  */
-export const TOAST_VOICE_SETTINGS: VoiceSettings = {
-  stability: 0.4,           // LOW = drunk/loose/slurry (was wrongly raised to 0.85)
-  similarity_boost: 0.7,
-  style: 0.5,               // expressive but not the maxed-out 1.0 that read as loud
-  speed: 0.8,               // drunk drawl — 0.9 read as barely-slower-than-sober; 0.8 is audibly wasted (EL floor 0.7, motion deltas clamp there)
-  use_speaker_boost: false, // EL speaker-boost raises output level → hot/clipping. Off for Toast.
-};
+export const TOAST_VOICE_SETTINGS: VoiceSettings = { ...DEFAULT_VOICE_SETTINGS };
 
 /** Ambient context derived from geolocation — time-of-day, weather, city. */
 export interface AmbientContext {
@@ -135,9 +125,7 @@ export interface RoastSentence {
 interface SessionState {
   phase: SessionPhase;
   sessionMode: SessionMode;
-  /** When true (DEFAULT — mobile networks made the LLM greeting too flaky:
-   *  a missed 1.5s prefetch race opens the show with the canned "hazard pay"
-   *  fallback), the session opens with an instant per-persona canned
+  /** When true (legacy dev experiment), the session opens with an instant per-persona canned
    *  video-call intro (no LLM greeting) that also asks who the user is —
    *  banks live in src/lib/comedians/*.ts. Roast experience only; dev
    *  checkbox on the landing screen can turn it off to compare. */
@@ -280,14 +268,12 @@ interface SessionState {
   reset: () => void;
 }
 
-/** E2E override for the canned-intro default: the Playwright suites drive the
- *  LLM-greeting show (greeting → ask_question …) and inject
- *  `window.__CANNED_INTRO_DEFAULT__ = false` before page scripts run
- *  (comedianBrainDriver). Production default is ON — see the cannedIntro doc. */
+/** Production starts with the generated vision joke. The override remains for
+ *  explicit experiments, but the legacy canned opener is off by default. */
 const cannedIntroDefault: boolean = (() => {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   const flag = (window as { __CANNED_INTRO_DEFAULT__?: unknown }).__CANNED_INTRO_DEFAULT__;
-  return typeof flag === "boolean" ? flag : true;
+  return typeof flag === "boolean" ? flag : false;
 })();
 
 const initialState = {

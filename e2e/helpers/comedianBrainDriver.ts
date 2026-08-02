@@ -14,6 +14,8 @@ export type JokeApiRequest = {
   previousObservations?: string[];
   conversationSoFar?: string[];
   imageBase64?: string;
+  stateless?: boolean;
+  branchPrefetch?: "yes" | "no";
 };
 
 const DEFAULT_JOKE_RESPONSE: JokeResponse = {
@@ -83,7 +85,19 @@ export class ComedianBrainDriver extends LiveSessionMock {
       const body = route.request().postDataJSON() as JokeApiRequest;
       this.jokeRequests.push(body);
 
-      const response = this.jokeResponseQueue.shift() ?? this.defaultJokeResponse;
+      // Binary prefetches are inert background work. Give them deterministic
+      // responses without consuming a response queued for the foreground show.
+      const response = body.branchPrefetch
+        ? {
+            relevant: true,
+            jokes: [{
+              text: `Prefetched ${body.branchPrefetch} response.`,
+              motion: "smug" as const,
+              intensity: 0.7,
+              score: 7,
+            }],
+          }
+        : this.jokeResponseQueue.shift() ?? this.defaultJokeResponse;
       await route.fulfill({
         status: 200,
         contentType: "application/json",

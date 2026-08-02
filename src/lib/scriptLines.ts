@@ -118,6 +118,13 @@ export const ANSWER_FALLBACK_ROASTS = [
 /** Spoken if the very first greeting/vision joke fails to generate. */
 export const GREETING_FALLBACK = "The camera took one look and requested hazard pay.";
 
+/** The only speech allowed ahead of a slow startup vision joke. It carries no
+ *  substantive reply, question, or roast, so the generated visual joke still
+ *  owns the opening beat. */
+export const VISION_GREETING_BRIDGE = "Well, hello there.";
+export const TOAST_VISION_GREETING_BRIDGE = "Oh—hi!";
+export const TOAST_VISION_FALLBACK = "Look at you—already giving the toast something to recover from.";
+
 // ─── Technical-difficulties exit ────────────────────────────────────────────
 /** Spoken when the joke-generation watchdog fires — the LLM hung past
  *  COMEDIAN_CONFIG.generationTimeoutMs and the puppet is about to fall back to

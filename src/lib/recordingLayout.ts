@@ -10,6 +10,28 @@ export interface RecordingSize {
   height: number;
 }
 
+/** Keep the recorded-call preview subordinate to the phone's action controls. */
+export function recordingPreviewSize(
+  videoWidth: number,
+  videoHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): RecordingSize {
+  const safeVideoWidth = videoWidth > 0 ? videoWidth : 1;
+  const safeVideoHeight = videoHeight > 0 ? videoHeight : 1;
+  const phone = viewportWidth < 768;
+  const maxWidth = Math.max(120, Math.min(384, viewportWidth - (phone ? 32 : 48)));
+  const heightShare = viewportHeight <= 500 ? 0.32 : 0.44;
+  const maxHeight = phone
+    ? Math.max(96, Math.min(420, viewportHeight * heightShare))
+    : Math.min(560, viewportHeight * 0.62);
+  const scale = Math.min(maxWidth / safeVideoWidth, maxHeight / safeVideoHeight);
+  return {
+    width: Math.max(2, Math.round(safeVideoWidth * scale)),
+    height: Math.max(2, Math.round(safeVideoHeight * scale)),
+  };
+}
+
 function even(value: number): number {
   const rounded = Math.max(2, Math.round(value));
   return rounded % 2 === 0 ? rounded : rounded + 1;

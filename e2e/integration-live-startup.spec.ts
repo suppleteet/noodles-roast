@@ -95,9 +95,9 @@ test.describe("Real live startup", () => {
     await page.getByTestId("build-timestamp").click();
     await page.getByTestId("roast-model-select").selectOption(TEST_MODEL);
     await page
-      .getByRole("checkbox", { name: "Share my location (just for jokes)" })
+      .getByRole("checkbox", { name: "Location" })
       .uncheck();
-    await page.getByRole("button", { name: "Roast Me" }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
 
     const hud = page.getByTestId("hud-overlay");
     await expect(hud).toBeVisible({ timeout: 20_000 });

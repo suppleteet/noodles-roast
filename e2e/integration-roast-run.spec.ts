@@ -85,7 +85,7 @@ test.describe("Integration Roast Run", () => {
       await page.getByTestId("roast-model-select").selectOption(TEST_MODEL);
       console.log(`[integration] selected model: ${TEST_MODEL}`);
     }
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
     await driver.waitForConnect();
 
     await page.locator("[data-testid='hud-overlay']").waitFor({ timeout: 15_000 });

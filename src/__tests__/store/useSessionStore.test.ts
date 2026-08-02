@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useSessionStore, pickDifferentModel } from "@/store/useSessionStore";
+import {
+  DEFAULT_VOICE_SETTINGS,
+  TOAST_VOICE_SETTINGS,
+  useSessionStore,
+  pickDifferentModel,
+} from "@/store/useSessionStore";
 
 beforeEach(() => {
   useSessionStore.getState().reset();
@@ -402,6 +407,16 @@ describe("transcript history", () => {
       "I'm a dentist",
     ]);
     expect(JSON.parse(localStorage.getItem("roastie-transcript") ?? "[]")).toEqual(history);
+  });
+});
+
+describe("experience voice profile", () => {
+  it("uses Roastie's complete voice settings for Toastie", () => {
+    expect(TOAST_VOICE_SETTINGS).toEqual(DEFAULT_VOICE_SETTINGS);
+
+    useSessionStore.getState().setExperienceType("toast");
+
+    expect(useSessionStore.getState().voiceSettings).toEqual(DEFAULT_VOICE_SETTINGS);
   });
 });
 

@@ -3,6 +3,7 @@ import {
   containRecordingRect,
   coverSourceRect,
   mapElementToRecording,
+  recordingPreviewSize,
   recordingSizeForFrame,
 } from "@/lib/recordingLayout";
 
@@ -44,6 +45,17 @@ describe("recording layout", () => {
       y: 555,
       width: 1080,
       height: 810,
+    });
+  });
+
+  it("keeps phone previews compact enough for the share controls", () => {
+    expect(recordingPreviewSize(592, 1280, 390, 844)).toEqual({
+      width: 172,
+      height: 371,
+    });
+    expect(recordingPreviewSize(1280, 592, 568, 320)).toEqual({
+      width: 221,
+      height: 102,
     });
   });
 });

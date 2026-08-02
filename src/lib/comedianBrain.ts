@@ -38,12 +38,14 @@ import {
   CONFIRM_DENIED_LINE,
   ANSWER_FALLBACK_ROASTS,
   GREETING_FALLBACK,
+  VISION_GREETING_BRIDGE,
+  TOAST_VISION_GREETING_BRIDGE,
+  TOAST_VISION_FALLBACK,
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
   TECHNICAL_DIFFICULTIES_LINES,
   NOISE_ANSWER_LINES,
   TOAST_NOISE_ANSWER_LINES,
-  TOAST_GREETINGS,
   TOAST_CONFIRM_ECHO_TEMPLATES,
   TOAST_CONFIRM_TAIL_FILLERS,
   TOAST_REJECT_TEMPLATES,
@@ -68,6 +70,11 @@ import {
   type TranscriptRepairRequest,
   type TranscriptRepairResult,
 } from "@/lib/transcriptRepair";
+import {
+  classifyClearYesNoAnswer,
+  isGenuinelyYesNoQuestion,
+  type YesNoAnswer,
+} from "@/lib/yesNoBranching";
 
 const CONTEXTUAL_QUESTION_TIMEOUT_MS = 5_000;
 
@@ -406,6 +413,26 @@ export class ComedianBrain {
     result: Promise<JokeResponse | null>;
   } | null = null;
 
+  /** Stateless Yes/No responses generated while a genuinely binary question
+   *  is on the floor. Neither branch can speak until the finalized answer
+   *  explicitly selects it; ambiguous replies cancel both and use the normal
+   *  answer pipeline. */
+  private yesNoBranchPrefetch: {
+    questionId: string;
+    questionText: string;
+    startedAt: number;
+    yes: {
+      abort: AbortController;
+      timeout: ReturnType<typeof setTimeout>;
+      result: Promise<JokeResponse | null>;
+    };
+    no: {
+      abort: AbortController;
+      timeout: ReturnType<typeof setTimeout>;
+      result: Promise<JokeResponse | null>;
+    };
+  } | null = null;
+
   // Hopper
   private jokeHopper: ScoredJoke[] = [];
   private hopperAbort: AbortController | null = null;
@@ -472,7 +499,7 @@ export class ComedianBrain {
   private visionReadyForGreeting = false;
   private greetingTtsDrained = false;
   private greetingSpeechQueued = false; // true once greeting generation resolves and speech is queued
-  private greetingFallbackSpoken = false; // true once the instant canned fallback fired — late prefetch chains instead of being discarded
+  private greetingBridgeSpoken = false; // minimal non-substantive bridge while the real vision joke stays authoritative
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
 
@@ -539,6 +566,7 @@ export class ComedianBrain {
     this.consecutiveSilentQuestions = 0;
     this.visionOnlyMode = false;
     this._cancelPipelinePrefetch();
+    this._cancelYesNoBranchPrefetch();
     this._cancelRephrase();
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
@@ -563,6 +591,7 @@ export class ComedianBrain {
   stop(): void {
     this._clearTimers();
     this._cancelSpeculative();
+    this._cancelYesNoBranchPrefetch();
     this._cancelHopper();
     this._cancelRephrase();
     // Invalidate async delivery callbacks before aborting repair. The abort
@@ -682,6 +711,22 @@ export class ComedianBrain {
     if (this.state !== "wait_answer" && this.state !== "pre_generate") return;
     const answer = this.answerBuffer.trim();
     if (!answer) return; // no transcript yet — let the silence timer handle it
+
+    // A bare, unfinalized "yes"/"no" is exactly where speculative branching
+    // saves the most time — and exactly where a late "but actually..." could
+    // select the wrong branch. Give Gemini one finalization grace window; a
+    // finished segment still commits immediately below.
+    if (
+      !this.sttHadFinalSegment &&
+      this.currentQuestion &&
+      isGenuinelyYesNoQuestion(this.currentQuestion.question) &&
+      classifyClearYesNoAnswer(answer)
+    ) {
+      this.deps.logTiming(`brain: VAD deferred unfinalized binary answer — "${answer}"`);
+      this._clearTimers();
+      this._startAnswerSilenceTimer();
+      return;
+    }
 
     // Silero often fires on a mid-sentence breath before Gemini marks the segment final.
     // Completing here queues the generating filler and cuts the user off. Defer to the
@@ -1208,7 +1253,7 @@ export class ComedianBrain {
     this.micMode = "off";
     this.greetingTtsDrained = false;
     this.greetingSpeechQueued = false;
-    this.greetingFallbackSpoken = false;
+    this.greetingBridgeSpoken = false;
     this.visionReadyForGreeting = true;
 
     this.deps.setMotion("thinking", 0.6);
@@ -1285,7 +1330,7 @@ export class ComedianBrain {
       const observations = this.deps.getObservations();
       const frame = this.cameraAvailable ? this.deps.captureFrame() : undefined;
       this.visionJokePrefetch = this._generateJoke({
-        context: "greeting",
+        context: "vision_opening",
         model: VISION_MODEL, // greeting always uses Gemini — fastest + best at vision
         observations,
         imageBase64: frame,
@@ -1302,6 +1347,10 @@ export class ComedianBrain {
         clearTimeout(this.greetingVisionTimeout);
         this.greetingVisionTimeout = null;
       }
+      // A minimal bridge may already have drained while generation was still
+      // running. Reset the drain gate before queueing the substantive vision
+      // joke so the show cannot advance to a question ahead of it.
+      this.greetingTtsDrained = false;
       if (!response || response.jokes.length === 0) {
         const fallback = this._greetingFallbackLine();
         const [fbMotion, fbIntensity] = this._openerRegister();
@@ -1351,26 +1400,22 @@ export class ComedianBrain {
       this.visionJokePrefetch,
       this.deps.prefetchedGreetingAudio ?? Promise.resolve(null),
     ]).then(([response, audioBuffer]) => {
-      if (this.greetingFallbackSpoken) {
-        this._handleLateGreeting(response);
-        return;
-      }
       queueGreeting(response, audioBuffer);
     });
     this.greetingVisionTimeout = setTimeout(() => {
-      if (this.state !== "greeting" || this.greetingSpeechQueued) return;
-      this.greetingFallbackSpoken = true;
-      this.deps.logTiming("brain: greeting prefetch slow — speaking instant fallback, real greeting will chain");
+      if (this.state !== "greeting" || this.greetingSpeechQueued || this.greetingBridgeSpoken) return;
+      this.greetingBridgeSpoken = true;
+      this.deps.logTiming("brain: startup vision joke slow — speaking minimal bridge, vision joke still owns opening");
       const [fbMotion, fbIntensity] = this._openerRegister();
-      queueGreeting({
-        relevant: true,
-        jokes: [{
-          motion: fbMotion,
-          intensity: fbIntensity,
-          text: this._greetingFallbackLine(),
-          score: 6,
-        }],
-      }, null);
+      const bridge = this._isToast() ? TOAST_VISION_GREETING_BRIDGE : VISION_GREETING_BRIDGE;
+      this.deps.queueSpeak(
+        bridge,
+        fbMotion,
+        fbIntensity,
+        undefined,
+        this._openerVoiceOverride(fbMotion, fbIntensity),
+      );
+      this._addLedger("reaction", bridge, []);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 
@@ -1411,34 +1456,9 @@ export class ComedianBrain {
   /** Canned greeting line matched to the experience — Toast must never open in the roast voice. */
   private _greetingFallbackLine(): string {
     if (this._isToast()) {
-      return TOAST_GREETINGS[Math.floor(Math.random() * TOAST_GREETINGS.length)];
+      return TOAST_VISION_FALLBACK;
     }
     return GREETING_FALLBACK;
-  }
-
-  /**
-   * The instant canned fallback already played because the greeting prefetch missed
-   * the timeout. Don't waste the real joke when it finally lands: chain it after the
-   * fallback if we're still in greeting, otherwise drop it in the hopper so it gets
-   * delivered after the current beat. (Toast has no hopper — discard there.)
-   */
-  private _handleLateGreeting(response: JokeResponse | null): void {
-    if (!response || response.jokes.length === 0) return;
-    const joke = response.jokes[0];
-    const text = compactGreetingText(joke.text);
-    const motion = joke.motion as import("@/lib/motionStates").MotionState;
-    if (this.state === "greeting") {
-      this.deps.logTiming("brain: late greeting arrived — chaining after fallback");
-      this.deps.queueSpeak(text, joke.motion, joke.intensity);
-      this._addLedger("joke", text, response.tags ?? []);
-      this.lastJokeMotion = motion;
-      this.lastJokeIntensity = joke.intensity;
-      return;
-    }
-    if (this._isToast()) return;
-    this.deps.logTiming("brain: late greeting arrived post-advance — adding to hopper");
-    // Ledger entry happens at delivery time when the hopper joke is popped.
-    this._addToHopper(text, motion, joke.intensity, joke.score ?? 8);
   }
 
   private _maybeAdvanceFromGreeting(): void {
@@ -1495,6 +1515,7 @@ export class ComedianBrain {
       return;
     }
     this._transition("ask_question");
+    this._cancelYesNoBranchPrefetch();
     this.answerBuffer = "";
     this.earlyListenActivated = false;
     this.prodCount = 0;
@@ -1513,6 +1534,7 @@ export class ComedianBrain {
       this.deps.setMotion(this.lastJokeMotion, this.lastJokeIntensity);
       const text = this._pickQuestionText(this.currentQuestion);
       this.deps.queueSpeak(text, this.lastJokeMotion, this.lastJokeIntensity);
+      this._startYesNoBranchPrefetch(text);
       spokenQuestionText = text;
     } else if (this.visionOnlyMode) {
       // Vision-only: no more questions, wait in check_vision for interesting changes
@@ -2363,6 +2385,21 @@ export class ComedianBrain {
     const q = this.currentQuestion;
     const conversationSoFar = this._getLedgerContext();
 
+    // A binary branch was generated while the user answered. Only a clear
+    // finalized yes/no for this exact question may select it; otherwise this
+    // returns false and the ordinary answer-aware stream below owns delivery.
+    if (
+      this._consumeYesNoBranchPrefetch(
+        answer,
+        q,
+        conversationSoFar,
+        fillerAlreadySaid,
+        this.deliveryGeneration,
+      )
+    ) {
+      return;
+    }
+
     // Check if speculative result is still usable
     const spec = this.speculativeRequest;
     if (spec && isSimilarAnswer(spec.snapshot, answer)) {
@@ -2957,6 +2994,10 @@ export class ComedianBrain {
    */
   private _queueQuestionSpeech(text: string): void {
     this.deps.queueSpeak(text, this.lastJokeMotion, this.lastJokeIntensity);
+    // Begin both inert binary branches as soon as the actual spoken wording is
+    // queued. This overlaps question TTS plus the caller's answer time instead
+    // of waiting until the question audio has completely drained.
+    this._startYesNoBranchPrefetch(text);
   }
 
   /** Generate a contextual question via LLM based on what we see + know. */
@@ -3249,7 +3290,121 @@ export class ComedianBrain {
     this.pipelinePrefetch = null;
   }
 
+  private _cancelYesNoBranchPrefetch(): void {
+    const prefetch = this.yesNoBranchPrefetch;
+    if (!prefetch) return;
+    for (const branch of [prefetch.yes, prefetch.no]) {
+      clearTimeout(branch.timeout);
+      branch.abort.abort();
+    }
+    this.yesNoBranchPrefetch = null;
+  }
+
+  /**
+   * Generate both binary outcomes while the user is answering. These calls are
+   * stateless so they cannot mutate/overlap the multi-turn comedian chat. The
+   * responses remain inert data until _consumeYesNoBranchPrefetch validates the
+   * final answer and the still-current question.
+   */
+  private _startYesNoBranchPrefetch(spokenQuestionText?: string): void {
+    this._cancelYesNoBranchPrefetch();
+    const question = this.currentQuestion;
+    const questionText = spokenQuestionText?.trim() || question?.question || "";
+    if (!question || !isGenuinelyYesNoQuestion(questionText)) return;
+
+    const createBranch = (answer: YesNoAnswer) => {
+      const abort = new AbortController();
+      const timeout = setTimeout(
+        () => abort.abort(),
+        COMEDIAN_CONFIG.yesNoBranchPrefetchTimeoutMs,
+      );
+      const result = this._generateJoke(
+        {
+          context: "answer_roast",
+          question: questionText,
+          userAnswer: answer === "yes" ? "Yes." : "No.",
+          fillerAlreadySaid: "brief acknowledgement",
+          jokesAlreadyDelivered: this._getDeliveredJokeTexts(),
+          conversationSoFar: this._getLedgerContext(),
+          knownFacts: this._getThrowbackContext(),
+          maxJokes: 1,
+          stateless: true,
+          branchPrefetch: answer,
+        },
+        abort.signal,
+      ).finally(() => clearTimeout(timeout));
+      return { abort, timeout, result };
+    };
+
+    this.yesNoBranchPrefetch = {
+      questionId: question.id,
+      questionText,
+      startedAt: Date.now(),
+      yes: createBranch("yes"),
+      no: createBranch("no"),
+    };
+    this.deps.logTiming(`brain: yes/no branches prefetched — "${questionText.slice(0, 60)}"`);
+  }
+
+  /** Returns true when branch selection owns delivery (hit or bounded miss). */
+  private _consumeYesNoBranchPrefetch(
+    answer: string,
+    q: ComedyQuestion | null,
+    conversationSoFar: string[],
+    fillerAlreadySaid: string | undefined,
+    generation: number,
+  ): boolean {
+    const classification = classifyClearYesNoAnswer(answer);
+    const prefetch = this.yesNoBranchPrefetch;
+    const questionStillMatches =
+      !!q &&
+      !!prefetch &&
+      prefetch.questionId === q.id;
+    if (!classification || !prefetch || !questionStillMatches) {
+      this._cancelYesNoBranchPrefetch();
+      return false;
+    }
+
+    const selected = prefetch[classification];
+    const rejected = prefetch[classification === "yes" ? "no" : "yes"];
+    clearTimeout(rejected.timeout);
+    rejected.abort.abort();
+    this.yesNoBranchPrefetch = null;
+
+    let selectionTimer: ReturnType<typeof setTimeout> | null = null;
+    const selectionTimeout = new Promise<null>((resolve) => {
+      selectionTimer = setTimeout(
+        () => resolve(null),
+        COMEDIAN_CONFIG.yesNoBranchSelectionWaitMs,
+      );
+    });
+    void Promise.race([selected.result, selectionTimeout]).then((response) => {
+      if (selectionTimer) clearTimeout(selectionTimer);
+      if (this.deliveryGeneration !== generation || this.state !== "generating") {
+        clearTimeout(selected.timeout);
+        selected.abort.abort();
+        return;
+      }
+      if (response?.jokes.length) {
+        this.deps.logTiming(
+          `brain: yes/no branch hit=${classification} ready in ${Date.now() - prefetch.startedAt}ms`,
+        );
+        this.enterDelivering(answer, response, fillerAlreadySaid);
+        return;
+      }
+
+      clearTimeout(selected.timeout);
+      selected.abort.abort();
+      this.deps.logTiming(
+        `brain: yes/no branch miss=${classification} after ${COMEDIAN_CONFIG.yesNoBranchSelectionWaitMs}ms — normal generation`,
+      );
+      this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
+    });
+    return true;
+  }
+
   private enterCheckVision(): void {
+    this._cancelYesNoBranchPrefetch();
     if (this.pendingWrapup) {
       this.enterWrapup();
       return;
@@ -4214,6 +4369,9 @@ export class ComedianBrain {
       /** Avoid contending with an in-flight multi-turn chat request. The caller
        *  must provide the conversation/known-fact context explicitly. */
       stateless?: boolean;
+      /** Diagnostics/test marker for inert speculative binary branches. The
+       *  API ignores this field when building the prompt. */
+      branchPrefetch?: YesNoAnswer;
     },
     signal?: AbortSignal,
   ): Promise<JokeResponse | null> {

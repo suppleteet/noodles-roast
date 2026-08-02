@@ -270,7 +270,7 @@ function MainApp() {
    * Fires immediately after the user grants permissions (post-click). Runs:
    *   - /api/prewarm-tts: warms EL DNS/TLS so the first real TTS request
    *     gets a faster WS handshake.
-   *   - prefetchParallelVisionAndGreeting: vision + direct-image joke in
+   *   - prefetchParallelVisionAndGreeting: vision + direct-image opening joke in
    *     parallel; returns the greeting JokeResponse.
    *   - prefetchGreetingAudio (chained off the joke): fires /api/tts-ws as
    *     soon as we have the joke text, accumulating audio chunks into a
@@ -297,7 +297,7 @@ function MainApp() {
     }
     const greetingPrefetchModulePromise = import("@/lib/greetingPrefetch");
 
-    // Canned intro (roast only): the brain opens with an instant canned line, so a
+    // Legacy canned intro experiment (roast only): the brain opens with an instant canned line, so a
     // prefetched LLM greeting would just be discarded — skip the wasted call.
     // Instead pick the canned line NOW and stream its TTS into a buffer, so the
     // EL handshake + synthesis overlaps the permission/connect window and the
@@ -800,7 +800,7 @@ function MainApp() {
       <section
         ref={callFrameRef}
         data-testid="call-frame"
-        aria-label="Roastie video call"
+        aria-label="Puppet Line call"
         className="call-frame"
       >
         {phase === "idle" && <LandingScreen />}

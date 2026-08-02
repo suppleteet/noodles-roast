@@ -109,7 +109,7 @@ async function generateGreetingFromObservations(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: "greeting" satisfies JokeContext,
+      context: "vision_opening" satisfies JokeContext,
       model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
@@ -129,7 +129,7 @@ async function generateDirectImageGreeting(
   return postJsonWithRetry<JokeResponse>(
     "/api/generate-joke",
     {
-      context: "greeting" satisfies JokeContext,
+      context: "vision_opening" satisfies JokeContext,
       model: snapshot.visionModel ?? VISION_MODEL,
       persona: snapshot.activePersona,
       burnIntensity: snapshot.burnIntensity,
@@ -143,11 +143,11 @@ async function generateDirectImageGreeting(
 }
 
 /**
- * Pre-roast startup path. Vision and the greeting joke run in TRUE parallel:
+ * Pre-roast startup path. Vision analysis and the first vision joke run in TRUE parallel:
  *  - `/api/analyze` fires in the background to populate observations for
  *    subsequent turns. It does NOT block the greeting.
  *  - `/api/generate-joke` with the raw image (direct-image) runs concurrently
- *    and returns the actual greeting joke as soon as it's ready.
+ *    and returns the actual opening vision joke as soon as it's ready.
  *
  * The old sequential design waited up to 6.5s for vision to time out before
  * even trying direct-image — that compounded to 13+ s of dead air on slow

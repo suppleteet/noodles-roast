@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { ComedyQuestion } from "@/lib/questionBank";
 import { PERSONAS } from "@/lib/personas";
+import { VISION_GREETING_BRIDGE } from "@/lib/scriptLines";
 
 // Mock COMEDIAN_CONFIG at module level (evaluated at import time)
 vi.mock("@/lib/comedianConfig", () => ({
@@ -27,6 +28,8 @@ vi.mock("@/lib/comedianConfig", () => ({
     generatedGreetingCount: 4,
     rephraseTimeoutMs: 20,
     transcriptRepairTimeoutMs: 100,
+    yesNoBranchSelectionWaitMs: 25,
+    yesNoBranchPrefetchTimeoutMs: 500,
     firstSpeechBeatMs: 5,
     devNotesEnabled: false,
     devNoteTimeoutMs: 60000,
@@ -729,6 +732,164 @@ describe("ComedianBrain", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("vision-joke startup", () => {
+    it("uses only a minimal bridge while a slow vision joke remains authoritative", async () => {
+      vi.useFakeTimers();
+      try {
+        let resolveVision!: (value: {
+          relevant: true;
+          jokes: Array<{ text: string; motion: "smug"; intensity: number; score: number }>;
+        }) => void;
+        const prefetchedGreeting = new Promise<{
+          relevant: true;
+          jokes: Array<{ text: string; motion: "smug"; intensity: number; score: number }>;
+        }>((resolve) => { resolveVision = resolve; });
+        const deps = makeDeps({ prefetchedGreeting });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          enterGreeting(): void;
+          onTtsQueueDrained(): void;
+        };
+
+        brain.enterGreeting();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(deps.queueSpeak).toHaveBeenCalledWith(
+          VISION_GREETING_BRIDGE,
+          expect.any(String),
+          expect.any(Number),
+          undefined,
+          expect.any(Object),
+        );
+
+        brain.onTtsQueueDrained();
+        expect(brain.state).toBe("greeting");
+
+        resolveVision({
+          relevant: true,
+          jokes: [{ text: "That shirt surrendered before the call connected.", motion: "smug", intensity: 0.7, score: 8 }],
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(deps.queueSpeak).toHaveBeenCalledWith(
+          "That shirt surrendered before the call connected.",
+          "smug",
+          0.7,
+        );
+        expect(brain.state).toBe("greeting");
+
+        brain.onTtsQueueDrained();
+        expect(brain.state).toBe("ask_question");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("yes/no response prefetch", () => {
+    const binaryQuestion: ComedyQuestion = {
+      id: "work_home",
+      question: "Do you work from home?",
+      jokeContext: "Work roast.",
+      prodLines: [],
+    };
+
+    it("queues both inert branches and delivers only the clearly selected one", async () => {
+      const branchSignals: Partial<Record<"yes" | "no", AbortSignal>> = {};
+      const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { branchPrefetch?: "yes" | "no" };
+        if (body.branchPrefetch) {
+          branchSignals[body.branchPrefetch] = init?.signal ?? undefined;
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              relevant: true,
+              jokes: [{
+                text: body.branchPrefetch === "yes" ? "Selected yes branch." : "Wrong no branch.",
+                motion: "smug",
+                intensity: 0.7,
+                score: 7,
+              }],
+            }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ relevant: true, jokes: [] }),
+        } as Response);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const deps = makeDeps();
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        deliveryGeneration: number;
+        currentQuestion: ComedyQuestion;
+        _startYesNoBranchPrefetch(question: string): void;
+        _consumeYesNoBranchPrefetch(
+          answer: string,
+          question: ComedyQuestion,
+          conversation: string[],
+          filler: string | undefined,
+          generation: number,
+        ): boolean;
+      };
+      brain.currentQuestion = binaryQuestion;
+      brain.state = "ask_question";
+      brain._startYesNoBranchPrefetch(binaryQuestion.question);
+      await Promise.resolve();
+
+      const branchBodies = fetchMock.mock.calls
+        .map((call) => JSON.parse(String(call[1]?.body ?? "{}")) as { branchPrefetch?: string; sessionId?: string })
+        .filter((body) => body.branchPrefetch);
+      expect(branchBodies.map((body) => body.branchPrefetch).sort()).toEqual(["no", "yes"]);
+      expect(branchBodies.every((body) => body.sessionId === undefined)).toBe(true);
+
+      brain.state = "generating";
+      brain.deliveryGeneration = 4;
+      expect(
+        brain._consumeYesNoBranchPrefetch("Yeah, I do.", binaryQuestion, [], undefined, 4),
+      ).toBe(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(branchSignals.no?.aborted).toBe(true);
+      expect(deps.queueSpeak).toHaveBeenCalledWith("Selected yes branch.", "smug", 0.7, false);
+      expect(deps.queueSpeak).not.toHaveBeenCalledWith(
+        "Wrong no branch.",
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it("cancels both branches and leaves ambiguous replies to the normal path", () => {
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal("fetch", vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        return new Promise<Response>(() => {});
+      }));
+      const brain = new ComedianBrain(makeDeps()) as unknown as {
+        currentQuestion: ComedyQuestion;
+        _startYesNoBranchPrefetch(question: string): void;
+        _consumeYesNoBranchPrefetch(
+          answer: string,
+          question: ComedyQuestion,
+          conversation: string[],
+          filler: string | undefined,
+          generation: number,
+        ): boolean;
+      };
+      brain.currentQuestion = binaryQuestion;
+      brain._startYesNoBranchPrefetch(binaryQuestion.question);
+
+      expect(
+        brain._consumeYesNoBranchPrefetch("Maybe, it depends.", binaryQuestion, [], undefined, 1),
+      ).toBe(false);
+      expect(signals).toHaveLength(2);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
     });
   });
 

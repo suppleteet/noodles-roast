@@ -1494,8 +1494,9 @@ export default function LiveSessionController({
     useSessionStore.getState().setTownFlavorRequested(false);
     useSessionStore.getState().logTiming("live: starting session");
 
-    // Prefetch greeting: vision analyze first → then joke generation with observations.
-    // This lets the greeting reference what the model actually sees ("nice beard", "that shirt").
+    // Prefetch the opening vision joke as early as the camera permits. Direct-image
+    // generation and the reusable vision analysis run in parallel so the first
+    // substantive spoken line references what the model actually sees.
     // Webcam startup can lag by a few hundred ms, so retry briefly before giving up.
     const captureGreetingFrame = async (): Promise<string | undefined> => {
       let frame = webcamRef.current?.captureFrame();

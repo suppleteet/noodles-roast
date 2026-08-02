@@ -57,7 +57,7 @@ test.describe("Full Roast Run", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await page.getByTestId("build-timestamp").click();
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
     await driver.waitForConnect();
 
     // Wait for HUDOverlay to be in the DOM before starting state tracking

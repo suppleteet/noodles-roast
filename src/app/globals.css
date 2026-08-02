@@ -35,10 +35,7 @@ body {
   place-items: center;
   overflow: hidden;
   padding: 16px;
-  background:
-    radial-gradient(circle at 18% 12%, rgba(249, 115, 22, 0.16), transparent 34%),
-    radial-gradient(circle at 86% 86%, rgba(120, 53, 15, 0.22), transparent 38%),
-    #050201;
+  background: #0e0f12;
 }
 
 .call-app::before {
@@ -46,12 +43,7 @@ body {
   inset: 0;
   content: "";
   pointer-events: none;
-  opacity: 0.22;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(to bottom, black, transparent 80%);
+  background: transparent;
 }
 
 .call-frame {
@@ -166,144 +158,173 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   color: white;
-  background: #080301;
+  background: #111214;
 }
 
-.landing-call-header {
+.puppet-line-header {
   position: relative;
   z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: max(22px, calc(env(safe-area-inset-top) + 14px)) 24px 8px;
-  text-align: left;
-}
-
-.landing-call-kicker {
-  margin-bottom: 2px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  color: rgba(255, 255, 255, 0.38);
-  text-transform: uppercase;
-}
-
-.landing-ready-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.66);
-  background: rgba(255, 255, 255, 0.05);
-  text-transform: uppercase;
-  backdrop-filter: blur(16px);
-}
-
-.landing-layout {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  min-height: 0;
-  grid-template-rows: minmax(230px, 1fr) auto;
-}
-
-.landing-identity {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 24px 18px;
+  padding: max(20px, calc(env(safe-area-inset-top) + 12px)) 24px 6px;
   text-align: center;
 }
 
-.landing-avatar-wrap {
+.puppet-line-main {
   position: relative;
-  display: grid;
-  width: 116px;
-  height: 116px;
-  place-items: center;
-}
-
-.landing-avatar-ring {
-  position: absolute;
-  inset: -8px;
-  border: 1px solid rgba(251, 146, 60, 0.33);
-  border-radius: 999px;
-  box-shadow: 0 0 0 10px rgba(249, 115, 22, 0.045), 0 0 52px rgba(249, 115, 22, 0.24);
-}
-
-.landing-avatar-ring::after {
-  position: absolute;
-  top: 7px;
-  right: 10px;
-  width: 9px;
-  height: 9px;
-  content: "";
-  border: 2px solid #1b0802;
-  border-radius: 999px;
-  background: #fb923c;
-  box-shadow: 0 0 14px rgba(251, 146, 60, 0.9);
-}
-
-.landing-avatar {
-  display: grid;
-  width: 100px;
-  height: 100px;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 34px;
-  font-family: var(--font-display);
-  font-size: 54px;
-  color: #fff7ed;
-  background:
-    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.2), transparent 28%),
-    linear-gradient(145deg, #fb7a2f, #a9180f 72%);
-  box-shadow: 0 18px 48px rgba(151, 33, 14, 0.48), inset 0 1px rgba(255, 255, 255, 0.25);
-  transform: rotate(-2deg);
-}
-
-.landing-actions {
+  z-index: 1;
   display: flex;
-  width: calc(100% - 32px);
-  max-height: 100%;
-  margin: 0 16px max(16px, env(safe-area-inset-bottom));
+  min-height: 0;
   flex-direction: column;
-  align-items: center;
   overflow-y: auto;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 28px;
-  background: rgba(6, 2, 1, 0.62);
-  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.055);
-  backdrop-filter: blur(22px) saturate(130%);
+  padding: 4px 0 max(16px, calc(env(safe-area-inset-bottom) + 8px));
   scrollbar-width: thin;
 }
 
-.landing-answer-button {
-  min-height: 60px;
-  border-radius: 18px;
-  padding: 15px 12px;
-  font-size: 18px;
-  font-weight: 900;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
-  transition: transform 160ms ease, background-color 160ms ease;
+.puppet-picker {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
 }
 
-.landing-answer-button:hover {
-  transform: translateY(-2px);
+.puppet-carousel {
+  display: flex;
+  width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 8px max(16%, calc(50% - min(29vw, 120px)));
+  scroll-padding-inline: max(16%, calc(50% - min(29vw, 120px)));
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+  outline: none;
 }
 
-.landing-answer-button:active {
+.puppet-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.puppet-carousel:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: -2px;
+}
+
+.puppet-profile-card {
+  display: flex;
+  flex: 0 0 min(58vw, 240px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 12px 14px;
+  border: 0;
+  border-radius: 28px;
+  color: rgba(255, 255, 255, 0.76);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.48;
+  outline: none;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  transform: scale(0.9);
+  transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.puppet-profile-card.is-selected {
+  color: white;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  transform: scale(1);
+}
+
+.puppet-profile-card:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: -2px;
+}
+
+.puppet-profile-portrait {
+  display: block;
+  width: min(48vw, 190px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #202124;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.puppet-profile-card.is-selected .puppet-profile-portrait {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.82), 0 14px 34px rgba(0, 0, 0, 0.36);
+}
+
+.puppet-profile-dots {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px;
+}
+
+.puppet-profile-dots button {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  transition: width 160ms ease, background 160ms ease;
+}
+
+.puppet-profile-dots button.is-selected {
+  width: 22px;
+  background: white;
+}
+
+.puppet-line-controls {
+  display: flex;
+  width: calc(100% - 32px);
+  max-width: 390px;
+  margin: 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.puppet-call-button {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  background: #34c759;
+  box-shadow: none;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.puppet-call-button:hover {
+  filter: brightness(1.04);
+}
+
+.puppet-call-button:active {
   transform: translateY(0) scale(0.98);
 }
 
-.landing-answer-button:disabled {
+.puppet-call-button:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 4px;
+}
+
+.puppet-call-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -450,6 +471,10 @@ body {
     border-radius: 0;
     box-shadow: none;
   }
+
+  .share-screen {
+    padding: max(12px, calc(env(safe-area-inset-top) + 8px)) 16px max(12px, calc(env(safe-area-inset-bottom) + 8px));
+  }
 }
 
 @media (orientation: landscape) and (max-height: 700px) {
@@ -483,55 +508,66 @@ body {
     transform: none;
   }
 
-  .landing-call-header {
-    grid-column: 1 / -1;
-    padding: max(14px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 4px max(20px, env(safe-area-inset-left));
+  .puppet-line-screen {
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .landing-layout {
+  .puppet-line-header {
+    padding: max(9px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 2px max(14px, env(safe-area-inset-left));
+  }
+
+  .puppet-line-header h1 {
+    font-size: 24px;
+  }
+
+  .puppet-line-main {
+    display: grid;
     min-width: 0;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 0.85fr);
     grid-template-rows: minmax(0, 1fr);
     align-items: center;
+    overflow: hidden;
+    padding: 0 max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
 
-  .landing-identity {
-    padding: 0 18px 14px max(28px, env(safe-area-inset-left));
+  .puppet-carousel {
+    gap: 12px;
+    padding: 6px max(16%, calc(50% - min(20vw, 90px)));
+    scroll-padding-inline: max(16%, calc(50% - min(20vw, 90px)));
   }
 
-  .landing-avatar-wrap {
-    width: 88px;
-    height: 88px;
+  .puppet-profile-card {
+    flex-basis: min(40vw, 180px);
+    padding: 8px 8px 11px;
+    border-radius: 25px;
   }
 
-  .landing-avatar {
-    width: 76px;
-    height: 76px;
-    border-radius: 26px;
-    font-size: 40px;
+  .puppet-profile-portrait {
+    width: min(27vw, 140px);
   }
 
-  .landing-identity h1 {
-    font-size: 38px;
+  .puppet-profile-card > span:last-child {
+    font-size: 18px;
   }
 
-  .landing-identity p:last-child {
-    margin-top: 6px;
-    font-size: 12px;
+  .puppet-profile-dots {
+    min-height: 20px;
+    padding: 2px;
   }
 
-  .landing-actions {
-    width: auto;
-    max-height: calc(100dvh - 66px);
-    margin: 4px max(18px, env(safe-area-inset-right)) 12px 0;
-    padding: 14px;
-    border-radius: 24px;
+  .puppet-line-controls {
+    width: 100%;
+    max-height: calc(100dvh - 52px);
+    margin: 0;
+    gap: 8px;
+    overflow-y: auto;
+    padding: 10px;
+    border-radius: 20px;
   }
 
-  .landing-answer-button {
-    min-height: 52px;
-    padding: 12px 10px;
-    font-size: 16px;
+  .puppet-call-button {
+    width: 60px;
+    height: 60px;
   }
 
   .consent-screen {
@@ -584,28 +620,37 @@ body {
 }
 
 @media (max-height: 720px) and (orientation: portrait) {
-  .landing-layout {
-    grid-template-rows: minmax(170px, 1fr) auto;
+  .puppet-line-header {
+    padding-top: max(10px, env(safe-area-inset-top));
   }
 
-  .landing-avatar-wrap {
-    width: 84px;
-    height: 84px;
+  .puppet-line-header h1 {
+    font-size: 25px;
   }
 
-  .landing-avatar {
-    width: 72px;
-    height: 72px;
-    border-radius: 24px;
-    font-size: 38px;
+  .puppet-carousel {
+    padding-top: 3px;
+    padding-bottom: 3px;
   }
 
-  .landing-identity h1 {
-    font-size: 38px;
+  .puppet-profile-card {
+    flex-basis: min(52vw, 220px);
+    padding: 8px 8px 10px;
+    border-radius: 26px;
   }
 
-  .landing-identity p:last-child {
-    display: none;
+  .puppet-profile-portrait {
+    width: min(46vw, 190px);
+  }
+
+  .puppet-line-controls {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .puppet-call-button {
+    width: 64px;
+    height: 64px;
   }
 }
 

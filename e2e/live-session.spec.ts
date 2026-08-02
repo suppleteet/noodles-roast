@@ -6,24 +6,24 @@ import { ComedianBrainDriver } from "./helpers/comedianBrainDriver";
 
 async function startRoasting(page: Page, mock: LiveSessionMock): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: /roast me/i }).click();
+  await page.getByRole("button", { name: "Call Roasty" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await mock.waitForConnect();
 }
 
 // ─── Startup speed test ───────────────────────────────────────────────────────
-// In brain mode, the comedian brain fires the greeting TTS immediately on session start.
+// In brain mode, the comedian brain starts the vision opening immediately.
 
 test.describe("Startup", () => {
-  test("puppet begins speaking within 6 seconds of page load (brain greeting)", async ({ page }) => {
+  test("puppet begins speaking within 6 seconds of page load (vision opening)", async ({ page }) => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
 
     const startMs = Date.now();
     await page.goto("/");
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
 
-    // Brain greets immediately — wait for the first TTS from the greeting
+    // Wait for either the ready vision joke or its brief latency bridge.
     const req = await driver.waitForTtsRequest(6000);
     const elapsed = Date.now() - startMs;
 
@@ -36,19 +36,19 @@ test.describe("Startup", () => {
     const mock = new LiveSessionMock(page);
     await mock.setup();
     await page.goto("/");
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   });
 
-  test("canned startup opener uses low-register non-rising TTS", async ({ page }) => {
+  test("slow vision startup uses a minimal low-register bridge", async ({ page }) => {
     const mock = new LiveSessionMock(page);
     await mock.setup();
 
     await page.goto("/");
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
 
     const req = await mock.waitForTtsRequest(5000);
-    expect(req.text).toMatch(/tell me .*name\.$/i);
+    expect(req.text).toBe("Well, hello there.");
     expect(req.text).not.toMatch(/\?$/);
     expect(req.voiceSettings).toMatchObject({
       style: 0.25,
@@ -123,7 +123,7 @@ test.describe("Startup", () => {
     });
 
     await page.goto("/");
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
     await driver.waitForBrainState("wait_answer", 10_000);
     await driver.simulateAnswer("My name is Alex");
 
@@ -274,7 +274,7 @@ test.describe("Diagnostics", () => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
     await page.goto("/");
-    await page.getByRole("button", { name: /roast me/i }).click();
+    await page.getByRole("button", { name: "Call Roasty" }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
     await driver.waitForConnect();
 
