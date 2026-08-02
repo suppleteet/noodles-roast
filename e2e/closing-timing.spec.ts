@@ -25,7 +25,7 @@ test("closing prefetch waits for the final answer and stops about one second aft
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10_000 });
   await driver.waitForConnect();
   await driver.waitForBrainState("wait_answer", 10_000);

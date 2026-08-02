@@ -14,7 +14,7 @@ import {
 export type ContentMode = "clean" | "vulgar";
 
 /**
- * Top-level puppet the user picks from the Puppet Line carousel. Roasty maps to
+ * Top-level puppet the user picks from the Puppet Line carousel. Roastie maps to
  * the standard roast experience; Toastie maps to a drunk woman at a wedding mic
  * giving a toast to the user, who she's pretending she knows. Same brain state
  * machine, different question bank, prompts, scripted lines, voice, and puppet

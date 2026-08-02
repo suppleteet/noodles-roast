@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("app loads and reaches roasting phase after calling Roasty", async ({ page }) => {
+test("app loads and reaches roasting phase after calling Roastie", async ({ page }) => {
   await page.route("/api/live-token", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "fake-token" }) })
   );
@@ -48,7 +48,7 @@ test("app loads and reaches roasting phase after calling Roasty", async ({ page 
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 });
 
@@ -73,17 +73,17 @@ test("debug checkbox toggles back to landing screen", async ({ page }) => {
   await expect(page.getByRole("checkbox", { name: "debug" })).toHaveCount(0);
   await page.getByTestId("build-timestamp").click();
   await expect(page.getByRole("checkbox", { name: "debug" })).toBeChecked();
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 
   // Uncheck debug → should return to idle/landing
   // A plain click is intentional: relocking removes the checkbox immediately,
   // so locator.uncheck() would keep waiting for a now-unmounted input.
   await page.getByRole("checkbox", { name: "debug" }).click();
-  await expect(page.getByRole("button", { name: "Call Roasty" })).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole("button", { name: "Call Roastie" })).toBeVisible({ timeout: 5000 });
 });
 
-test("landing call button starts the centered Roasty session", async ({ page }) => {
+test("landing call button starts the centered Roastie session", async ({ page }) => {
   await page.route("/api/live-token", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "fake-token" }) })
   );
@@ -101,9 +101,9 @@ test("landing call button starts the centered Roasty session", async ({ page }) 
 
   await page.goto("/");
   // Landing screen is shown on page load with debug UI still locked.
-  await expect(page.getByRole("button", { name: "Call Roasty" })).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole("button", { name: "Call Roastie" })).toBeVisible({ timeout: 5000 });
 
   // Call the centered puppet → session starts → HUD appears.
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
 });

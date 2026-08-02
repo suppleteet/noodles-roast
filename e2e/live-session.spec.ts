@@ -6,7 +6,7 @@ import { ComedianBrainDriver } from "./helpers/comedianBrainDriver";
 
 async function startRoasting(page: Page, mock: LiveSessionMock): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await mock.waitForConnect();
 }
@@ -21,7 +21,7 @@ test.describe("Startup", () => {
 
     const startMs = Date.now();
     await page.goto("/");
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
 
     // Wait for either the ready vision joke or its brief latency bridge.
     const req = await driver.waitForTtsRequest(6000);
@@ -36,7 +36,7 @@ test.describe("Startup", () => {
     const mock = new LiveSessionMock(page);
     await mock.setup();
     await page.goto("/");
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   });
 
@@ -45,7 +45,7 @@ test.describe("Startup", () => {
     await mock.setup();
 
     await page.goto("/");
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
 
     const req = await mock.waitForTtsRequest(5000);
     expect(req.text).toBe("Well, hello there.");
@@ -123,7 +123,7 @@ test.describe("Startup", () => {
     });
 
     await page.goto("/");
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
     await driver.waitForBrainState("wait_answer", 10_000);
     await driver.simulateAnswer("My name is Alex");
 
@@ -274,7 +274,7 @@ test.describe("Diagnostics", () => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
     await page.goto("/");
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
     await driver.waitForConnect();
 

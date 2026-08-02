@@ -57,15 +57,15 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   await expect(page.getByText("Roastie video")).toHaveCount(0);
 
   const carousel = page.getByTestId("puppet-carousel");
-  const roasty = page.getByTestId("puppet-profile-roasty");
+  const roastie = page.getByTestId("puppet-profile-roastie");
   const toastie = page.getByTestId("puppet-profile-toastie");
   const call = page.getByTestId("call-selected-puppet");
   await expect(carousel).toBeVisible();
-  await expect(roasty).toHaveAttribute("aria-pressed", "true");
-  await expect(call).toHaveAttribute("aria-label", "Call Roasty");
+  await expect(roastie).toHaveAttribute("aria-pressed", "true");
+  await expect(call).toHaveAttribute("aria-label", "Call Roastie");
   // Next/Image URL-encodes the public path in its optimizer URL, so assert the
   // renderer-derived asset filename rather than the literal slash-delimited path.
-  await expect(page.locator('img[src*="roasty.png"]')).toBeVisible();
+  await expect(page.locator('img[src*="roastie.png"]')).toBeVisible();
   await expect(page.locator('img[src*="toastie.png"]')).toBeVisible();
   await expect(call).toHaveCount(1);
   await expect(call).toBeEnabled();
@@ -103,9 +103,9 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   await expect(call).toHaveAttribute("aria-label", "Call Toastie");
 
   // Non-gesture selection remains available for keyboard/switch users.
-  await page.getByRole("button", { name: "Show Roasty" }).click();
-  await expect(roasty).toHaveAttribute("aria-pressed", "true");
-  await expect(call).toHaveAttribute("aria-label", "Call Roasty");
+  await page.getByRole("button", { name: "Show Roastie" }).click();
+  await expect(roastie).toHaveAttribute("aria-pressed", "true");
+  await expect(call).toHaveAttribute("aria-label", "Call Roastie");
   await expectNoPageOverflow(page);
   await context.close();
 });
@@ -140,7 +140,7 @@ test("short landscape viewports reflow setup and live-call controls side by side
   // the landing handlers. Wait for the client to settle before exercising the
   // live-call transition so this layout assertion does not race hydration.
   await page.waitForLoadState("networkidle");
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.getByTestId("call-surface")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("self-view")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("call-controls")).toBeVisible();

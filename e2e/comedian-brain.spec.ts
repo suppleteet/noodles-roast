@@ -8,7 +8,7 @@ async function startRoasting(page: Page, driver: ComedianBrainDriver): Promise<v
   // The landing HTML is server-rendered; wait for the client bundle before
   // clicking so the test cannot spend the whole run on a pre-hydration tap.
   await page.waitForLoadState("networkidle");
-  await page.getByRole("button", { name: "Call Roasty" }).click();
+  await page.getByRole("button", { name: "Call Roastie" }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await driver.waitForConnect();
 }

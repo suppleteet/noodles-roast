@@ -97,7 +97,7 @@ test.describe("Real live startup", () => {
     await page
       .getByRole("checkbox", { name: "Location" })
       .uncheck();
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+    await page.getByRole("button", { name: "Call Roastie" }).click();
 
     const hud = page.getByTestId("hud-overlay");
     await expect(hud).toBeVisible({ timeout: 20_000 });

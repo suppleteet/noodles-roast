@@ -47,10 +47,10 @@ export default function LandingScreen() {
   const [hydrated, setHydrated] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
   const [paymentBusy, setPaymentBusy] = useState<RoastPassSku | "redeem" | null>(null);
-  const [selectedProfileId, setSelectedProfileId] = useState<PuppetProfile["id"]>("roasty");
+  const [selectedProfileId, setSelectedProfileId] = useState<PuppetProfile["id"]>("roastie");
   const carouselRef = useRef<HTMLDivElement>(null);
   const profileRefs = useRef<Record<PuppetProfile["id"], HTMLButtonElement | null>>({
-    roasty: null,
+    roastie: null,
     toastie: null,
   });
 
@@ -421,6 +421,6 @@ interface PuppetProfile {
 }
 
 const PUPPET_PROFILES: readonly PuppetProfile[] = [
-  { id: "roasty", name: "Roasty", experienceType: "roast", portraitSrc: "/puppets/roasty.png" },
+  { id: "roastie", name: "Roastie", experienceType: "roast", portraitSrc: "/puppets/roastie.png" },
   { id: "toastie", name: "Toastie", experienceType: "toast", portraitSrc: "/puppets/toastie.png" },
 ];
