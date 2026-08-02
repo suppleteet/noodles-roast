@@ -10,7 +10,6 @@ import AudioPlayer, { type AudioPlayerHandle } from "@/components/audio/AudioPla
 import VideoRecorder, { type VideoRecorderHandle } from "@/components/recording/VideoRecorder";
 import { useCompositor } from "@/components/recording/useCompositor";
 import { PERSONA_IDS, PERSONA_NAMES } from "@/lib/personaMetadata";
-import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
@@ -104,7 +103,6 @@ function MainApp() {
   const [mockMode, setMockMode] = useState(false);
   const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
   const lastNonZeroUsageRef = useRef<DebugUsageSnapshot | null>(null);
-  const ambientRequestInFlightRef = useRef(false);
   const mockModeRef = useRef(false); // ref so the requesting-permissions effect reads current value
   const pendingMockRestartRef = useRef(false); // set by handleMockToggle to bounce session
   // Set when the user picks "restart with a different model" — bounce
@@ -539,48 +537,6 @@ function MainApp() {
       });
   }, [phase, sessionMode, webcamStream, setPhase, setError]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const locationConsent = useSessionStore((s) => s.locationConsent);
-
-  // Geolocation + ambient context as soon as the user opts in (landing / consent) — before the roast begins
-  useEffect(() => {
-    if (phase !== "idle" && phase !== "consent" && phase !== "requesting-permissions" && phase !== "roasting")
-      return;
-    const { locationConsent: locOk, ambientContext } = useSessionStore.getState();
-    if (!locOk) return;
-    if (!navigator.geolocation) return;
-    if (ambientContext?.city && ambientContext.city !== "unknown") return;
-    if (ambientRequestInFlightRef.current) return;
-    ambientRequestInFlightRef.current = true;
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude: lat, longitude: lon } = pos.coords;
-        logTiming(`geo: got location (${lat.toFixed(2)}, ${lon.toFixed(2)})`);
-        fetch("/api/ambient-context", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lon }),
-          signal: AbortSignal.timeout(8000),
-        })
-          .then((r) => r.json())
-          .then((ctx) => {
-            if (ctx.city) {
-              useSessionStore.getState().setAmbientContext(ctx);
-              logTiming(`geo: ambient context ready — ${ctx.city}, ${ctx.timeOfDay}, ${ctx.weather ?? "no weather"}`);
-              kickTownFlavorFetch();
-            }
-          })
-          .catch(() => logTiming("geo: ambient-context fetch failed"))
-          .finally(() => { ambientRequestInFlightRef.current = false; });
-      },
-      () => {
-        ambientRequestInFlightRef.current = false;
-        logTiming("geo: permission denied or unavailable");
-      },
-      { timeout: 10000, maximumAge: 300000 },
-    );
-  }, [phase, locationConsent]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Wire webcam video element ref once stream is ready
   useEffect(() => {
     webcamVideoRef.current = webcamRef.current?.getVideoElement() ?? null;
@@ -856,7 +812,7 @@ function MainApp() {
               <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7">
                 <path
                   fill="currentColor"
-                  d="M6.6 10.8c3.48-2.15 7.32-2.15 10.8 0l1.26-1.72a1.55 1.55 0 0 1 2.16-.34l1.17.86c.68.5.83 1.45.34 2.13l-2.2 3a1.55 1.55 0 0 1-2.13.36l-1.16-.82a1.52 1.52 0 0 1-.54-1.76 8.85 8.85 0 0 0-8.6 0 1.52 1.52 0 0 1-.54 1.76L6 15.09a1.55 1.55 0 0 1-2.13-.36l-2.2-3a1.54 1.54 0 0 1 .34-2.13l1.17-.86a1.55 1.55 0 0 1 2.16.34L6.6 10.8Z"
+                  d="M12 8c-2.86 0-5.67.41-8.33 1.18a.63.63 0 0 0-.48.61v3.43c0 .44.43.71.86.62.75-.16 1.52-.28 2.31-.34.39-.03.64-.38.64-.76V9.79c1.59-.51 3.27-.79 5-.79s3.41.28 5 .79v2.95c0 .38.25.73.64.76.79.06 1.56.18 2.31.34.43.09.86-.18.86-.62V9.79c0-.29-.2-.54-.48-.61A29.7 29.7 0 0 0 12 8Z"
                 />
               </svg>
               <span className="sr-only">End Session</span>

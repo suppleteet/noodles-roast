@@ -69,6 +69,10 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   await expect(page.locator('img[src*="toastie.png"]')).toBeVisible();
   await expect(call).toHaveCount(1);
   await expect(call).toBeEnabled();
+  await expect(call.locator("svg")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Content mode" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clean" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("checkbox", { name: /location/i })).toHaveCount(0);
   await page.waitForTimeout(400);
 
   // Exercise an actual Chromium touch gesture rather than a synthetic scroll;
@@ -144,6 +148,7 @@ test("short landscape viewports reflow setup and live-call controls side by side
   await expect(page.getByTestId("call-surface")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("self-view")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("call-controls")).toBeVisible();
+  await expect(page.getByRole("button", { name: "End Session" }).locator("svg")).toBeVisible();
   await driver.waitForConnect();
   await expect.poll(() => recorderLogs.join("\n"), { timeout: 10_000 }).toContain(
     "size=1280x592",

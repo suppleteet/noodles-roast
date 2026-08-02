@@ -22,7 +22,7 @@ test.describe("Comedian Brain — Full Flow", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     const startMs = Date.now();
-    await page.getByRole("button", { name: "Call Roasty" }).click();
+    await page.getByRole("button", { name: "Call Roastie" }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
     await driver.waitForConnect();
 
@@ -173,6 +173,57 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
     expect(repairWindow.start).toBeGreaterThanOrEqual(0);
     expect(repairWindow.end).toBeGreaterThan(repairWindow.start);
     expect(repairWindow.fillers.length).toBeLessThanOrEqual(1);
+  });
+
+  test("hands a ready yes branch directly to TTS without a filler", async ({ page }) => {
+    const driver = new ComedianBrainDriver(page);
+    await driver.setup();
+    // Keep the second turn in the fixed-bank route, then make its spoken
+    // wording binary. The original question identity still protects branch
+    // selection; only the text determines whether both branches are prefetched.
+    await page.route("/api/rephrase-question", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ rephrased: "Are you single?" }),
+      }),
+    );
+    await page.goto("/");
+    await page.getByTestId("build-timestamp").click();
+    await page.getByRole("checkbox", { name: "LLM questions" }).uncheck();
+    await page.getByRole("button", { name: "Call Roastie" }).click();
+    await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
+    await driver.waitForConnect();
+
+    await driver.waitForBrainState("wait_answer", 10000);
+    await driver.simulateAnswer("My name is Alex");
+    await page.waitForFunction(() => {
+      const timing = JSON.parse(localStorage.getItem("roastie-timing-log") ?? "[]") as string[];
+      return timing.some((line) => line.includes('yes/no branches prefetched — "Are you single?"'));
+    }, { timeout: 10000 });
+    await driver.waitForBrainState("wait_answer", 10000);
+
+    driver.clearTtsRequests();
+    await driver.simulateAnswer("Yes.");
+    await expect.poll(() => driver.getTtsRequests().map((request) => request.text)).toContain(
+      "Prefetched yes response.",
+    );
+
+    const handoff = await page.evaluate(() => {
+      const timing = JSON.parse(localStorage.getItem("roastie-timing-log") ?? "[]") as string[];
+      const heard = timing.findLastIndex((line) => line.includes('brain: heard "Yes."'));
+      const selected = timing.findIndex(
+        (line, index) => index > heard && line.includes("yes/no branch hit=yes cached"),
+      );
+      return {
+        heard,
+        selected,
+        fillers: timing.slice(heard, selected + 1).filter((line) => line.includes("brain: filler[")),
+      };
+    });
+    expect(handoff.heard).toBeGreaterThanOrEqual(0);
+    expect(handoff.selected).toBeGreaterThan(handoff.heard);
+    expect(handoff.fillers).toEqual([]);
   });
 
 });

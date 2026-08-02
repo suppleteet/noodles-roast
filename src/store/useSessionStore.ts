@@ -162,8 +162,9 @@ interface SessionState {
   llmLog: { ts: number; dir: "→" | "←"; label: string; text: string }[];
   observations: string[];
   visionSetting: string | null; // best guess at user's location from background analysis
-  locationConsent: boolean; // user opted in to share location
-  ambientContext: AmbientContext | null; // time-of-day, weather, city from geolocation
+  /** Dormant location capability. The product currently neither requests nor uses it. */
+  locationConsent: boolean;
+  ambientContext: AmbientContext | null;
   /** LLM blurbs local vibe/culture for roast fodder — filled async after geo resolves. */
   townFlavorBlurb: string | null;
   townFlavorRequested: boolean;
@@ -302,7 +303,7 @@ const initialState = {
   llmLog: [] as { ts: number; dir: "→" | "←"; label: string; text: string }[],
   observations: [] as string[],
   visionSetting: null as string | null,
-  locationConsent: true,
+  locationConsent: false,
   ambientContext: null as AmbientContext | null,
   townFlavorBlurb: null as string | null,
   townFlavorRequested: false,

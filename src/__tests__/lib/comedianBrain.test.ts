@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { ComedyQuestion } from "@/lib/questionBank";
+import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { PERSONAS } from "@/lib/personas";
 import { VISION_GREETING_BRIDGE } from "@/lib/scriptLines";
 
@@ -796,6 +797,128 @@ describe("ComedianBrain", () => {
       jokeContext: "Work roast.",
       prodLines: [],
     };
+
+    it("delivers a settled high-confidence branch before any filler beat", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        const preparedYes: JokeResponse = {
+          relevant: true,
+          jokes: [{ text: "Prepared yes branch.", motion: "smug", intensity: 0.7, score: 7 }],
+        };
+        type Branch = {
+          abort: AbortController;
+          timeout: ReturnType<typeof setTimeout>;
+          ready: JokeResponse | null;
+          result: Promise<JokeResponse | null>;
+        };
+        const makeBranch = (ready: JokeResponse | null): Branch => ({
+          abort: new AbortController(),
+          timeout: setTimeout(() => {}, 500),
+          ready,
+          result: Promise.resolve(ready),
+        });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          currentQuestion: ComedyQuestion;
+          yesNoBranchPrefetch: {
+            questionId: string;
+            questionText: string;
+            startedAt: number;
+            yes: Branch;
+            no: Branch;
+          } | null;
+          enterGenerating(answer: string): void;
+          stop(): void;
+        };
+        brain.currentQuestion = binaryQuestion;
+        brain.state = "wait_answer";
+        brain.yesNoBranchPrefetch = {
+          questionId: binaryQuestion.id,
+          questionText: binaryQuestion.question,
+          startedAt: Date.now() - 50,
+          yes: makeBranch(preparedYes),
+          no: makeBranch(null),
+        };
+
+        brain.enterGenerating("Yes.");
+        expect(deps.queueSpeak).toHaveBeenCalledWith("Prepared yes branch.", "smug", 0.7, false);
+
+        // The normal first acknowledgement waits 10ms in this unit config. A
+        // prepared branch must never schedule it behind the selected response.
+        await vi.advanceTimersByTimeAsync(20);
+        expect(deps.queueSpeak).not.toHaveBeenCalledWith(
+          expect.any(String),
+          expect.any(String),
+          expect.any(Number),
+          false,
+          undefined,
+          expect.objectContaining({ handoff: "filler" }),
+        );
+        expect(deps.logTiming).toHaveBeenCalledWith(
+          expect.stringContaining("yes/no branch ready=yes — bypassing filler"),
+        );
+        brain.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a low-information filler when the selected branch is not ready", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        type Branch = {
+          abort: AbortController;
+          timeout: ReturnType<typeof setTimeout>;
+          ready: JokeResponse | null;
+          result: Promise<JokeResponse | null>;
+        };
+        const pendingBranch = (): Branch => ({
+          abort: new AbortController(),
+          timeout: setTimeout(() => {}, 500),
+          ready: null,
+          result: new Promise<JokeResponse | null>(() => {}),
+        });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          currentQuestion: ComedyQuestion;
+          yesNoBranchPrefetch: {
+            questionId: string;
+            questionText: string;
+            startedAt: number;
+            yes: Branch;
+            no: Branch;
+          } | null;
+          enterGenerating(answer: string): void;
+          stop(): void;
+        };
+        brain.currentQuestion = binaryQuestion;
+        brain.state = "wait_answer";
+        brain.yesNoBranchPrefetch = {
+          questionId: binaryQuestion.id,
+          questionText: binaryQuestion.question,
+          startedAt: Date.now(),
+          yes: pendingBranch(),
+          no: pendingBranch(),
+        };
+
+        brain.enterGenerating("Yes.");
+        await vi.advanceTimersByTimeAsync(10);
+        expect(deps.queueSpeak).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.any(String),
+          expect.any(Number),
+          false,
+          undefined,
+          expect.objectContaining({ handoff: "filler" }),
+        );
+        brain.stop();
+        await vi.advanceTimersByTimeAsync(30);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
 
     it("queues both inert branches and delivers only the clearly selected one", async () => {
       const branchSignals: Partial<Record<"yes" | "no", AbortSignal>> = {};

@@ -34,8 +34,6 @@ export default function LandingScreen() {
   const setError = useSessionStore((s) => s.setError);
   const contentMode = useSessionStore((s) => s.contentMode);
   const setContentMode = useSessionStore((s) => s.setContentMode);
-  const locationConsent = useSessionStore((s) => s.locationConsent);
-  const setLocationConsent = useSessionStore((s) => s.setLocationConsent);
   const roastModel = useSessionStore((s) => s.roastModel);
   const setRoastModel = useSessionStore((s) => s.setRoastModel);
   const cannedIntro = useSessionStore((s) => s.cannedIntro);
@@ -325,16 +323,17 @@ export default function LandingScreen() {
             </div>
           )}
 
-          <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3">
-            <div className="grid grid-cols-2 rounded-full border border-white/10 bg-white/10 p-1">
+          <div className="content-mode-control" role="group" aria-label="Content mode">
+            <div className="grid grid-cols-2 rounded-full border border-white/10 bg-white/10 p-0.5">
               {(["clean", "vulgar"] as ContentMode[]).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   onClick={() => setContentMode(mode)}
-                  className={`rounded-full px-4 py-2 text-sm font-bold capitalize transition-all ${
+                  aria-pressed={contentMode === mode}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold capitalize transition-all ${
                     contentMode === mode
-                      ? "bg-white text-black shadow"
+                      ? "bg-white text-black"
                       : "text-white/55 hover:text-white"
                   }`}
                 >
@@ -342,15 +341,6 @@ export default function LandingScreen() {
                 </button>
               ))}
             </div>
-            <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-white/65">
-              <input
-                type="checkbox"
-                checked={locationConsent}
-                onChange={(event) => setLocationConsent(event.target.checked)}
-                className="h-5 w-5 cursor-pointer rounded accent-white"
-              />
-              Location
-            </label>
           </div>
 
           {PAYMENTS_ENABLED && (
@@ -403,8 +393,8 @@ export default function LandingScreen() {
             disabled={!hydrated || paymentBusy !== null}
             className="puppet-call-button"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-9 w-9">
-              <path fill="currentColor" d="M6.6 10.8c3.48-2.15 7.32-2.15 10.8 0l1.26-1.72a1.55 1.55 0 0 1 2.16-.34l1.17.86c.68.5.83 1.45.34 2.13l-2.2 3a1.55 1.55 0 0 1-2.13.36l-1.16-.82a1.52 1.52 0 0 1-.54-1.76 8.85 8.85 0 0 0-8.6 0 1.52 1.52 0 0 1-.54 1.76L6 15.09a1.55 1.55 0 0 1-2.13-.36l-2.2-3a1.54 1.54 0 0 1 .34-2.13l1.17-.86a1.55 1.55 0 0 1 2.16.34L6.6 10.8Z" />
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-9 w-9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L7.96 9.72a16 16 0 0 0 6 6l1.26-1.26a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z" />
             </svg>
           </button>
         </section>

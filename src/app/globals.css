@@ -298,6 +298,13 @@ body {
   box-shadow: none;
 }
 
+.content-mode-control {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 3px;
+}
+
 .puppet-call-button {
   display: grid;
   width: 76px;

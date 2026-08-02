@@ -39,8 +39,8 @@ describe("initial state", () => {
     expect(useSessionStore.getState().observations).toHaveLength(0);
   });
 
-  it("opts into location by default", () => {
-    expect(useSessionStore.getState().locationConsent).toBe(true);
+  it("keeps location dormant by default", () => {
+    expect(useSessionStore.getState().locationConsent).toBe(false);
   });
 
   it("starts Roast voice stability at 0.5", () => {

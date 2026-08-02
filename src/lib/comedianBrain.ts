@@ -424,11 +424,15 @@ export class ComedianBrain {
     yes: {
       abort: AbortController;
       timeout: ReturnType<typeof setTimeout>;
+      /** Settled, playable result cached before the caller finishes answering. */
+      ready: JokeResponse | null;
       result: Promise<JokeResponse | null>;
     };
     no: {
       abort: AbortController;
       timeout: ReturnType<typeof setTimeout>;
+      /** Settled, playable result cached before the caller finishes answering. */
+      ready: JokeResponse | null;
       result: Promise<JokeResponse | null>;
     };
   } | null = null;
@@ -2312,7 +2316,20 @@ export class ComedianBrain {
       !!this.deps.repairTranscript &&
       shouldAttemptTranscriptRepair(rawAnswer, questionId, knownFacts);
 
-    const fillerAlreadySaid = this._startAnswerFiller(rawAnswer, shouldRepair);
+    // A fully prepared binary branch is the one case where the normal
+    // acknowledgement would only slow the handoff down. Do not bypass a
+    // transcript repair: that may still change the answer's classification.
+    const readyYesNoBranch = shouldRepair
+      ? null
+      : this._getReadyYesNoBranch(rawAnswer, this.currentQuestion);
+    const fillerAlreadySaid = readyYesNoBranch
+      ? undefined
+      : this._startAnswerFiller(rawAnswer, shouldRepair);
+    if (readyYesNoBranch) {
+      this.deps.logTiming(
+        `brain: yes/no branch ready=${readyYesNoBranch.answer} — bypassing filler`,
+      );
+    }
 
     const proceed = (answer: string, repair?: TranscriptRepairResult) => {
       if (this.deliveryGeneration !== generation || this.state !== "generating") return;
@@ -3318,7 +3335,18 @@ export class ComedianBrain {
         () => abort.abort(),
         COMEDIAN_CONFIG.yesNoBranchPrefetchTimeoutMs,
       );
-      const result = this._generateJoke(
+      const branch: {
+        abort: AbortController;
+        timeout: ReturnType<typeof setTimeout>;
+        ready: JokeResponse | null;
+        result: Promise<JokeResponse | null>;
+      } = {
+        abort,
+        timeout,
+        ready: null,
+        result: Promise.resolve(null),
+      };
+      branch.result = this._generateJoke(
         {
           context: "answer_roast",
           question: questionText,
@@ -3332,8 +3360,14 @@ export class ComedianBrain {
           branchPrefetch: answer,
         },
         abort.signal,
-      ).finally(() => clearTimeout(timeout));
-      return { abort, timeout, result };
+      )
+        .then((response) => {
+          branch.ready = this._hasPlayableBranchResponse(response) ? response : null;
+          return response;
+        })
+        .catch(() => null)
+        .finally(() => clearTimeout(timeout));
+      return branch;
     };
 
     this.yesNoBranchPrefetch = {
@@ -3344,6 +3378,33 @@ export class ComedianBrain {
       no: createBranch("no"),
     };
     this.deps.logTiming(`brain: yes/no branches prefetched — "${questionText.slice(0, 60)}"`);
+  }
+
+  private _hasPlayableBranchResponse(response: JokeResponse | null): response is JokeResponse {
+    return !!response && (
+      response.jokes.length > 0 ||
+      !!response.callback ||
+      !!response.redirect
+    );
+  }
+
+  /**
+   * Return a precomputed branch only when it belongs to the question currently
+   * on the floor and has already settled into speech the browser can queue now.
+   * This is deliberately stricter than the normal bounded branch wait: a miss
+   * keeps the filler pump active so callers never get a silent dead zone.
+   */
+  private _getReadyYesNoBranch(
+    answer: string,
+    q: ComedyQuestion | null,
+  ): { answer: YesNoAnswer; response: JokeResponse } | null {
+    const classification = classifyClearYesNoAnswer(answer);
+    const prefetch = this.yesNoBranchPrefetch;
+    if (!classification || !q || !prefetch || prefetch.questionId !== q.id) return null;
+    const response = prefetch[classification].ready;
+    return this._hasPlayableBranchResponse(response)
+      ? { answer: classification, response }
+      : null;
   }
 
   /** Returns true when branch selection owns delivery (hit or bounded miss). */
@@ -3371,6 +3432,18 @@ export class ComedianBrain {
     rejected.abort.abort();
     this.yesNoBranchPrefetch = null;
 
+    // The branch completed while the question was playing, so queue it in the
+    // same call stack as the finalized answer. This is what lets enterGenerating
+    // skip the filler pump without risking a silence gap.
+    if (this._hasPlayableBranchResponse(selected.ready)) {
+      clearTimeout(selected.timeout);
+      this.deps.logTiming(
+        `brain: yes/no branch hit=${classification} cached in ${Date.now() - prefetch.startedAt}ms`,
+      );
+      this.enterDelivering(answer, selected.ready, fillerAlreadySaid);
+      return true;
+    }
+
     let selectionTimer: ReturnType<typeof setTimeout> | null = null;
     const selectionTimeout = new Promise<null>((resolve) => {
       selectionTimer = setTimeout(
@@ -3385,7 +3458,7 @@ export class ComedianBrain {
         selected.abort.abort();
         return;
       }
-      if (response?.jokes.length) {
+      if (this._hasPlayableBranchResponse(response)) {
         this.deps.logTiming(
           `brain: yes/no branch hit=${classification} ready in ${Date.now() - prefetch.startedAt}ms`,
         );
