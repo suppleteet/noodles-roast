@@ -806,10 +806,10 @@ function MainApp() {
               aria-label="End Session"
               className="call-end-button"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7">
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path
-                  fill="currentColor"
-                  d="M12 8c-2.86 0-5.67.41-8.33 1.18a.63.63 0 0 0-.48.61v3.43c0 .44.43.71.86.62.75-.16 1.52-.28 2.31-.34.39-.03.64-.38.64-.76V9.79c1.59-.51 3.27-.79 5-.79s3.41.28 5 .79v2.95c0 .38.25.73.64.76.79.06 1.56.18 2.31.34.43.09.86-.18.86-.62V9.79c0-.29-.2-.54-.48-.61A29.7 29.7 0 0 0 12 8Z"
+                  transform="rotate(90 12 12)"
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L7.96 9.72a16 16 0 0 0 6 6l1.26-1.26a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z"
                 />
               </svg>
               <span className="sr-only">End Session</span>
