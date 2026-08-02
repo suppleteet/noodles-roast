@@ -11,10 +11,12 @@ const defaults = {
   // Timing (milliseconds)
   answerSilenceMs: 300,          // fallback silence timer (Silero VAD is primary, ~150ms)
   unfinalizedAnswerSilenceMs: 1600, // wait longer for trailing STT chunks before committing partial answers
+  unfinalizedCompleteSilenceMs: 650, // punctuated-but-unfinalized STT needs one brief grace window for a final segment
+  lateTranscriptSilenceMs: 1100, // regroup a materially extended/corrected answer before restarting generation
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   rephraseTimeoutMs: 1200,       // inline question-rephrase race cap. 450ms never beat a cold LLM, so questions shipped generic/impersonal (no name) and read canned. Higher = personalization lands; worst case is this much dead air before the bridged-original fallback.
-  transcriptRepairTimeoutMs: 3200, // conservative STT repair; a brief acknowledgement masks the utility call, including occasional cold responses
+  transcriptRepairTimeoutMs: 1200, // repair only entity-like answers and never let the utility call dominate turn latency
   visionIntervalMs: 5000,        // how often vision analyze fires
   greetingVisionTimeoutMs: 1500, // max wait for prefetched vision greeting before speaking an instant fallback — the real greeting chains after the fallback when it lands, so firing this is cheap
   firstSpeechBeatMs: 250,        // brief reveal beat before first TTS; keep TTFS low while avoiding an abrupt entrance
@@ -70,6 +72,13 @@ const defaults = {
   // answer into a stack of generic noises. The generation watchdog owns a true
   // provider hang; fillers should preserve character, not conceal ten seconds.
   fillerMaxStack: 2,
+
+  // TTS watchdogs — a stuck first streamed joke used to hold the serialized
+  // playback chain forever, blocking later jokes that had already synthesized.
+  ttsFirstAudioTimeoutMs: 2200,
+  ttsCompletionTimeoutMs: 7000,
+  ttsFallbackTextWaitMs: 1200,
+  ttsRestTimeoutMs: 6500,
 
   // Generation watchdog — if the joke-generation request (generate-speak) produces no joke
   // within this window, abort it and run the brain-busted exit: the comedian says (in

@@ -288,8 +288,10 @@ export class ComedianBrainDriver extends LiveSessionMock {
   async simulateAnswer(text: string, wordDelayMs = 10): Promise<void> {
     // Send individual words as deltas (like real Gemini inputTranscription)
     const words = text.split(/\s+/);
-    for (const word of words) {
-      this.sendInputTranscription(word);
+    for (const [index, word] of words.entries()) {
+      // Gemini emits leading whitespace at real word boundaries. Preserve that
+      // signal so smartJoin can distinguish words from syllable fragments.
+      this.sendInputTranscription(index === 0 ? word : ` ${word}`);
       await new Promise((r) => setTimeout(r, wordDelayMs));
     }
     // Wait for answerSilenceMs (30ms in fast config) + buffer for silence detection

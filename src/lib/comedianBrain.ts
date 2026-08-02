@@ -779,6 +779,9 @@ export class ComedianBrain {
       ) {
         this._clearTimers();
         this.deps.cancelSpeech();
+        // The prior acknowledgement was canceled with the stale generation.
+        // Let the corrected answer receive a fresh, audible backchannel.
+        this.fillerFiredForAnswer = false;
         this.deps.logTiming(`brain: correction cue during generating — "${text}" (restarting)`);
         this._transition("pre_generate");
         this._cancelSpeculative();
@@ -789,6 +792,7 @@ export class ComedianBrain {
       if (appended && /[A-Za-z0-9]/.test(appended)) {
         this._clearTimers();
         this.deps.cancelSpeech();
+        this.fillerFiredForAnswer = false;
         this.deps.logTiming(`brain: late transcription extended answer — "${appended}" (restarting)`);
         this._transition("pre_generate");
         this._cancelSpeculative();
@@ -803,6 +807,7 @@ export class ComedianBrain {
       }
       this._clearTimers();
       this.deps.cancelSpeech();
+      this.fillerFiredForAnswer = false;
       this.deps.logTiming(`brain: late transcription during generating — "${text}" → buffer now "${newAnswer}" (restarting)`);
       this._transition("pre_generate");
       this._cancelSpeculative();
@@ -1639,7 +1644,9 @@ export class ComedianBrain {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     const silenceMs = this._answerNeedsMoreStt()
       ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.unfinalizedAnswerSilenceMs ?? 1000)
-      : COMEDIAN_CONFIG.answerSilenceMs;
+      : !this.sttHadFinalSegment
+        ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.unfinalizedCompleteSilenceMs)
+        : COMEDIAN_CONFIG.answerSilenceMs;
     this.silenceTimer = setTimeout(() => {
       if (this.state === "wait_answer" || this.state === "pre_generate") {
         this._onAnswerComplete();
@@ -1651,8 +1658,10 @@ export class ComedianBrain {
   private _startLateSilenceTimer(): void {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     const silenceMs = this._answerNeedsMoreStt()
-      ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, 900)
-      : Math.round(COMEDIAN_CONFIG.answerSilenceMs / 2);
+      ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.lateTranscriptSilenceMs)
+      : !this.sttHadFinalSegment
+        ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.unfinalizedCompleteSilenceMs)
+        : Math.round(COMEDIAN_CONFIG.answerSilenceMs / 2);
     this.silenceTimer = setTimeout(() => {
       if (this.state === "wait_answer" || this.state === "pre_generate") {
         this._onAnswerComplete();

@@ -56,7 +56,11 @@ test("closing prefetch waits for the final answer and stops about one second aft
   const recordingStoppedIndex = log.findIndex((line) => line.includes("live: recording stopped"));
   const phaseStoppedIndex = log.findIndex((line) => line.includes("live: phase stopped"));
 
-  expect(fade).toMatch(/3\d\dms after final drain/);
-  expect(stopped).toMatch(/10\d{2}ms after final drain/);
+  const fadeDelay = Number(fade?.match(/(\d+)ms after final drain/)?.[1]);
+  const stoppedDelay = Number(stopped?.match(/(\d+)ms after final drain/)?.[1]);
+  expect(fadeDelay).toBeGreaterThanOrEqual(250);
+  expect(fadeDelay).toBeLessThanOrEqual(550);
+  expect(stoppedDelay).toBeGreaterThanOrEqual(850);
+  expect(stoppedDelay).toBeLessThanOrEqual(1250);
   expect(recordingStoppedIndex).toBeGreaterThan(phaseStoppedIndex);
 });

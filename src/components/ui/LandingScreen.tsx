@@ -43,6 +43,7 @@ export default function LandingScreen() {
   const setLlmQuestions = useSessionStore((s) => s.setLlmQuestions);
   const setExperienceType = useSessionStore((s) => s.setExperienceType);
   const IS_DEV = useDevUnlock();
+  const [hydrated, setHydrated] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<MonetizationStatus | null>(null);
   const [paymentBusy, setPaymentBusy] = useState<RoastPassSku | "redeem" | null>(null);
 
@@ -59,6 +60,10 @@ export default function LandingScreen() {
   // buttons, so the first session doesn't eat the latency (a cold first session
   // pushed time-to-first-speech to ~28s in one log). Fire-and-forget; each call
   // is harmless on its own and the post-permission warmup still runs as backstop.
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
   useEffect(() => {
     // Warm the EL synthesis path for the default Roast voice — a tiny real
     // synth (one word) so the model/voice cold-start is mostly paid before the
@@ -319,7 +324,7 @@ export default function LandingScreen() {
               setExperienceType("roast");
               void handleStart();
             }}
-            disabled={paymentBusy !== null}
+            disabled={!hydrated || paymentBusy !== null}
             className="landing-answer-button bg-orange-600 text-white shadow-orange-950/50 hover:bg-orange-500"
           >
             {paymentBusy === "redeem" ? "Starting..." : "Roast Me"}
@@ -329,7 +334,7 @@ export default function LandingScreen() {
               setExperienceType("toast");
               void handleStart();
             }}
-            disabled={paymentBusy !== null}
+            disabled={!hydrated || paymentBusy !== null}
             className="landing-answer-button bg-amber-200 text-amber-950 shadow-amber-900/40 hover:bg-amber-100"
           >
             {paymentBusy === "redeem" ? "Starting..." : "Toast Me"}

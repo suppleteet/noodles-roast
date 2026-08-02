@@ -99,6 +99,7 @@ function MainApp() {
   const setModelUnavailable = useSessionStore((s) => s.setModelUnavailable);
   const acceptModelFallback = useSessionStore((s) => s.acceptModelFallback);
   const IS_DEV = useDevUnlock();
+  const [hydrated, setHydrated] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [mockMode, setMockMode] = useState(false);
   const [llmUsage, setLlmUsage] = useState<DebugUsageSnapshot | null>(null);
@@ -139,8 +140,22 @@ function MainApp() {
   const puppetCanvasRef = useRef<HTMLCanvasElement>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
+  const callFrameRef = useRef<HTMLElement>(null);
+  const callControlsRef = useRef<HTMLDivElement>(null);
+  const endButtonRef = useRef<HTMLButtonElement>(null);
 
-  const compositorHandle = useCompositor(puppetCanvasRef, webcamVideoRef);
+  const compositorHandle = useCompositor(
+    puppetCanvasRef,
+    webcamVideoRef,
+    callFrameRef,
+    pipVideoRef,
+    callControlsRef,
+    endButtonRef,
+  );
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   // Keep mockModeRef in sync for stale-closure-safe reads in effects
   useEffect(() => { mockModeRef.current = mockMode; }, [mockMode]);
@@ -715,6 +730,7 @@ function MainApp() {
       <button
         type="button"
         onClick={handleBuildTimestampClick}
+        disabled={!hydrated}
         data-testid="build-timestamp"
         aria-label="Open developer tools"
         title={`Build ${BUILD_TIMESTAMP}`}
@@ -762,7 +778,7 @@ function MainApp() {
           webcamRef={webcamRef}
           audioPlayerRef={audioPlayerRef}
           videoRecorderRef={videoRecorderRef}
-          compositorStream={compositorHandle.current.stream}
+          compositorHandle={compositorHandle}
         />
       )}
 
@@ -770,7 +786,7 @@ function MainApp() {
         <LiveSessionController
           webcamRef={webcamRef}
           videoRecorderRef={videoRecorderRef}
-          compositorStream={compositorHandle.current.stream}
+          compositorHandle={compositorHandle}
           mediaStream={webcamStream}
           prefetchedTokenPromise={getFreshLiveTokenPromise()}
           prefetchedComedianSessionPromise={comedianSessionPromiseRef.current}
@@ -782,6 +798,7 @@ function MainApp() {
       )}
 
       <section
+        ref={callFrameRef}
         data-testid="call-frame"
         aria-label="Roastie video call"
         className="call-frame"
@@ -803,7 +820,7 @@ function MainApp() {
             )}
           </div>
           <PuppetScene canvasRef={puppetCanvasRef} />
-          {/* Webcam PIP — bottom-right, mirrored; hidden once stream stops */}
+          {/* Webcam PIP — responsive top-right, mirrored; hidden once stream stops */}
           <video
             ref={pipRefCallback}
             muted
@@ -828,8 +845,9 @@ function MainApp() {
         )}
 
         {phase === "roasting" && (
-          <div data-testid="call-controls" className="call-controls">
+          <div ref={callControlsRef} data-testid="call-controls" className="call-controls">
             <button
+              ref={endButtonRef}
               type="button"
               onClick={() => setPhase("stopped", "STOP_CLICKED")}
               aria-label="End Session"

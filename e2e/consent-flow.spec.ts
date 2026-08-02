@@ -69,6 +69,7 @@ test("debug checkbox toggles back to landing screen", async ({ page }) => {
   });
 
   await page.goto("/");
+  await page.waitForLoadState("networkidle");
   await expect(page.getByRole("checkbox", { name: "debug" })).toHaveCount(0);
   await page.getByTestId("build-timestamp").click();
   await expect(page.getByRole("checkbox", { name: "debug" })).toBeChecked();

@@ -1,6 +1,5 @@
 "use client";
 import { useRef, useImperativeHandle, forwardRef } from "react";
-import { COMPOSITOR_SIZE } from "@/lib/constants";
 import {
   chooseRecorderFormat,
   recommendedVideoBitsPerSecond,
@@ -8,7 +7,11 @@ import {
 } from "@/lib/mediaRecorderSupport";
 
 export interface VideoRecorderHandle {
-  start(compositorStream: MediaStream, audioStream: MediaStream | null): void;
+  start(
+    compositorStream: MediaStream,
+    audioStream: MediaStream | null,
+    dimensions?: { width: number; height: number },
+  ): void;
   stop(): Promise<Blob>;
   isRecording(): boolean;
 }
@@ -19,7 +22,11 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
   const mimeTypeRef = useRef("video/mp4");
 
   useImperativeHandle(ref, () => ({
-    start(compositorStream: MediaStream, audioStream: MediaStream | null) {
+    start(
+      compositorStream: MediaStream,
+      audioStream: MediaStream | null,
+      dimensions?: { width: number; height: number },
+    ) {
       // Guard against double-start (React StrictMode fires effects twice in dev)
       if (recorderRef.current?.state === "recording") return;
       chunksRef.current = [];
@@ -44,7 +51,10 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
         );
         return;
       }
-      const videoBitsPerSecond = recommendedVideoBitsPerSecond(COMPOSITOR_SIZE, COMPOSITOR_SIZE);
+      const videoSettings = videoTracks[0]?.getSettings();
+      const width = dimensions?.width ?? videoSettings?.width ?? 720;
+      const height = dimensions?.height ?? videoSettings?.height ?? 720;
+      const videoBitsPerSecond = recommendedVideoBitsPerSecond(width, height);
 
       let recorder: MediaRecorder;
       try {
@@ -64,7 +74,7 @@ const VideoRecorder = forwardRef<VideoRecorderHandle>(function VideoRecorder(_pr
       recorder.start(1000);
       recorderRef.current = recorder;
       console.info(
-        `[recorder] started mime=${mimeTypeRef.current} video=${videoTracks.length} audio=${audioTracks.length} vbps=${videoBitsPerSecond} abps=${RECOMMENDED_AUDIO_BITS_PER_SECOND}`,
+        `[recorder] started mime=${mimeTypeRef.current} size=${width}x${height} video=${videoTracks.length} audio=${audioTracks.length} vbps=${videoBitsPerSecond} abps=${RECOMMENDED_AUDIO_BITS_PER_SECOND}`,
       );
     },
 

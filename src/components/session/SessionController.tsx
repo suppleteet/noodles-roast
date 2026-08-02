@@ -4,6 +4,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import type { WebcamCaptureHandle } from "./WebcamCapture";
 import type { AudioPlayerHandle } from "@/components/audio/AudioPlayer";
 import type { VideoRecorderHandle } from "@/components/recording/VideoRecorder";
+import type { CompositorHandle } from "@/components/recording/useCompositor";
 import { ROAST_PAUSE_MS, getCannedGreeting } from "@/lib/constants";
 import type { MotionState } from "@/lib/motionStates";
 import type { RoastSentence } from "@/store/useSessionStore";
@@ -14,14 +15,14 @@ interface Props {
   webcamRef: React.RefObject<WebcamCaptureHandle | null>;
   audioPlayerRef: React.RefObject<AudioPlayerHandle | null>;
   videoRecorderRef: React.RefObject<VideoRecorderHandle | null>;
-  compositorStream: MediaStream | null;
+  compositorHandle: React.MutableRefObject<CompositorHandle>;
 }
 
 export default function SessionController({
   webcamRef,
   audioPlayerRef,
   videoRecorderRef,
-  compositorStream,
+  compositorHandle,
 }: Props) {
   const phase = useSessionStore((s) => s.phase);
   const setPhase = useSessionStore((s) => s.setPhase);
@@ -267,9 +268,10 @@ export default function SessionController({
 
   useEffect(() => {
     if (phase === "roasting") {
-      if (videoRecorderRef.current && compositorStream) {
+      const prepared = compositorHandle.current.prepareForRecording();
+      if (videoRecorderRef.current && prepared) {
         const audioStream = audioPlayerRef.current?.getDestinationStream() ?? null;
-        videoRecorderRef.current.start(compositorStream, audioStream);
+        videoRecorderRef.current.start(prepared.stream, audioStream, prepared);
       }
       startLoop();
     } else if (phase === "stopped") {

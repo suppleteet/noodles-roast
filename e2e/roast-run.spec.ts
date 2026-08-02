@@ -55,6 +55,7 @@ test.describe("Full Roast Run", () => {
     });
 
     await page.goto("/");
+    await page.waitForLoadState("networkidle");
     await page.getByTestId("build-timestamp").click();
     await page.getByRole("button", { name: /roast me/i }).click();
     await driver.waitForConnect();

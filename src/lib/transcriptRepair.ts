@@ -139,7 +139,7 @@ export function shouldAttemptTranscriptRepair(
 ): boolean {
   const original = cleanText(transcript);
   if (original.length < 2 || original.length > 500) return false;
-  if (questionId === "name" && !knownName(knownFacts)) return false;
+  if (questionId === "name") return knownName(knownFacts) !== null;
   if (questionId === "age" && hasNumberMeaning(original)) return false;
   if (
     questionId === "single" &&
@@ -149,7 +149,15 @@ export function shouldAttemptTranscriptRepair(
   ) {
     return false;
   }
-  return true;
+  // Limit the utility-model hop to entity-heavy answers where homophone repair
+  // can materially improve the roast. Free-form answers, complaints, and
+  // conversational reactions are already useful as heard; delaying all of them
+  // by a model call made healthy mobile turns feel like bad reception.
+  const entityLikeSyntax = /^(?:(?:i am|i'm|im)\s+(?:an?\s+)?[a-z][a-z'-]*(?:\s+[a-z][a-z'-]*){0,3}|(?:i\s+)?(?:work|live|grew up)\s+(?:as|in|at|near|from)\b)/i;
+  return (
+    new Set(["job", "where_from", "hometown_now"]).has(questionId) ||
+    entityLikeSyntax.test(original)
+  );
 }
 
 /**

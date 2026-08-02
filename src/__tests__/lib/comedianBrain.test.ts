@@ -8,6 +8,8 @@ vi.mock("@/lib/comedianConfig", () => ({
   COMEDIAN_CONFIG: {
     answerSilenceMs: 30,
     unfinalizedAnswerSilenceMs: 80,
+    unfinalizedCompleteSilenceMs: 65,
+    lateTranscriptSilenceMs: 90,
     answerWaitMs: 50,
     earlyListenMs: 20,
     visionIntervalMs: 100,
@@ -23,12 +25,22 @@ vi.mock("@/lib/comedianConfig", () => ({
     jokesPerVisionOpen: { min: 1, max: 1 },
     callbackOpportunityEveryN: 3,
     generatedGreetingCount: 4,
+    rephraseTimeoutMs: 20,
+    transcriptRepairTimeoutMs: 100,
+    firstSpeechBeatMs: 5,
     devNotesEnabled: false,
     devNoteTimeoutMs: 60000,
     skipGreeting: true,
     skipPreGeneration: false,
     skipFiller: false,
     singleJokeMode: true,
+    fillerBreathMs: 10,
+    fillerMaxStack: 2,
+    generationTimeoutMs: 8000,
+    ttsFirstAudioTimeoutMs: 2200,
+    ttsCompletionTimeoutMs: 7000,
+    ttsFallbackTextWaitMs: 1200,
+    ttsRestTimeoutMs: 6500,
   },
 }));
 
@@ -651,6 +663,72 @@ describe("ComedianBrain", () => {
       expect(facts).toContain("current_location:Seattle");
       expect(facts).not.toContain("city:Seattle");
       expect(facts).not.toContain("hometown:Seattle");
+    });
+
+    it("gives punctuated but unfinalized STT a brief grace window", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        const brain = new ComedianBrain(deps);
+        brain.start();
+        brain.onTtsQueueDrained();
+
+        brain.onInputTranscription("I work in accounting.");
+        await vi.advanceTimersByTimeAsync(40);
+        expect(stateHistory(deps)).not.toContain("generating");
+
+        await vi.advanceTimersByTimeAsync(25);
+        expect(stateHistory(deps)).toContain("generating");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("allows a fresh filler after material late STT cancels the old generation", async () => {
+      vi.useFakeTimers();
+      try {
+        // Hold joke generation open so the replacement filler gets a chance to
+        // queue instead of the empty-response fallback ending generation first.
+        vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+        const deps = makeDeps();
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          answerBuffer: string;
+          sttHadFinalSegment: boolean;
+          fillerFiredForAnswer: boolean;
+          currentQuestion: ComedyQuestion;
+          onInputTranscription(text: string, finished?: boolean): void;
+        };
+        brain.state = "generating";
+        brain.answerBuffer = "I work in accounting.";
+        brain.sttHadFinalSegment = false;
+        brain.fillerFiredForAnswer = true;
+        brain.currentQuestion = {
+          id: "job",
+          question: "What do you do for a living?",
+          jokeContext: "Profession roast",
+          prodLines: [],
+        };
+
+        brain.onInputTranscription("And I hate it.");
+        expect(brain.state).toBe("pre_generate");
+        expect(brain.fillerFiredForAnswer).toBe(false);
+        expect(deps.cancelSpeech).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(90);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(brain.fillerFiredForAnswer).toBe(true);
+        expect(deps.queueSpeak).toHaveBeenCalledWith(
+          expect.stringMatching(/\S/),
+          expect.any(String),
+          expect.any(Number),
+          false,
+          undefined,
+          expect.objectContaining({ handoff: "filler" }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

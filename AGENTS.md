@@ -2,7 +2,7 @@
 
 ## Checkout Workflow
 
-Do not create or use separate Git worktrees for Roastie work. Always work directly in the main project checkout unless the owner explicitly revokes this rule.
+Work directly in the main Roastie checkout by default. Do not create or use separate Git worktrees unless the owner explicitly revokes this rule.
 
 Use `main` as the default working branch. Short-lived branches are allowed when they make a task safer or easier to organize, but keep them in this same checkout. At each sensible, working milestone, agents may merge the branch into `main` without asking first, then push `main` so the Vercel-linked deployment can reflect the latest state.
 

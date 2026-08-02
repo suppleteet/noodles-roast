@@ -5,6 +5,9 @@ import { ComedianBrainDriver } from "./helpers/comedianBrainDriver";
 
 async function startRoasting(page: Page, driver: ComedianBrainDriver): Promise<void> {
   await page.goto("/");
+  // The landing HTML is server-rendered; wait for the client bundle before
+  // clicking so the test cannot spend the whole run on a pre-hydration tap.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   await driver.waitForConnect();
@@ -17,6 +20,7 @@ test.describe("Comedian Brain — Full Flow", () => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
     await page.goto("/");
+    await page.waitForLoadState("networkidle");
     const startMs = Date.now();
     await page.getByRole("button", { name: /roast me/i }).click();
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
@@ -115,7 +119,7 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
 
     // The first bank question is always the user's name. Novel names cannot be
     // inferred safely, so complete that cycle unchanged and exercise repair on
-    // the next semantic question.
+    // the next entity-like question.
     await driver.waitForBrainState("wait_answer", 10000);
     await driver.simulateAnswer("My name is Alex");
     await driver.waitForBrainStateOneOf(["generating", "delivering"], 5000);
@@ -127,7 +131,7 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
       changed: true,
       confidence: 0.98,
       reason: "Likely phonetic substitution in a job answer.",
-    }, 1600);
+    }, 300);
     await driver.startStateTracking();
     await driver.simulateAnswer("I'm a dennis");
     await driver.waitForStateVisited("generating", 5000);

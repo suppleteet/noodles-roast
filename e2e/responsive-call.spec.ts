@@ -45,6 +45,10 @@ test("call shell is full-screen on mobile and a portrait handset on desktop", as
 });
 
 test("short landscape viewports reflow setup and live-call controls side by side", async ({ page }) => {
+  const recorderLogs: string[] = [];
+  page.on("console", (message) => {
+    if (message.text().includes("[recorder]")) recorderLogs.push(message.text());
+  });
   const driver = new ComedianBrainDriver(page);
   await driver.setup();
   await page.setViewportSize({ width: 844, height: 390 });
@@ -75,6 +79,9 @@ test("short landscape viewports reflow setup and live-call controls side by side
   await expect(page.getByTestId("self-view")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("call-controls")).toBeVisible();
   await driver.waitForConnect();
+  await expect.poll(() => recorderLogs.join("\n"), { timeout: 10_000 }).toContain(
+    "size=1280x592",
+  );
 
   expectInside(await page.getByTestId("call-surface").boundingBox(), 844, 390);
   expectInside(await page.getByTestId("self-view").boundingBox(), 844, 390);
@@ -89,6 +96,14 @@ test("short landscape viewports reflow setup and live-call controls side by side
 
   await page.getByRole("button", { name: "End Session" }).click();
   await expect(page.getByTestId("share-screen")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("share-video-shell").locator("video")).toHaveClass(/object-contain/);
+  await expect.poll(
+    () => page.getByTestId("share-video-shell").locator("video").evaluate((video) => ({
+      width: (video as HTMLVideoElement).videoWidth,
+      height: (video as HTMLVideoElement).videoHeight,
+    })),
+    { timeout: 10_000 },
+  ).toEqual({ width: 1280, height: 592 });
   await page.setViewportSize({ width: 568, height: 320 });
   const shareMetrics = await page.getByTestId("share-screen").evaluate((element) => {
     const screen = element as HTMLElement;

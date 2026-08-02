@@ -31,7 +31,7 @@ type StreamEvent =
   /** Fired when ElevenLabs has finished producing audio for a given joke
    *  index — the brain uses this to close the per-joke audio buffer so the
    *  playback chain can advance. */
-  | { type: "audio-end"; index: number }
+  | { type: "audio-end"; index: number; failed?: boolean }
   | {
       type: "meta";
       relevant: boolean;
@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
           }
           // Tell the brain it can close the per-joke audio buffer — all
           // chunks for this joke have been delivered (or we gave up).
-          safeEnqueue({ type: "audio-end", index });
+          safeEnqueue({ type: "audio-end", index, ...(reason === "done" ? {} : { failed: true }) });
           resolveDone();
         };
 

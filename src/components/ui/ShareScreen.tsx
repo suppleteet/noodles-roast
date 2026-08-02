@@ -40,6 +40,7 @@ export default function ShareScreen() {
   const [playing, setPlaying] = useState(false);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoAspectRatio, setVideoAspectRatio] = useState("1 / 1");
   const [fancyName, setFancyName] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [savedFolder, setSavedFolder] = useState<string | null>(null);
@@ -143,6 +144,7 @@ export default function ShareScreen() {
 
   useEffect(() => {
     if (!videoBlob) return;
+    setVideoAspectRatio("1 / 1");
     const url = URL.createObjectURL(videoBlob);
     setVideoUrl(url);
     return () => URL.revokeObjectURL(url);
@@ -271,10 +273,20 @@ export default function ShareScreen() {
           </button>
         )}
 
-        <div className="relative aspect-square overflow-hidden rounded-[2rem] border border-white/10 bg-gray-950 shadow-2xl shadow-orange-950/30">
+        <div
+          data-testid="share-video-shell"
+          className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-gray-950 shadow-2xl shadow-orange-950/30"
+          style={{ aspectRatio: videoAspectRatio }}
+        >
           <video
             ref={videoRef}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
+            onLoadedMetadata={(event) => {
+              const { videoWidth, videoHeight } = event.currentTarget;
+              if (videoWidth > 0 && videoHeight > 0) {
+                setVideoAspectRatio(`${videoWidth} / ${videoHeight}`);
+              }
+            }}
             onEnded={() => setPlaying(false)}
             onPause={() => setPlaying(false)}
             onPlay={() => setPlaying(true)}

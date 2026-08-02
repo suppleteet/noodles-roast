@@ -104,11 +104,19 @@ describe("shouldAttemptTranscriptRepair", () => {
     expect(shouldAttemptTranscriptRepair("Alex", "name", [])).toBe(false);
   });
 
-  it("checks semantic answers and previously established names", () => {
+  it("checks entity-like answers and previously established names", () => {
     expect(shouldAttemptTranscriptRepair("I'm a dennis", "job", [])).toBe(true);
+    expect(shouldAttemptTranscriptRepair("I'm a dennis", "free_time", [])).toBe(true);
+    expect(shouldAttemptTranscriptRepair("I'm from Tuscon", "where_from", [])).toBe(true);
     expect(
       shouldAttemptTranscriptRepair("Alex", "name", ["name:Aleks"]),
     ).toBe(true);
+  });
+
+  it("does not delay free-form answers or conversational complaints", () => {
+    expect(shouldAttemptTranscriptRepair("I build furniture", "free_time", [])).toBe(false);
+    expect(shouldAttemptTranscriptRepair("You are running real slow", "delusion", [])).toBe(false);
+    expect(shouldAttemptTranscriptRepair("It's not true", "single", [])).toBe(false);
   });
 });
 

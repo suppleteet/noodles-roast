@@ -10,6 +10,7 @@ import {
 } from "@/store/useSessionStore";
 import type { WebcamCaptureHandle } from "./WebcamCapture";
 import type { VideoRecorderHandle } from "@/components/recording/VideoRecorder";
+import type { CompositorHandle } from "@/components/recording/useCompositor";
 import { useMicCapture } from "@/components/audio/useMicCapture";
 import { useVad } from "@/components/audio/useVad";
 import { usePcmPlayback } from "@/components/audio/usePcmPlayback";
@@ -41,7 +42,11 @@ import {
   gainForContinuity,
   type VoiceContinuityMode,
 } from "@/lib/voiceMotionPresets";
-import { TtsChunkBuffer, isCompleteTtsBuffer } from "@/lib/ttsChunkBuffer";
+import {
+  TtsChunkBuffer,
+  armTtsStreamWatchdog,
+  isCompleteTtsBuffer,
+} from "@/lib/ttsChunkBuffer";
 import {
   isTranscriptRepairResult,
   type TranscriptRepairRequest,
@@ -65,7 +70,7 @@ interface SpeechProfile {
 interface Props {
   webcamRef: React.RefObject<WebcamCaptureHandle | null>;
   videoRecorderRef: React.RefObject<VideoRecorderHandle | null>;
-  compositorStream: MediaStream | null;
+  compositorHandle: React.MutableRefObject<CompositorHandle>;
   mediaStream?: MediaStream | null;
   prefetchedTokenPromise?: Promise<string> | null;
   /** Comedian chat session pre-created at button press (page.tsx) so its cold
@@ -86,7 +91,7 @@ interface Props {
 export default function LiveSessionController({
   webcamRef,
   videoRecorderRef,
-  compositorStream,
+  compositorHandle,
   mediaStream,
   prefetchedTokenPromise,
   prefetchedComedianSessionPromise,
@@ -362,6 +367,19 @@ export default function LiveSessionController({
     const sinkOpenedAt = Date.now();
     let firstAudioLogged = false;
     let finalizedText = "";
+    let resolveFinalizedText: () => void = () => {};
+    const finalizedTextReady = new Promise<void>((resolve) => {
+      resolveFinalizedText = resolve;
+    });
+    const watchdog = armTtsStreamWatchdog(audio, () => {}, {
+      firstAudioMs: COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs,
+      completionMs: COMEDIAN_CONFIG.ttsCompletionTimeoutMs,
+      onTimeout: (reason) => {
+        useSessionStore.getState().logTiming(
+          `tts-stream: ${reason} timeout (${reason === "first-audio" ? COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs : COMEDIAN_CONFIG.ttsCompletionTimeoutMs}ms) — REST failover`,
+        );
+      },
+    });
     const ttsSpanId = useSessionStore.getState().beginSpan("tts", `stream:${motion}`);
     let spanEnded = false;
     const endSpan = () => {
@@ -372,6 +390,7 @@ export default function LiveSessionController({
 
     ttsChainRef.current = ttsChainRef.current.then(async () => {
       if (ttsGenerationRef.current !== gen || !isRunningRef.current) {
+        watchdog.dispose();
         audio.finish(true);
         endSpan();
         return;
@@ -385,11 +404,26 @@ export default function LiveSessionController({
           get text() { return finalizedText; },
           handoff: options?.handoff,
         });
-        if (!queued && audio.failed && finalizedText) {
-          useSessionStore.getState().logTiming(
-            `tts-stream: no audio — REST failover "${finalizedText.slice(0, 40)}"`,
-          );
-          await scheduleRestFallback(finalizedText, gen, profile, options?.handoff);
+        if (!queued && audio.failed) {
+          if (!finalizedText) {
+            await Promise.race([
+              finalizedTextReady,
+              new Promise<void>((resolve) => window.setTimeout(
+                resolve,
+                COMEDIAN_CONFIG.ttsFallbackTextWaitMs,
+              )),
+            ]);
+          }
+          if (finalizedText) {
+            useSessionStore.getState().logTiming(
+              `tts-stream: no audio — REST failover "${finalizedText.slice(0, 40)}"`,
+            );
+            await scheduleRestFallback(finalizedText, gen, profile, options?.handoff);
+          } else {
+            useSessionStore.getState().logTiming(
+              "tts-stream: failed before joke text arrived — advancing safely",
+            );
+          }
         }
       } finally {
         endSpan();
@@ -403,6 +437,7 @@ export default function LiveSessionController({
           // The streamed-joke path had no audio-arrival telemetry — EL synthesis
           // lag here is invisible in the log yet is the main mid-set pause source.
           firstAudioLogged = true;
+          watchdog.noteFirstAudio();
           useSessionStore
             .getState()
             .logTiming(`tts-stream: first audio ${Date.now() - sinkOpenedAt}ms (${motion})`);
@@ -415,6 +450,7 @@ export default function LiveSessionController({
         // before the remaining chunks arrive and the joke gets cut off.
         if (text.trim()) {
           finalizedText = text.trim();
+          resolveFinalizedText();
           useSessionStore
             .getState()
             .pushTranscriptEntry("puppet", text.trim(), { append: options?.appendToPrev });
@@ -422,9 +458,11 @@ export default function LiveSessionController({
         }
       },
       endAudio(failed = false) {
+        watchdog.dispose();
         audio.finish(failed || !firstAudioLogged);
       },
       cancel() {
+        watchdog.dispose();
         audio.finish(true);
         endSpan();
       },
@@ -549,6 +587,16 @@ export default function LiveSessionController({
       return audio;
     }
     const ttsSpanId = useSessionStore.getState().beginSpan("tts", text.slice(0, 22));
+    const requestAbort = new AbortController();
+    const watchdog = armTtsStreamWatchdog(audio, () => requestAbort.abort(), {
+      firstAudioMs: COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs,
+      completionMs: COMEDIAN_CONFIG.ttsCompletionTimeoutMs,
+      onTimeout: (reason) => {
+        useSessionStore.getState().logTiming(
+          `tts: ${reason} timeout (${reason === "first-audio" ? COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs : COMEDIAN_CONFIG.ttsCompletionTimeoutMs}ms) "${text.slice(0, 32)}"`,
+        );
+      },
+    });
     let spanEnded = false;
     const endSpan = () => {
       if (spanEnded) return;
@@ -574,9 +622,11 @@ export default function LiveSessionController({
             voiceSettings: mergedVoice,
             experienceType: useSessionStore.getState().experienceType,
           }),
+          signal: requestAbort.signal,
         });
 
         if (!resp.ok || !resp.body || ttsGenerationRef.current !== gen) {
+          watchdog.dispose();
           endSpan();
           audio.finish(true);
           return;
@@ -591,6 +641,7 @@ export default function LiveSessionController({
           if (done) break;
           if (ttsGenerationRef.current !== gen || !isRunningRef.current) {
             reader.cancel();
+            watchdog.dispose();
             endSpan();
             audio.finish(true);
             return;
@@ -611,6 +662,7 @@ export default function LiveSessionController({
               if (event.type === "audio" && event.chunk) {
                 if (!firstAudioLogged) {
                   firstAudioLogged = true;
+                  watchdog.noteFirstAudio();
                   useSessionStore.getState().logTiming(
                     `tts: first audio ${Date.now() - startedAt}ms "${text.slice(0, 32)}"`,
                   );
@@ -626,12 +678,14 @@ export default function LiveSessionController({
           }
         }
 
+        watchdog.dispose();
         endSpan();
         // A nominally completed stream with zero PCM is still a failed line.
         // Mark it failed so queueSpeak uses the REST transport instead of
         // silently advancing the show with missing speech.
         audio.finish(streamFailed || !firstAudioLogged);
       } catch (e) {
+        watchdog.dispose();
         endSpan();
         audio.finish(true);
         if ((e as Error).name !== "AbortError") {
@@ -666,6 +720,9 @@ export default function LiveSessionController({
       await audio.waitForUpdate();
     }
     if (!isCompleteTtsBuffer(audio)) return false;
+    useSessionStore.getState().logTiming(
+      `tts: buffer complete chunks=${audio.chunks.length} "${meta.text.slice(0, 32)}"`,
+    );
 
     while (isRunningRef.current && ttsGenerationRef.current === gen) {
       while (cursor < audio.chunks.length) {
@@ -730,7 +787,13 @@ export default function LiveSessionController({
     profile: SpeechProfile,
     handoff?: SpeechHandoff,
   ): Promise<boolean> {
+    let fallbackTimer: number | null = null;
     try {
+      const fallbackAbort = new AbortController();
+      fallbackTimer = window.setTimeout(
+        () => fallbackAbort.abort(),
+        COMEDIAN_CONFIG.ttsRestTimeoutMs,
+      );
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -739,6 +802,7 @@ export default function LiveSessionController({
           voiceSettings: profile.voice,
           experienceType: useSessionStore.getState().experienceType,
         }),
+        signal: fallbackAbort.signal,
       });
       if (!response.ok || ttsGenerationRef.current !== gen || !isRunningRef.current) {
         useSessionStore.getState().logTiming(
@@ -768,6 +832,8 @@ export default function LiveSessionController({
         `tts: REST failover error — ${(error as Error).message}`,
       );
       return false;
+    } finally {
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
     }
   }
 
@@ -779,11 +845,13 @@ export default function LiveSessionController({
    */
   function startVideoRecordingIfNeeded(): void {
     if (mockMode) return;
-    if (!videoRecorderRef.current || !compositorStream || !isRunningRef.current) return;
+    if (!videoRecorderRef.current || !isRunningRef.current) return;
     if (videoRecorderRef.current.isRecording()) return;
-    videoRecorderRef.current.start(compositorStream, playback.getDestinationStream());
+    const prepared = compositorHandle.current.prepareForRecording();
+    if (!prepared) return;
+    videoRecorderRef.current.start(prepared.stream, playback.getDestinationStream(), prepared);
     useSessionStore.getState().logTiming(
-      `live: recording start requested (${compositorStream.getVideoTracks().length}v/${playback.getDestinationStream()?.getAudioTracks().length ?? 0}a)`,
+      `live: recording start requested ${prepared.width}x${prepared.height} (${prepared.stream.getVideoTracks().length}v/${playback.getDestinationStream()?.getAudioTracks().length ?? 0}a)`,
     );
   }
 
