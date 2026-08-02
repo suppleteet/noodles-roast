@@ -199,7 +199,7 @@ export function useCompositor(
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(
-          "Sizing you up…",
+          "Connecting…",
           recordingFrame.x + recordingFrame.width / 2,
           recordingFrame.y + recordingFrame.height / 2 + 22 * scale,
         );

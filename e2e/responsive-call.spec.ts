@@ -114,7 +114,7 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   await context.close();
 });
 
-test("short landscape viewports reflow setup and live-call controls side by side", async ({ page }) => {
+test("short landscape viewports keep the puppet selector above the bottom call controls", async ({ page }) => {
   const recorderLogs: string[] = [];
   page.on("console", (message) => {
     if (message.text().includes("[recorder]")) recorderLogs.push(message.text());
@@ -130,7 +130,7 @@ test("short landscape viewports reflow setup and live-call controls side by side
   const actions = await page.locator(".puppet-line-controls").boundingBox();
   expectInside(carousel, 844, 390);
   expectInside(actions, 844, 390);
-  expect(carousel!.x + carousel!.width).toBeLessThanOrEqual(actions!.x + 1);
+  expect(carousel!.y + carousel!.height).toBeLessThanOrEqual(actions!.y + 1);
 
   await page.setViewportSize({ width: 568, height: 320 });
   expectInside(await frame.boundingBox(), 568, 320);

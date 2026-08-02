@@ -766,11 +766,13 @@ function MainApp() {
         <div data-testid="call-surface" className="call-puppet-stage">
           {/* Loading overlay — fades out only when the first TTS audio chunk starts. */}
           <div className={`absolute inset-0 bg-black z-10 pointer-events-none transition-opacity ${isEnding ? "duration-[600ms]" : "duration-[500ms]"} ${puppetRevealed ? "opacity-0" : "opacity-100"}`}>
-            {phase === "roasting" && !puppetRevealed && (
+            {(phase === "requesting-permissions" || phase === "roasting") && !puppetRevealed && (
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <p className="text-white/50 text-sm font-medium animate-pulse">Sizing you up…</p>
+                  <p className="text-white/50 text-sm font-medium animate-pulse" aria-label="Connecting.">
+                    Connecting<span className="loading-ellipsis" aria-hidden="true" />
+                  </p>
                 </div>
               </div>
             )}
@@ -791,11 +793,6 @@ function MainApp() {
               onStartSession={handleStartSession}
               isMock={mockMode}
             />
-          )}
-          {phase === "requesting-permissions" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-              <p className="text-white text-lg font-bold animate-pulse">Requesting camera…</p>
-            </div>
           )}
         </div>
         )}
