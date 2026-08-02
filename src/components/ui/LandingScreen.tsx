@@ -5,6 +5,7 @@ import type { ContentMode, RoastModelId } from "@/store/useSessionStore";
 import { formatUsd, type RoastPassProduct, type RoastPassSku } from "@/lib/monetizationCatalog";
 import { useDevUnlock } from "@/lib/devUnlock";
 import { preloadLiveExperienceModules } from "@/lib/preloadLiveExperience";
+import { currentMediaCaptureBlockMessage } from "@/lib/mediaCaptureSupport";
 
 const MODEL_OPTIONS: { id: RoastModelId; label: string }[] = [
   { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash — Recommended" },
@@ -114,6 +115,11 @@ export default function LandingScreen() {
   async function handleStart() {
     preloadLiveExperienceModules();
     setError(null);
+    const captureBlockMessage = currentMediaCaptureBlockMessage();
+    if (captureBlockMessage) {
+      setError(captureBlockMessage);
+      return;
+    }
     if (PAYMENTS_ENABLED) {
       const status = paymentStatus ?? await refreshPaymentStatus();
       if (!status?.configured) {

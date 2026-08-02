@@ -14,6 +14,7 @@ import { kickTownFlavorFetch } from "@/lib/kickTownFlavorFetch";
 import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
+import { currentMediaCaptureBlockMessage } from "@/lib/mediaCaptureSupport";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { useRigEditStore } from "@/engine/store/RigEditStore";
 import { lockDevUi, unlockDevUi, useDevUnlock } from "@/lib/devUnlock";
@@ -335,6 +336,11 @@ function MainApp() {
 
   const handleStartSession = async () => {
     preloadLiveExperienceModules();
+    const captureBlockMessage = currentMediaCaptureBlockMessage();
+    if (captureBlockMessage) {
+      setError(captureBlockMessage);
+      return;
+    }
     // MP4-only flow — block the session if MediaRecorder can't produce MP4.
     // No fallback to WebM since the server can't convert it (Vercel Hobby tier
     // has no ffmpeg). Surface a clear message so the user knows to switch
@@ -403,6 +409,7 @@ function MainApp() {
   // dialog fires while the user is reading, and the first frame is pre-analyzed.
   useEffect(() => {
     if (phase !== "consent") return;
+    if (currentMediaCaptureBlockMessage()) return;
     navigator.mediaDevices
       .getUserMedia({
         video: { width: { ideal: 720 }, height: { ideal: 720 }, facingMode: { ideal: "user" } },
@@ -438,6 +445,13 @@ function MainApp() {
   // Request camera when phase enters requesting-permissions
   useEffect(() => {
     if (phase !== "requesting-permissions") return;
+
+    const captureBlockMessage = currentMediaCaptureBlockMessage();
+    if (captureBlockMessage) {
+      setError(captureBlockMessage);
+      setPhase("idle", "PERMISSIONS_DENIED");
+      return;
+    }
 
     ensureLiveTokenPrefetch();
     // Kick off the longest cold path now (settings locked at button press) so it

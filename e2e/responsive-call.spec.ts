@@ -66,6 +66,10 @@ test("short landscape viewports reflow setup and live-call controls side by side
 
   await page.setViewportSize({ width: 844, height: 390 });
 
+  // Geometry is available from server-rendered HTML before React has attached
+  // the landing handlers. Wait for the client to settle before exercising the
+  // live-call transition so this layout assertion does not race hydration.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: /roast me/i }).click();
   await expect(page.getByTestId("call-surface")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("self-view")).toBeVisible({ timeout: 10_000 });

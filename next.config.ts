@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["ws"],
+  // Next 16 blocks dev-resource/HMR requests whose browser origin is not
+  // explicitly trusted. The owner's phone reaches this checkout over the
+  // private Wi-Fi address; without this entry the HTML renders but React never
+  // hydrates, leaving every visible control inert. Development-only and scoped
+  // to this machine's current private LAN address.
+  allowedDevOrigins: ["10.0.0.36"],
   env: {
     // A deterministic deploy/build stamp for the discreet developer-UI trigger.
     // An explicit value is useful for reproducible builds; otherwise each build
