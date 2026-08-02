@@ -34,3 +34,10 @@ export class TtsChunkBuffer {
     for (const resolve of waiters) resolve();
   }
 }
+
+/** A line is playable only after the producer finalized every chunk cleanly.
+ * Partial failed streams are intentionally rejected so the caller can replace
+ * the entire line through an independent transport without repeating a prefix. */
+export function isCompleteTtsBuffer(buffer: TtsChunkBuffer): boolean {
+  return buffer.done && !buffer.failed && buffer.chunks.length > 0;
+}

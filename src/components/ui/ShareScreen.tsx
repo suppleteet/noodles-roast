@@ -257,8 +257,8 @@ export default function ShareScreen() {
   const buttonsDisabled = converting || !shareBlob || shareBlob.size === 0;
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-black px-6 text-center text-white">
-      <div className="relative mb-6 w-full max-w-sm">
+    <div data-testid="share-screen" className="flex h-full min-h-0 flex-col items-center justify-start overflow-y-auto bg-[radial-gradient(circle_at_50%_12%,rgba(249,115,22,0.16),transparent_32%),#030201] px-5 py-8 text-center text-white">
+      <div data-testid="share-preview" className="relative mb-6 w-full max-w-sm">
         {IS_DEV && (
           <button
             onClick={handleOpenFolder}

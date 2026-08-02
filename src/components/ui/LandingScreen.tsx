@@ -162,10 +162,39 @@ export default function LandingScreen() {
   const featured = products.find((product) => product.featured) ?? products[0];
 
   return (
-    <div className="relative flex h-dvh w-full flex-col items-center justify-center overflow-hidden bg-[#080301] px-4 text-center text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,22,0.24),transparent_30%),linear-gradient(150deg,#170604_0%,#050201_58%,#000_100%)]" />
+    <div className="landing-screen">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,22,0.26),transparent_32%),linear-gradient(155deg,#210907_0%,#080302_55%,#000_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-white/[0.035] to-transparent" />
 
-      <div className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-[2rem] border border-white/10 bg-black/45 px-6 py-8 shadow-2xl shadow-orange-950/30 backdrop-blur-xl">
+      <header className="landing-call-header">
+        <div>
+          <p className="landing-call-kicker">Roastie video</p>
+          <p className="text-sm font-bold text-white/90">Incoming call</p>
+        </div>
+        <div className="landing-ready-pill">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]" />
+          Ready
+        </div>
+      </header>
+
+      <div className="landing-layout">
+        <section className="landing-identity" aria-labelledby="roastie-title">
+          <div className="landing-avatar-wrap" aria-hidden="true">
+            <div className="landing-avatar-ring" />
+            <div className="landing-avatar">R</div>
+          </div>
+          <p className="mt-5 text-[11px] font-black uppercase tracking-[0.32em] text-orange-300/75">
+            AI comedian
+          </p>
+          <h1 id="roastie-title" className="font-display mt-1 text-5xl leading-none tracking-tight text-orange-50">
+            Roastie
+          </h1>
+          <p className="mt-3 max-w-[280px] text-sm leading-relaxed text-white/55">
+            Your camera. His material. Pick the call you want to answer.
+          </p>
+        </section>
+
+      <div className="landing-actions">
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/50 bg-red-950/70 px-5 py-3 text-sm text-red-100">
             {error}
@@ -207,7 +236,7 @@ export default function LandingScreen() {
           </>
         )}
 
-        <label className="mb-6 flex max-w-xs cursor-pointer select-none items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 transition-colors hover:bg-white/[0.07]">
+        <label className="mb-4 flex w-full cursor-pointer select-none items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3.5 transition-colors hover:bg-white/[0.07]">
           <input
             type="checkbox"
             checked={locationConsent}
@@ -219,7 +248,7 @@ export default function LandingScreen() {
           </span>
         </label>
 
-        <div className="mb-8 grid w-full grid-cols-2 rounded-full border border-white/10 bg-white/10 p-1">
+        <div className="mb-5 grid w-full grid-cols-2 rounded-full border border-white/10 bg-white/10 p-1">
           {(["clean", "vulgar"] as ContentMode[]).map((mode) => (
             <button
               key={mode}
@@ -278,14 +307,14 @@ export default function LandingScreen() {
           </div>
         )}
 
-        <div className="flex w-full flex-wrap items-center justify-center gap-4">
+        <div className="grid w-full grid-cols-2 gap-3">
           <button
             onClick={() => {
               setExperienceType("roast");
               void handleStart();
             }}
             disabled={paymentBusy !== null}
-            className="rounded-2xl bg-orange-600 px-8 py-5 text-xl font-black text-white shadow-lg shadow-orange-950/50 transition-all hover:-translate-y-0.5 hover:bg-orange-500 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50"
+            className="landing-answer-button bg-orange-600 text-white shadow-orange-950/50 hover:bg-orange-500"
           >
             {paymentBusy === "redeem" ? "Starting..." : "Roast Me"}
           </button>
@@ -295,11 +324,12 @@ export default function LandingScreen() {
               void handleStart();
             }}
             disabled={paymentBusy !== null}
-            className="rounded-2xl bg-amber-200 px-8 py-5 text-xl font-black text-amber-950 shadow-lg shadow-amber-900/40 transition-all hover:-translate-y-0.5 hover:bg-amber-100 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50"
+            className="landing-answer-button bg-amber-200 text-amber-950 shadow-amber-900/40 hover:bg-amber-100"
           >
             {paymentBusy === "redeem" ? "Starting..." : "Toast Me"}
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

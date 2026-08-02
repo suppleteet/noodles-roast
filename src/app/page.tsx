@@ -697,7 +697,7 @@ function MainApp() {
   }, [phase]);
 
   return (
-    <main className="relative h-dvh bg-black flex items-center justify-center overflow-hidden">
+    <main className="call-app">
       <button
         type="button"
         onClick={handleBuildTimestampClick}
@@ -767,11 +767,16 @@ function MainApp() {
         />
       )}
 
-      {phase === "idle" && <LandingScreen />}
-      {phase === "consent" && <ConsentScreen />}
+      <section
+        data-testid="call-frame"
+        aria-label="Roastie video call"
+        className="call-frame"
+      >
+        {phase === "idle" && <LandingScreen />}
+        {phase === "consent" && <ConsentScreen />}
 
-      {showPuppet && (
-        <div className="relative w-full max-w-[560px] aspect-square">
+        {showPuppet && (
+        <div data-testid="call-surface" className="call-puppet-stage">
           {/* Loading overlay — fades out only when the first TTS audio chunk starts. */}
           <div className={`absolute inset-0 bg-black z-10 pointer-events-none transition-opacity ${isEnding ? "duration-[600ms]" : "duration-[500ms]"} ${puppetRevealed ? "opacity-0" : "opacity-100"}`}>
             {phase === "roasting" && !puppetRevealed && (
@@ -789,7 +794,9 @@ function MainApp() {
             ref={pipRefCallback}
             muted
             playsInline
-            className={`absolute bottom-4 right-4 w-36 h-36 object-cover rounded-lg border border-white/20 z-20 ${webcamStream ? "" : "hidden"}`}
+            data-testid="self-view"
+            aria-label="Your camera preview"
+            className={`call-self-view ${webcamStream ? "" : "hidden"}`}
             style={{ transform: "scaleX(-1)" }}
           />
           {(phase === "roasting" || phase === "stopped") && (
@@ -804,19 +811,30 @@ function MainApp() {
             </div>
           )}
         </div>
-      )}
+        )}
 
-      {/* End Session — outside puppet view */}
-      {phase === "roasting" && (
-        <button
-          onClick={() => setPhase("stopped", "STOP_CLICKED")}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 px-8 py-3 bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 rounded-full text-white font-bold transition-all"
-        >
-          End Session
-        </button>
-      )}
+        {phase === "roasting" && (
+          <div data-testid="call-controls" className="call-controls">
+            <button
+              type="button"
+              onClick={() => setPhase("stopped", "STOP_CLICKED")}
+              aria-label="End Session"
+              className="call-end-button"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7">
+                <path
+                  fill="currentColor"
+                  d="M6.6 10.8c3.48-2.15 7.32-2.15 10.8 0l1.26-1.72a1.55 1.55 0 0 1 2.16-.34l1.17.86c.68.5.83 1.45.34 2.13l-2.2 3a1.55 1.55 0 0 1-2.13.36l-1.16-.82a1.52 1.52 0 0 1-.54-1.76 8.85 8.85 0 0 0-8.6 0 1.52 1.52 0 0 1-.54 1.76L6 15.09a1.55 1.55 0 0 1-2.13-.36l-2.2-3a1.54 1.54 0 0 1 .34-2.13l1.17-.86a1.55 1.55 0 0 1 2.16.34L6.6 10.8Z"
+                />
+              </svg>
+              <span className="sr-only">End Session</span>
+            </button>
+            <span className="call-control-label">End</span>
+          </div>
+        )}
 
-      {phase === "sharing" && <ShareScreen />}
+        {phase === "sharing" && <ShareScreen />}
+      </section>
 
       {/* Debug panels — dev only */}
       {IS_DEV && debugMode && <DebugTranscript />}

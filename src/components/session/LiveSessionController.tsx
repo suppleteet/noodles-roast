@@ -41,7 +41,7 @@ import {
   gainForContinuity,
   type VoiceContinuityMode,
 } from "@/lib/voiceMotionPresets";
-import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
+import { TtsChunkBuffer, isCompleteTtsBuffer } from "@/lib/ttsChunkBuffer";
 import {
   isTranscriptRepairResult,
   type TranscriptRepairRequest,
@@ -665,7 +665,7 @@ export default function LiveSessionController({
     while (!audio.done && isRunningRef.current && ttsGenerationRef.current === gen) {
       await audio.waitForUpdate();
     }
-    if (audio.failed || !audio.done) return false;
+    if (!isCompleteTtsBuffer(audio)) return false;
 
     while (isRunningRef.current && ttsGenerationRef.current === gen) {
       while (cursor < audio.chunks.length) {
