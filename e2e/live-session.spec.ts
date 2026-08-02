@@ -40,21 +40,15 @@ test.describe("Startup", () => {
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible({ timeout: 10000 });
   });
 
-  test("slow vision startup uses a minimal low-register bridge", async ({ page }) => {
+  test("slow vision startup waits for the vision joke", async ({ page }) => {
     const mock = new LiveSessionMock(page);
     await mock.setup();
 
     await page.goto("/");
   await page.getByRole("button", { name: "Call Roastie" }).click();
 
-    const req = await mock.waitForTtsRequest(5000);
-    expect(req.text).toBe("Well, hello there.");
-    expect(req.text).not.toMatch(/\?$/);
-    expect(req.voiceSettings).toMatchObject({
-      style: 0.25,
-      speed: 0.88,
-      stability: 0.632,
-    });
+    await page.waitForTimeout(1800);
+    expect(mock.getTtsRequests().some((request) => request.text === "Well, hello there.")).toBe(false);
   });
 
   test("model-trouble restart creates fresh Terra startup resources", async ({ page }) => {

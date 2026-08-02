@@ -3,7 +3,6 @@ import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { ComedyQuestion } from "@/lib/questionBank";
 import type { JokeResponse } from "@/app/api/generate-joke/route";
 import { PERSONAS } from "@/lib/personas";
-import { VISION_GREETING_BRIDGE } from "@/lib/scriptLines";
 
 // Mock COMEDIAN_CONFIG at module level (evaluated at import time)
 vi.mock("@/lib/comedianConfig", () => ({
@@ -737,7 +736,7 @@ describe("ComedianBrain", () => {
   });
 
   describe("vision-joke startup", () => {
-    it("uses only a minimal bridge while a slow vision joke remains authoritative", async () => {
+    it("waits for a slow vision joke without the legacy roast bridge", async () => {
       vi.useFakeTimers();
       try {
         let resolveVision!: (value: {
@@ -757,13 +756,7 @@ describe("ComedianBrain", () => {
 
         brain.enterGreeting();
         await vi.advanceTimersByTimeAsync(50);
-        expect(deps.queueSpeak).toHaveBeenCalledWith(
-          VISION_GREETING_BRIDGE,
-          expect.any(String),
-          expect.any(Number),
-          undefined,
-          expect.any(Object),
-        );
+        expect(deps.queueSpeak).not.toHaveBeenCalled();
 
         brain.onTtsQueueDrained();
         expect(brain.state).toBe("greeting");

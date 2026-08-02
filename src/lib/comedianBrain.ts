@@ -38,7 +38,6 @@ import {
   CONFIRM_DENIED_LINE,
   ANSWER_FALLBACK_ROASTS,
   GREETING_FALLBACK,
-  VISION_GREETING_BRIDGE,
   TOAST_VISION_GREETING_BRIDGE,
   TOAST_VISION_FALLBACK,
   WRAPUP_FALLBACK,
@@ -503,7 +502,7 @@ export class ComedianBrain {
   private visionReadyForGreeting = false;
   private greetingTtsDrained = false;
   private greetingSpeechQueued = false; // true once greeting generation resolves and speech is queued
-  private greetingBridgeSpoken = false; // minimal non-substantive bridge while the real vision joke stays authoritative
+  private greetingBridgeSpoken = false; // guards the one-shot startup fallback timer
   private greetingVisionTimeout: ReturnType<typeof setTimeout> | null = null;
   private visionJokePrefetch: Promise<JokeResponse | null> | null = null;
 
@@ -1409,17 +1408,20 @@ export class ComedianBrain {
     this.greetingVisionTimeout = setTimeout(() => {
       if (this.state !== "greeting" || this.greetingSpeechQueued || this.greetingBridgeSpoken) return;
       this.greetingBridgeSpoken = true;
-      this.deps.logTiming("brain: startup vision joke slow — speaking minimal bridge, vision joke still owns opening");
+      if (!this._isToast()) {
+        this.deps.logTiming("brain: startup vision joke slow — waiting for vision joke");
+        return;
+      }
+      this.deps.logTiming("brain: startup vision joke slow — speaking Toast bridge");
       const [fbMotion, fbIntensity] = this._openerRegister();
-      const bridge = this._isToast() ? TOAST_VISION_GREETING_BRIDGE : VISION_GREETING_BRIDGE;
       this.deps.queueSpeak(
-        bridge,
+        TOAST_VISION_GREETING_BRIDGE,
         fbMotion,
         fbIntensity,
         undefined,
         this._openerVoiceOverride(fbMotion, fbIntensity),
       );
-      this._addLedger("reaction", bridge, []);
+      this._addLedger("reaction", TOAST_VISION_GREETING_BRIDGE, []);
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 
