@@ -38,6 +38,8 @@ import {
 import {
   voiceSettingsForMotion,
   gainForMotion,
+  voiceSettingsForExperience,
+  gainForExperience,
   voiceSettingsForContinuity,
   gainForContinuity,
   type VoiceContinuityMode,
@@ -234,9 +236,11 @@ export default function LiveSessionController({
     voiceOverride?: Partial<VoiceSettings>,
     continuity?: VoiceContinuityMode,
   ): SpeechProfile {
-    const baseVoice = useSessionStore.getState().voiceSettings;
+    const store = useSessionStore.getState();
+    const baseVoice = store.voiceSettings;
     const motionVoice = voiceSettingsForMotion(baseVoice, motion, intensity);
-    const targetVoice = voiceOverride ? { ...motionVoice, ...voiceOverride } : motionVoice;
+    const overriddenVoice = voiceOverride ? { ...motionVoice, ...voiceOverride } : motionVoice;
+    const targetVoice = voiceSettingsForExperience(overriddenVoice, store.experienceType);
     // Continuity-sensitive lines deliberately key off the last profile that
     // actually reached WebAudio. A failed synthesis must never become the
     // voice/timbre reference for the next filler or joke.
@@ -252,7 +256,7 @@ export default function LiveSessionController({
       continuity,
     );
     const gain = gainForContinuity(
-      gainForMotion(motion, intensity),
+      gainForExperience(gainForMotion(motion, intensity), store.experienceType),
       continuityGain,
       continuity,
     );

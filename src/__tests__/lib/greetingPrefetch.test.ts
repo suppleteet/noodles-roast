@@ -4,6 +4,9 @@ import { DEFAULT_VOICE_SETTINGS, useSessionStore } from "@/store/useSessionStore
 import {
   ROAST_OPENER_SPEED_CAP,
   ROAST_OPENER_STYLE_CAP,
+  TOAST_MAX_SPEED,
+  TOAST_MAX_STYLE,
+  TOAST_MIN_STABILITY,
 } from "@/lib/voiceMotionPresets";
 import { kvetch } from "@/lib/comedians/kvetch";
 
@@ -266,6 +269,32 @@ describe("prefetchGreetingAudio", () => {
 
     expect(buffer.failed).toBe(true);
     expect(buffer.done).toBe(true);
+  });
+
+  it("contains Toastie motion extremes before opening the TTS stream", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, body: null });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { prefetchGreetingAudio } = await import("@/lib/greetingPrefetch");
+    const buffer = prefetchGreetingAudio(
+      "Oh, hi!",
+      "energetic",
+      0.8,
+      DEFAULT_VOICE_SETTINGS,
+      "toast",
+    );
+
+    while (!buffer.done) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.experienceType).toBe("toast");
+    expect(body.voiceSettings).toMatchObject({
+      stability: TOAST_MIN_STABILITY,
+      style: TOAST_MAX_STYLE,
+      speed: TOAST_MAX_SPEED,
+    });
   });
 
   it("returns immediately-failed buffer for empty text", () => {

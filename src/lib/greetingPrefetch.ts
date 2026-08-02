@@ -6,7 +6,11 @@ import { pickCannedIntro } from "@/lib/comedians/types";
 import type { ContentMode, VoiceSettings } from "@/store/useSessionStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
-import { voiceSettingsForMotion, voiceSettingsForRoastOpener } from "@/lib/voiceMotionPresets";
+import {
+  voiceSettingsForExperience,
+  voiceSettingsForMotion,
+  voiceSettingsForRoastOpener,
+} from "@/lib/voiceMotionPresets";
 import type { MotionState } from "@/lib/motionStates";
 
 export interface GreetingPrefetchSnapshot {
@@ -240,10 +244,13 @@ export function prefetchGreetingAudio(
   }
 
   const startedAt = Date.now();
-  const mergedVoice = voiceSettingsForMotion(
-    baseVoiceSettings,
-    motion as MotionState | undefined,
-    intensity ?? 0.7,
+  const mergedVoice = voiceSettingsForExperience(
+    voiceSettingsForMotion(
+      baseVoiceSettings,
+      motion as MotionState | undefined,
+      intensity ?? 0.7,
+    ),
+    experienceType,
   );
 
   void (async () => {

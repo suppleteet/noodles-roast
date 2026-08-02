@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ROAST_OPENER_SPEED_CAP,
   ROAST_OPENER_STYLE_CAP,
+  TOAST_MAX_SPEED,
+  TOAST_MAX_STYLE,
+  TOAST_MIN_STABILITY,
+  TOAST_OUTPUT_GAIN,
+  gainForExperience,
   gainForContinuity,
+  voiceSettingsForExperience,
   voiceSettingsForContinuity,
   voiceSettingsForMotion,
   voiceSettingsForRoastOpener,
@@ -73,5 +79,36 @@ describe("voice continuity", () => {
     expect(Math.abs(next.style - previous.style)).toBeCloseTo(0.1);
     expect(Math.abs(next.speed - previous.speed)).toBeCloseTo(0.05);
     expect(gainForContinuity(0.4, 0.85, "smooth")).toBeCloseTo(0.77);
+  });
+});
+
+describe("Toastie source-voice quality rails", () => {
+  it("contains aggressive motion settings without changing Roastie", () => {
+    const energetic = voiceSettingsForMotion(DEFAULT_VOICE_SETTINGS, "energetic", 0.8);
+
+    expect(voiceSettingsForExperience(energetic, "roast")).toBe(energetic);
+    expect(voiceSettingsForExperience(energetic, "toast")).toEqual({
+      ...energetic,
+      stability: TOAST_MIN_STABILITY,
+      style: TOAST_MAX_STYLE,
+      speed: TOAST_MAX_SPEED,
+    });
+  });
+
+  it("preserves already-safer Toastie settings", () => {
+    const safe = {
+      ...DEFAULT_VOICE_SETTINGS,
+      stability: 0.72,
+      style: 0.04,
+      speed: 0.94,
+    };
+
+    expect(voiceSettingsForExperience(safe, "toast")).toEqual(safe);
+  });
+
+  it("creates Toastie headroom before recording and speaker output", () => {
+    expect(gainForExperience(1, "toast")).toBe(TOAST_OUTPUT_GAIN);
+    expect(gainForExperience(0.8, "toast")).toBeCloseTo(0.8 * TOAST_OUTPUT_GAIN);
+    expect(gainForExperience(0.8, "roast")).toBe(0.8);
   });
 });

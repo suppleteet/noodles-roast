@@ -10,11 +10,24 @@
  * sound like a different person between lines.
  */
 
-import type { VoiceSettings } from "@/store/useSessionStore";
+import type { ExperienceType, VoiceSettings } from "@/store/useSessionStore";
 import type { MotionState } from "@/lib/stateMachine";
 
 export const ROAST_OPENER_STYLE_CAP = 0.25;
 export const ROAST_OPENER_SPEED_CAP = 0.88;
+
+/**
+ * Toastie's generated source voice is already fast, slurred, and highly
+ * expressive. Treat these as quality rails, not a second character preset:
+ * both experiences still start from DEFAULT_VOICE_SETTINGS, but motion must
+ * not compound that source voice into unstable, style-maxed synthesis.
+ */
+export const TOAST_MIN_STABILITY = 0.6;
+export const TOAST_MAX_STYLE = 0.1;
+export const TOAST_MAX_SPEED = 1;
+
+/** Raw Toastie PCM measures roughly 4-5 dB louder at onset than Roastie. */
+export const TOAST_OUTPUT_GAIN = 0.56;
 
 /**
  * Per-motion offsets. Each value is ADDED to the base setting before clamping.
@@ -116,6 +129,33 @@ export function gainForMotion(motion?: MotionState, intensity = 0.7): number {
   if (target === undefined) return 1;
   const i = clamp(intensity, 0, 1);
   return 1 + (target - 1) * i;
+}
+
+/**
+ * Apply source-voice quality rails after motion deltas. Toastie's personality
+ * is already baked into its generated voice and writing, so stability/style
+ * extremes only add warble and shouting. Roastie remains unchanged.
+ */
+export function voiceSettingsForExperience(
+  settings: VoiceSettings,
+  experienceType: ExperienceType,
+): VoiceSettings {
+  if (experienceType !== "toast") return settings;
+  return {
+    ...settings,
+    stability: Math.max(settings.stability, TOAST_MIN_STABILITY),
+    style: Math.min(settings.style, TOAST_MAX_STYLE),
+    speed: Math.min(settings.speed, TOAST_MAX_SPEED),
+  };
+}
+
+/**
+ * Match Toastie's objectively hotter source level before both the recording
+ * branch and the speaker master. This creates real PCM headroom instead of
+ * merely turning down the device output after the recording split.
+ */
+export function gainForExperience(gain: number, experienceType: ExperienceType): number {
+  return experienceType === "toast" ? clamp(gain * TOAST_OUTPUT_GAIN, 0, 1) : gain;
 }
 
 function clamp(n: number, min: number, max: number): number {

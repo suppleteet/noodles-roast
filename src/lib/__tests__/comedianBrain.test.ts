@@ -129,6 +129,26 @@ describe("ComedianBrain — start() / greeting", () => {
     brain.start();
     expect(brain.isListening()).toBe(false);
   });
+
+  it("opens a slow Toastie greeting with moderate emphasis, not energetic screaming", async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps({
+      getExperienceType: vi.fn().mockReturnValue("toast"),
+      prefetchedGreeting: new Promise<JokeResponse>(() => {}),
+    });
+    const brain = new ComedianBrain(deps);
+
+    brain.start();
+    await vi.advanceTimersByTimeAsync(COMEDIAN_CONFIG.greetingVisionTimeoutMs);
+
+    expect(deps.queueSpeak).toHaveBeenCalledWith(
+      "Oh—hi!",
+      "emphasis",
+      0.45,
+      undefined,
+      undefined,
+    );
+  });
 });
 
 // ─── Vision flow ─────────────────────────────────────────────────────────────

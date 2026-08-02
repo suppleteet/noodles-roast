@@ -1425,12 +1425,11 @@ export class ComedianBrain {
     }, COMEDIAN_CONFIG.greetingVisionTimeoutMs);
   }
 
-  /** Motion + intensity for scripted opening lines, in the persona's register —
-   *  a hardcoded "energetic" 0.8 pushed every persona's first line hot (the
-   *  style-maxed base voice + energetic delta reads screechy). Toast keeps the
-   *  loud drunk energy; Roast personas open on their top motion preference. */
+  /** Motion + intensity for scripted opening lines, in the character's register.
+   *  Toastie's generated source voice already supplies the drunk energy, so a
+   *  moderate emphasis avoids stacking a screamed energetic onset on top. */
   private _openerRegister(): [MotionState, number] {
-    if (this._isToast()) return ["energetic", 0.8];
+    if (this._isToast()) return ["emphasis", 0.45];
     return [PERSONAS[this.deps.getPersona()].motionPreferences[0] ?? "emphasis", 0.6];
   }
 

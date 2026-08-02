@@ -15,7 +15,7 @@ import {
 import { trimObservations } from "@/lib/visionDiff";
 import { createStreamingJokeParser } from "@/lib/partialJokeParser";
 import { openElTtsStream, type ElTtsStreamController } from "@/lib/elTtsStream";
-import { voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
+import { voiceSettingsForExperience, voiceSettingsForMotion } from "@/lib/voiceMotionPresets";
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "@/store/useSessionStore";
 import type { MotionState } from "@/lib/motionStates";
 import { recordTtsUsage } from "@/lib/usageTracker";
@@ -209,7 +209,10 @@ export async function POST(req: NextRequest) {
       const openTtsForJoke = (index: number, motion: string, intensity: number) => {
         if (!useStreamingTts) return;
         const motionState = motion as MotionState;
-        const mergedVoice = voiceSettingsForMotion(baseVoice, motionState, intensity);
+        const mergedVoice = voiceSettingsForExperience(
+          voiceSettingsForMotion(baseVoice, motionState, intensity),
+          experienceType,
+        );
         let resolveDone: () => void = () => {};
         let settled = false;
         const done = new Promise<void>((res) => {
