@@ -52,7 +52,7 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   });
   const page = await context.newPage();
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Puppet Line" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a puppet" })).toBeAttached();
   await expect(page.getByText("Incoming call")).toHaveCount(0);
   await expect(page.getByText("Roastie video")).toHaveCount(0);
 

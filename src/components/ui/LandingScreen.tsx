@@ -218,11 +218,9 @@ export default function LandingScreen() {
   return (
     <div className="landing-screen puppet-line-screen">
       <div className="pointer-events-none absolute inset-0 bg-black" />
-      <header className="puppet-line-header">
-        <h1 className="text-4xl font-bold tracking-tight text-white">Puppet Line</h1>
-      </header>
 
       <main className="puppet-line-main">
+        <h1 className="sr-only">Choose a puppet</h1>
         <section aria-label="Choose a puppet" className="puppet-picker">
           <div
             ref={carouselRef}

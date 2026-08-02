@@ -10,7 +10,7 @@ interface Props {
   isMock?: boolean;
 }
 
-export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
+export default function HUDOverlay({ onStartSession }: Props) {
   const phase = useSessionStore((s) => s.phase);
   const setPhase = useSessionStore((s) => s.setPhase);
   const sessionMode = useSessionStore((s) => s.sessionMode);
@@ -46,12 +46,6 @@ export default function HUDOverlay({ onStartSession, isMock = false }: Props) {
     >
       {/* Top bar */}
       <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none">
-        <span className={`w-2 h-2 rounded-full ${isRoasting ? "bg-red-500 animate-pulse" : "bg-gray-500"}`} />
-        <span className="text-xs font-bold text-white/70 uppercase tracking-wider">
-          {isRoasting ? "Live" : "Stopped"}
-          {isConversation && " · Conversation"}
-          {isMock && <span className="text-yellow-400"> · MOCK</span>}
-        </span>
         {isDev && isRoasting && isSpeaking && (
           <span className="text-xs text-orange-400 font-bold uppercase tracking-wider animate-pulse ml-2">
             Speaking…
