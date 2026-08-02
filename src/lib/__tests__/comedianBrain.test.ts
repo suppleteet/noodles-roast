@@ -705,9 +705,9 @@ describe("ComedianBrain._classifyConfirmResponse", () => {
   });
 });
 
-// ─── Filler picking (echo gated on full answer) ─────────────────────────────
+// ─── Filler picking (production uses low-information backchannels) ──────────
 
-describe("ComedianBrain — filler echo gating", () => {
+describe("ComedianBrain — filler backchannel gating", () => {
   /** Drive through to entering `generating`. Returns the first queueSpeak call after entry. */
   async function captureFillerForAnswer(answer: string, randomValue: number): Promise<string> {
     vi.useFakeTimers();
@@ -733,10 +733,10 @@ describe("ComedianBrain — filler echo gating", () => {
     return (calls[0]?.[0] as string) ?? "";
   }
 
-  it("echoes a complete short name (random=0 forces echo branch)", async () => {
+  it("does not echo a complete short name even at the lowest random value", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0);
-    // Echo template inserts "Tyler" verbatim — must contain it.
-    expect(filler.toLowerCase()).toContain("tyler");
+    expect(filler.toLowerCase()).not.toContain("tyler");
+    expect(PERSONAS.kvetch.fillers).toContain(filler);
   });
 
   it("uses a non-echo filler when echo probability misses", async () => {
@@ -775,10 +775,10 @@ describe("ComedianBrain — filler echo gating", () => {
     expect(filler.toLowerCase()).not.toContain("software engineer at");
   });
 
-  it("echoes a sentence-terminated short answer (random=0)", async () => {
-    // 3 words, ends in period → echo-eligible (cap is 4 words to keep fillers brief).
+  it("does not echo a sentence-terminated short answer", async () => {
     const filler = await captureFillerForAnswer("Just a baker.", 0);
-    expect(filler.toLowerCase()).toContain("baker");
+    expect(filler.toLowerCase()).not.toContain("baker");
+    expect(PERSONAS.kvetch.fillers).toContain(filler);
   });
 
   it("does NOT echo a long answer — falls back to non-word filler", async () => {
