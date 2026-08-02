@@ -1,6 +1,7 @@
 import { getPersona, type PersonaId, DEFAULT_PERSONA } from "@/lib/personas";
 import { getAvoidTopicsBlock } from "@/lib/avoidTopics";
 import { getComedyGuidelinesBlock } from "@/lib/comedyGuidelines";
+import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
 import type { JokeContext } from "@/app/api/generate-joke/route";
 
 export type BurnIntensity = 1 | 2 | 3 | 4 | 5;
@@ -188,7 +189,8 @@ Generate exactly 1 joke. Keep it quick.`,
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
 Based on CURRENT OBSERVATIONS provided. Be specific — reference what you actually see.
-Max 20 words. Punchline at the end.
+${VISION_OPENING_ARRIVAL_RULE}
+Keep the full greeting-plus-observation to 24 words or fewer. The visual observation still needs its punchline at the end.
 
 BACKGROUND RULE:
 - NEVER joke about specific background objects (a ceiling beam, a bookshelf, a poster, a lamp, furniture, etc.)

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getJokePrompt } from "@/lib/prompts";
+import { getContextInstructions } from "@/lib/chatSessionStore";
+import { getToastContextInstructions } from "@/lib/toastPrompts";
 
 describe("getJokePrompt", () => {
   describe("context-specific instructions", () => {
@@ -12,6 +14,22 @@ describe("getJokePrompt", () => {
     it("contains vision_opening task heading", () => {
       const prompt = getJokePrompt("vision_opening", "kvetch", 3, "clean");
       expect(prompt).toContain("Task: First Vision Joke");
+    });
+
+    it("requires a calm arrival beat before every Roast vision observation", () => {
+      const directPrompt = getJokePrompt("vision_opening", "hype", 3, "clean");
+      const sessionPrompt = getContextInstructions("vision_opening");
+
+      expect(directPrompt).toContain("Arrival Beat (HARD)");
+      expect(sessionPrompt).toContain("Arrival Beat (HARD)");
+      expect(directPrompt).toContain("must not be shouted");
+    });
+
+    it("requires Toastie to greet before her first vision beat", () => {
+      const prompt = getToastContextInstructions("vision_opening", "clean");
+
+      expect(prompt).toContain("Arrival Beat (HARD)");
+      expect(prompt).toContain("Do not ask a question");
     });
 
     it("contains answer_roast task heading", () => {

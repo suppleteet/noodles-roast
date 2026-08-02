@@ -17,6 +17,7 @@
 
 import type { JokeContext } from "@/app/api/generate-joke/route";
 import type { BurnIntensity } from "@/lib/prompts";
+import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
 
 /**
  * Toast's drunk-thinking fillers — spoken while a roast is being written, same
@@ -244,8 +245,9 @@ toast. NOT a roast. NOT mean. Warm. One sentence, max 22 words. End on energy.${
 Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First substantive spoken content of the call. Use what you SEE to land one
-toast-shaped beat about the user — confident drunk-assumption energy. Do not greet, ask a question,
-or refer to an earlier intro. Max 22 words. End on energy.${vulgarSuffix}
+toast-shaped beat about the user — confident drunk-assumption energy.
+${VISION_OPENING_ARRIVAL_RULE}
+Keep the full greeting-plus-toast beat to 24 words or fewer. Do not ask a question or refer to an earlier intro.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
 
     answer_roast: `TASK: The user just answered your self-interruption question. You had been mid-toast,

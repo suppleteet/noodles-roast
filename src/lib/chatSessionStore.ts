@@ -17,6 +17,7 @@ import { GoogleGenAI, type Chat } from "@google/genai";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getBaseJokePrompt } from "@/lib/prompts";
 import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
+import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
 import type { BurnIntensity } from "@/lib/prompts";
 import type { PersonaId } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
@@ -458,7 +459,9 @@ Use at least 3 concrete observations when available.
 Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.
-Max 20 words, punchline at the end. Set "relevant": true. Generate exactly 1 joke.`,
+${VISION_OPENING_ARRIVAL_RULE}
+Keep the full greeting-plus-observation to 24 words or fewer, with the visual punchline at the end.
+Set "relevant": true. Generate exactly 1 joke.`,
 
     answer_roast: `TASK: Roast the user's answer. 1-2 jokes that directly reference and roast their answer.
 Max 20 words per sentence, punchline at the end. Each sentence self-contained.
