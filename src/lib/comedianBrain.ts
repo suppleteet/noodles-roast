@@ -388,6 +388,8 @@ export class ComedianBrain {
       timeout: ReturnType<typeof setTimeout>;
       /** Settled, playable result cached before the caller finishes answering. */
       ready: JokeResponse | null;
+      /** Wall-clock time when a playable result became ready. */
+      readyAt: number | null;
       result: Promise<JokeResponse | null>;
     };
     no: {
@@ -395,6 +397,8 @@ export class ComedianBrain {
       timeout: ReturnType<typeof setTimeout>;
       /** Settled, playable result cached before the caller finishes answering. */
       ready: JokeResponse | null;
+      /** Wall-clock time when a playable result became ready. */
+      readyAt: number | null;
       result: Promise<JokeResponse | null>;
     };
   } | null = null;
@@ -537,7 +541,7 @@ export class ComedianBrain {
     this.consecutiveSilentQuestions = 0;
     this.visionOnlyMode = false;
     this._cancelPipelinePrefetch();
-    this._cancelYesNoBranchPrefetch();
+    this._cancelYesNoBranchPrefetch("session-start");
     this._cancelRephrase();
     this.pendingWrapup = false;
     this.wrapupSessionEnded = false;
@@ -564,7 +568,7 @@ export class ComedianBrain {
   stop(): void {
     this._clearTimers();
     this._cancelSpeculative();
-    this._cancelYesNoBranchPrefetch();
+    this._cancelYesNoBranchPrefetch("session-stop");
     this._cancelHopper();
     this._cancelRephrase();
     // Invalidate async delivery callbacks before aborting repair. The abort
@@ -1521,7 +1525,7 @@ export class ComedianBrain {
       return;
     }
     this._transition("ask_question");
-    this._cancelYesNoBranchPrefetch();
+    this._cancelYesNoBranchPrefetch("next-question");
     this.answerBuffer = "";
     this.vadSpeechEndedAt = null;
     this.earlyListenActivated = false;
@@ -2723,12 +2727,9 @@ export class ComedianBrain {
         // closing request on the same multi-turn session.
         if (this.wrapupPrefetchRequested) return;
 
-        // Bonus hopper joke is intentionally NOT fired here — the streaming API already
-        // returns 1-2 jokes per answer (jokesPerAnswer.max=2). Adding a third joke pads
-        // the paragraph and delays the next question. The hopper still feeds vision_react
-        // and silence-fallback paths.
-
-        this._fireHopperGeneration("answer", undefined, answer);
+        // The streaming API already returns 1-2 jokes per answer. Do not also
+        // fill the vision hopper here: its only consumer filters for vision
+        // context, so answer-sourced candidates could never be delivered.
 
         // Speculatively prefetch next pipeline joke while current TTS plays
         this._prefetchPipelineJoke();
@@ -2818,10 +2819,8 @@ export class ComedianBrain {
       return;
     }
 
-    // Bonus hopper joke intentionally suppressed — see _generateAndDeliver onMeta for rationale.
-
-    // Feed hopper with this context
-    this._fireHopperGeneration("answer", undefined, answer);
+    // Do not feed the vision hopper from an answer. Its consumer selects only
+    // vision-sourced candidates, so this used to create disposable LLM work.
 
     // Pre-queue next question while jokes play (no-op in singleJokeMode pipeline path)
     if (!COMEDIAN_CONFIG.singleJokeMode) {
@@ -3362,9 +3361,15 @@ export class ComedianBrain {
     this.pipelinePrefetch = null;
   }
 
-  private _cancelYesNoBranchPrefetch(): void {
+  private _cancelYesNoBranchPrefetch(reason = "state-change"): void {
     const prefetch = this.yesNoBranchPrefetch;
     if (!prefetch) return;
+    const ready = (["yes", "no"] as const)
+      .filter((answer) => this._hasPlayableBranchResponse(prefetch[answer].ready))
+      .join(",") || "none";
+    this.deps.logTiming(
+      `brain: yes/no branches cancelled reason=${reason} age=${Date.now() - prefetch.startedAt}ms ready=${ready}`,
+    );
     for (const branch of [prefetch.yes, prefetch.no]) {
       clearTimeout(branch.timeout);
       branch.abort.abort();
@@ -3379,26 +3384,34 @@ export class ComedianBrain {
    * final answer and the still-current question.
    */
   private _startYesNoBranchPrefetch(spokenQuestionText?: string): void {
-    this._cancelYesNoBranchPrefetch();
+    this._cancelYesNoBranchPrefetch("question-replaced");
     const question = this.currentQuestion;
     const questionText = spokenQuestionText?.trim() || question?.question || "";
     if (!question || !isGenuinelyYesNoQuestion(questionText)) return;
 
     const createBranch = (answer: YesNoAnswer) => {
       const abort = new AbortController();
+      const requestStartedAt = Date.now();
       const timeout = setTimeout(
-        () => abort.abort(),
+        () => {
+          this.deps.logTiming(
+            `brain: yes/no branch timeout=${answer} after ${Date.now() - requestStartedAt}ms`,
+          );
+          abort.abort();
+        },
         COMEDIAN_CONFIG.yesNoBranchPrefetchTimeoutMs,
       );
       const branch: {
         abort: AbortController;
         timeout: ReturnType<typeof setTimeout>;
         ready: JokeResponse | null;
+        readyAt: number | null;
         result: Promise<JokeResponse | null>;
       } = {
         abort,
         timeout,
         ready: null,
+        readyAt: null,
         result: Promise.resolve(null),
       };
       branch.result = this._generateJoke(
@@ -3418,9 +3431,20 @@ export class ComedianBrain {
       )
         .then((response) => {
           branch.ready = this._hasPlayableBranchResponse(response) ? response : null;
+          branch.readyAt = branch.ready ? Date.now() : null;
+          this.deps.logTiming(
+            `brain: yes/no branch settled=${answer} playable=${branch.ready ? "yes" : "no"} generation=${Date.now() - requestStartedAt}ms`,
+          );
           return response;
         })
-        .catch(() => null)
+        .catch(() => {
+          if (!abort.signal.aborted) {
+            this.deps.logTiming(
+              `brain: yes/no branch failed=${answer} after ${Date.now() - requestStartedAt}ms`,
+            );
+          }
+          return null;
+        })
         .finally(() => clearTimeout(timeout));
       return branch;
     };
@@ -3477,7 +3501,9 @@ export class ComedianBrain {
       !!prefetch &&
       prefetch.questionId === q.id;
     if (!classification || !prefetch || !questionStillMatches) {
-      this._cancelYesNoBranchPrefetch();
+      this._cancelYesNoBranchPrefetch(
+        !classification ? "answer-not-clear-binary" : "question-changed",
+      );
       return false;
     }
 
@@ -3486,19 +3512,24 @@ export class ComedianBrain {
     clearTimeout(rejected.timeout);
     rejected.abort.abort();
     this.yesNoBranchPrefetch = null;
+    this.deps.logTiming(
+      `brain: yes/no branch selected=${classification} discarded=${classification === "yes" ? "no" : "yes"} discardedReady=${this._hasPlayableBranchResponse(rejected.ready) ? "yes" : "no"}`,
+    );
 
     // The branch completed while the question was playing, so queue it in the
     // same call stack as the finalized answer. This is what lets enterGenerating
     // skip the filler pump without risking a silence gap.
     if (this._hasPlayableBranchResponse(selected.ready)) {
       clearTimeout(selected.timeout);
+      const now = Date.now();
       this.deps.logTiming(
-        `brain: yes/no branch hit=${classification} cached in ${Date.now() - prefetch.startedAt}ms`,
+        `brain: yes/no branch hit=${classification} cached in ${now - prefetch.startedAt}ms ready-before-answer=${selected.readyAt ? now - selected.readyAt : 0}ms`,
       );
       this.enterDelivering(answer, selected.ready, fillerAlreadySaid);
       return true;
     }
 
+    const selectionStartedAt = Date.now();
     let selectionTimer: ReturnType<typeof setTimeout> | null = null;
     const selectionTimeout = new Promise<null>((resolve) => {
       selectionTimer = setTimeout(
@@ -3515,7 +3546,7 @@ export class ComedianBrain {
       }
       if (this._hasPlayableBranchResponse(response)) {
         this.deps.logTiming(
-          `brain: yes/no branch hit=${classification} ready in ${Date.now() - prefetch.startedAt}ms`,
+          `brain: yes/no branch hit=${classification} ready in ${Date.now() - prefetch.startedAt}ms selection-wait=${Date.now() - selectionStartedAt}ms`,
         );
         this.enterDelivering(answer, response, fillerAlreadySaid);
         return;
@@ -3524,7 +3555,7 @@ export class ComedianBrain {
       clearTimeout(selected.timeout);
       selected.abort.abort();
       this.deps.logTiming(
-        `brain: yes/no branch miss=${classification} after ${COMEDIAN_CONFIG.yesNoBranchSelectionWaitMs}ms — normal generation`,
+        `brain: yes/no branch miss=${classification} selection-wait=${Date.now() - selectionStartedAt}ms — normal generation`,
       );
       this._generateAndDeliver(answer, q, conversationSoFar, fillerAlreadySaid);
     });
@@ -3532,7 +3563,7 @@ export class ComedianBrain {
   }
 
   private enterCheckVision(): void {
-    this._cancelYesNoBranchPrefetch();
+    this._cancelYesNoBranchPrefetch("answer-complete");
     if (this.pendingWrapup) {
       this.enterWrapup();
       return;

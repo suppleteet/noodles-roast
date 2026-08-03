@@ -28,6 +28,9 @@ export interface LlmRequest {
   systemPrompt: string;
   userParts: UserPart[];
   maxOutputTokens?: number;
+  /** Attribution label surfaced by /api/debug-usage. Callers that launch
+   *  speculative work should set this so its token cost is measurable. */
+  usageRoute?: string;
   /**
    * Creative turns get a small reasoning allowance; utility calls such as
    * question phrasing stay at the provider's minimum-latency setting.
@@ -267,7 +270,7 @@ export async function generateText(req: LlmRequest): Promise<string> {
           const text = result.text ?? "";
           const usage = result.usageMetadata;
           recordLlmUsage({
-            route: "generateText",
+            route: req.usageRoute ?? "generateText",
             provider,
             model: req.model,
             inputTokens: usage?.promptTokenCount ?? estimatedInputTokens(req),
@@ -295,7 +298,7 @@ export async function generateText(req: LlmRequest): Promise<string> {
           });
           const text = resp.choices[0]?.message?.content ?? "";
           recordLlmUsage({
-            route: "generateText",
+            route: req.usageRoute ?? "generateText",
             provider,
             model: req.model,
             inputTokens: resp.usage?.prompt_tokens ?? estimatedInputTokens(req),
@@ -322,7 +325,7 @@ export async function generateText(req: LlmRequest): Promise<string> {
           const textBlock = resp.content.find((b) => b.type === "text");
           const text = textBlock?.text ?? "";
           recordLlmUsage({
-            route: "generateText",
+            route: req.usageRoute ?? "generateText",
             provider,
             model: req.model,
             inputTokens: resp.usage.input_tokens ?? estimatedInputTokens(req),
@@ -392,7 +395,7 @@ export async function* generateTextStream(
             }
           }
           recordLlmUsage({
-            route: "generateTextStream",
+            route: req.usageRoute ?? "generateTextStream",
             provider,
             model: req.model,
             inputTokens: promptTokenCount ?? estimatedInputTokens(req),
@@ -429,7 +432,7 @@ export async function* generateTextStream(
             }
           }
           recordLlmUsage({
-            route: "generateTextStream",
+            route: req.usageRoute ?? "generateTextStream",
             provider,
             model: req.model,
             inputTokens: estimatedInputTokens(req),
@@ -462,7 +465,7 @@ export async function* generateTextStream(
             }
           }
           recordLlmUsage({
-            route: "generateTextStream",
+            route: req.usageRoute ?? "generateTextStream",
             provider,
             model: req.model,
             inputTokens: estimatedInputTokens(req),

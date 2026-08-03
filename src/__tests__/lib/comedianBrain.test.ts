@@ -844,12 +844,14 @@ describe("ComedianBrain", () => {
           abort: AbortController;
           timeout: ReturnType<typeof setTimeout>;
           ready: JokeResponse | null;
+          readyAt: number | null;
           result: Promise<JokeResponse | null>;
         };
         const makeBranch = (ready: JokeResponse | null): Branch => ({
           abort: new AbortController(),
           timeout: setTimeout(() => {}, 500),
           ready,
+          readyAt: ready ? Date.now() - 25 : null,
           result: Promise.resolve(ready),
         });
         const brain = new ComedianBrain(deps) as unknown as {
@@ -906,12 +908,14 @@ describe("ComedianBrain", () => {
           abort: AbortController;
           timeout: ReturnType<typeof setTimeout>;
           ready: JokeResponse | null;
+          readyAt: number | null;
           result: Promise<JokeResponse | null>;
         };
         const pendingBranch = (): Branch => ({
           abort: new AbortController(),
           timeout: setTimeout(() => {}, 500),
           ready: null,
+          readyAt: null,
           result: new Promise<JokeResponse | null>(() => {}),
         });
         const brain = new ComedianBrain(deps) as unknown as {
@@ -1028,7 +1032,8 @@ describe("ComedianBrain", () => {
         if (init?.signal) signals.push(init.signal);
         return new Promise<Response>(() => {});
       }));
-      const brain = new ComedianBrain(makeDeps()) as unknown as {
+      const deps = makeDeps();
+      const brain = new ComedianBrain(deps) as unknown as {
         currentQuestion: ComedyQuestion;
         _startYesNoBranchPrefetch(question: string): void;
         _consumeYesNoBranchPrefetch(
@@ -1047,6 +1052,37 @@ describe("ComedianBrain", () => {
       ).toBe(false);
       expect(signals).toHaveLength(2);
       expect(signals.every((signal) => signal.aborted)).toBe(true);
+      expect(deps.logTiming).toHaveBeenCalledWith(
+        expect.stringContaining("yes/no branches cancelled reason=answer-not-clear-binary"),
+      );
+    });
+  });
+
+  describe("answer delivery generation", () => {
+    it("does not launch answer-sourced work into the vision-only hopper", () => {
+      const deps = makeDeps();
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        enterDelivering(answer: string, response: JokeResponse, filler?: string): void;
+        _fireHopperGeneration: ReturnType<typeof vi.fn>;
+        stop(): void;
+      };
+      const fireHopper = vi.fn();
+      brain._fireHopperGeneration = fireHopper;
+      brain.state = "generating";
+
+      brain.enterDelivering("I make posters.", {
+        relevant: true,
+        jokes: [{
+          text: "Your wall has a cry for help in every frame.",
+          motion: "smug",
+          intensity: 0.7,
+          score: 7,
+        }],
+      });
+
+      expect(fireHopper).not.toHaveBeenCalled();
+      brain.stop();
     });
   });
 

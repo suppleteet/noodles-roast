@@ -64,6 +64,9 @@ export interface GenerateJokeRequest {
   conversationSoFar?: string[];
   knownFacts?: string[];
   maxJokes?: number;
+  /** Inert speculative binary branch marker. It never changes prompt content;
+   *  it only attributes token cost in the usage dashboard. */
+  branchPrefetch?: "yes" | "no";
   imageBase64?: string;
   setting?: string | null;
   ambientContext?: {
@@ -133,6 +136,13 @@ export async function POST(req: NextRequest) {
     if (body.model !== undefined && !isRoastModelId(body.model)) {
       return NextResponse.json({ error: "Unsupported model" }, { status: 400 });
     }
+    if (
+      body.branchPrefetch !== undefined &&
+      body.branchPrefetch !== "yes" &&
+      body.branchPrefetch !== "no"
+    ) {
+      return NextResponse.json({ error: "Invalid branch prefetch marker" }, { status: 400 });
+    }
     const model = body.model ?? ROAST_MODEL;
 
     // Try to use an existing chat session
@@ -198,6 +208,9 @@ export async function POST(req: NextRequest) {
         maxOutputTokens: 1024,
         reasoningProfile: "creative",
         forceJsonObject: true,
+        usageRoute: body.branchPrefetch
+          ? `generateJoke:yesNoPrefetch:${body.branchPrefetch}`
+          : "generateJoke:stateless",
       });
     }
 
