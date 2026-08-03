@@ -189,9 +189,8 @@ export interface ComedianBrainDeps {
   /** Surface a fatal error to the user (quota exhaustion, API key missing, etc.) */
   setError?: (error: string) => void;
   /** Called when the model is in trouble — a generation hang past the watchdog,
-   *  or a 503 UNAVAILABLE. The brain has already spoken an in-character
-   *  "my brain's busted" line and is ending the session; the controller surfaces
-   *  a "restart with a different model?" prompt. No silent model swap happens. */
+   *  or a 503 UNAVAILABLE. The brain queues an in-character "my brain's busted"
+   *  line and waits for the controller's restart-or-continue choice. */
   onModelTrouble?: (failedModel: string) => void;
   /** Called when session should reveal the puppet (fade in). */
   revealSession?: () => void;
@@ -476,6 +475,11 @@ export class ComedianBrain {
   // Model trouble — flipped once a hang/503 has triggered the brain-busted exit,
   // so a second trigger (e.g. watchdog + a late 503) can't double-exit or re-prompt.
   private modelTroubleExited = false;
+  /** True while the recovery dialog is open and the technical exit is paused. */
+  private awaitingModelTroubleChoice = false;
+  /** The queued technical line is removed from prompt history if the caller
+   *  continues before hearing it all. */
+  private technicalDifficultiesLine: string | null = null;
 
   // Wrapup state
   private pendingWrapup = false;        // true once requestWrapup() fires; consumed by next safe transition
@@ -547,6 +551,8 @@ export class ComedianBrain {
     this.wrapupPrefetchStartedAt = 0;
     this.answerGenerationSettled = true;
     this.modelTroubleExited = false;
+    this.awaitingModelTroubleChoice = false;
+    this.technicalDifficultiesLine = null;
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -2118,8 +2124,8 @@ export class ComedianBrain {
       this._stopFillerPump();
       // The model hung. We no longer limp along on canned save lines or silently
       // swap models — that "weird canned experience" reads as broken. Instead the
-      // comedian says (in character) that his brain's busted, the session ends,
-      // and the controller offers a restart with a different model.
+      // comedian says (in character) that his brain's busted and waits for the
+      // caller to restart with another model or continue this session.
       this.deps.logTiming(
         `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — brain-busted exit`,
       );
@@ -2130,9 +2136,10 @@ export class ComedianBrain {
   /**
    * Brain-busted graceful exit, triggered by model trouble (generation hang past
    * the watchdog, or a 503). Speaks a persona-flavored "my brain's busted, try
-   * again later" line and routes through the wrapup state so the existing drain
-   * handler fires onSessionEnd. Skips the LLM closing-line call (that's what just
-   * failed) — uses a canned line directly.
+   * again later" line and routes through the wrapup state. When the controller
+   * can show a recovery dialog, the final session-end step is held until the
+   * caller explicitly picks a path. Skips the LLM closing-line call (that's
+   * what just failed) — uses a canned line directly.
    *
    * When `failedModel` is given, also notifies the controller via onModelTrouble
    * so it can offer a "restart with a different model?" prompt. Idempotent: a
@@ -2163,14 +2170,57 @@ export class ComedianBrain {
       : TECHNICAL_DIFFICULTIES_LINES[this.deps.getPersona()] ??
         TECHNICAL_DIFFICULTIES_LINES.kvetch;
     const line = lines[Math.floor(Math.random() * lines.length)];
+    this.technicalDifficultiesLine = line;
     this.deps.logTiming(`brain: technical-difficulties exit — "${line.slice(0, 60)}"`);
     this.deps.queueSpeak(line, "conspiratorial", 0.7);
     this._addLedger("joke", line, []);
-    // Flip the gate so the next wrapup drain event fires session end.
-    this.wrapupClosingQueued = true;
-
-    // Surface the restart-with-a-different-model prompt (no silent swap).
+    // Keep the existing live call alive while the caller decides. If no UI can
+    // receive the callback, retain the old graceful-exit behavior instead.
+    this.awaitingModelTroubleChoice = Boolean(failedModel && this.deps.onModelTrouble);
+    this.wrapupClosingQueued = !this.awaitingModelTroubleChoice;
     if (failedModel) this.deps.onModelTrouble?.(failedModel);
+  }
+
+  /**
+   * Resume the same live call after its recovery dialog's Continue action.
+   * The failed request and its technical-exit line are discarded, then the
+   * existing brain advances to a fresh question without reconnecting media,
+   * resetting the ledger, or switching models.
+   */
+  continueAfterTechnicalDifficulties(): boolean {
+    if (
+      !this.modelTroubleExited ||
+      !this.awaitingModelTroubleChoice ||
+      this.state !== "wrapup"
+    ) {
+      return false;
+    }
+
+    this._clearTimers();
+    try { this.generationAbort?.abort(); } catch { /* best-effort */ }
+    this.generationAbort = null;
+    this.deliveryGeneration++;
+    this._stopFillerPump();
+    this.deps.cancelSpeech();
+
+    const lastEntry = this.ledger.at(-1);
+    if (
+      lastEntry?.type === "joke" &&
+      lastEntry.text === this.technicalDifficultiesLine
+    ) {
+      this.ledger.pop();
+    }
+
+    this.modelTroubleExited = false;
+    this.awaitingModelTroubleChoice = false;
+    this.technicalDifficultiesLine = null;
+    this.wrapupClosingQueued = false;
+    this.wrapupSessionEnded = false;
+    this.pendingWrapup = false;
+    this.answerGenerationSettled = true;
+    this.deps.logTiming("brain: model trouble — continuing current call");
+    this.enterAskQuestion();
+    return true;
   }
 
   /** Clear the generation watchdog timer (joke arrived, state left generating, or stop). */

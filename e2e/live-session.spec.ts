@@ -51,7 +51,7 @@ test.describe("Startup", () => {
     expect(mock.getTtsRequests().some((request) => request.text === "Well, hello there.")).toBe(false);
   });
 
-  test("model-trouble restart creates fresh Terra startup resources", async ({ page }) => {
+  test("model-trouble Continue keeps the current live session running", async ({ page }) => {
     const driver = new ComedianBrainDriver(page);
     await driver.setup();
 
@@ -125,24 +125,16 @@ test.describe("Startup", () => {
       page.getByRole("heading", { name: "His brain glitched out" }),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Reproduce accepting only after teardown has already reached `stopped`.
-    // This exercises the non-roasting modal branch, where stale resources used
-    // to survive and poison the replacement session.
-    await page.getByRole("button", { name: "End Session" }).click({ force: true });
-    await expect(page.getByRole("button", { name: "Start Session" })).toBeVisible();
-    const liveTokenRequestsBeforeRestart = liveTokenRequests;
+    // Continue must dismiss the dialog without creating a replacement session.
+    const liveTokenRequestsBeforeContinue = liveTokenRequests;
+    await page.getByRole("button", { name: "Continue" }).click();
 
-    await page.getByRole("button", { name: "Start Over" }).click();
-
-    await expect.poll(() => sessionModels).toContain("gpt-5.6-terra");
-    await expect.poll(() => liveTokenRequests).toBeGreaterThan(
-      liveTokenRequestsBeforeRestart,
-    );
-    await driver.waitForBrainState("wait_answer", 10_000);
-    expect(sessionModels).toEqual([
-      "gemini-3.6-flash",
-      "gpt-5.6-terra",
-    ]);
+    await expect(
+      page.getByRole("heading", { name: "His brain glitched out" }),
+    ).toBeHidden();
+    await driver.waitForBrainState("ask_question", 10_000);
+    expect(sessionModels).toEqual(["gemini-3.6-flash"]);
+    expect(liveTokenRequests).toBe(liveTokenRequestsBeforeContinue);
   });
 });
 

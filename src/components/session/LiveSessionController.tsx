@@ -89,6 +89,9 @@ interface Props {
   /** Canned-intro opener picked + TTS-prefetched in page.tsx during the
    *  permission window. Null/absent when the canned intro doesn't apply. */
   warmupCannedOpener?: Promise<CannedOpenerPrefetch | null> | null;
+  /** Incremented by the recovery dialog when the caller continues the current
+   *  live session instead of restarting with another model. */
+  modelTroubleContinueSignal?: number;
   mockMode?: boolean;
 }
 
@@ -102,6 +105,7 @@ export default function LiveSessionController({
   warmupGreetingPrefetch,
   warmupGreetingAudio,
   warmupCannedOpener,
+  modelTroubleContinueSignal = 0,
   mockMode = false,
 }: Props) {
   // Only subscribe to phase + pendingDebugTranscription for lifecycle/debug.
@@ -235,6 +239,7 @@ export default function LiveSessionController({
 
   // ComedianBrain — instantiated when session starts
   const brainRef = useRef<ComedianBrain | null>(null);
+  const handledModelTroubleContinueRef = useRef(modelTroubleContinueSignal);
 
   // Debug: consume typed transcription and forward to brain (same as mic input)
   useEffect(() => {
@@ -254,6 +259,18 @@ export default function LiveSessionController({
     useSessionStore.getState().clearPendingDevNoteResume();
     brainRef.current.resumeFromDevNote();
   }, [pendingDevNoteResume]);
+
+  // A recovery dialog is surfaced while the technical-exit line is queued.
+  // Continuing must stay in this same controller/session; do not run the normal
+  // stopped → requesting-permissions startup path.
+  useEffect(() => {
+    if (modelTroubleContinueSignal === handledModelTroubleContinueRef.current) return;
+    handledModelTroubleContinueRef.current = modelTroubleContinueSignal;
+    if (phase !== "roasting" || !isRunningRef.current) return;
+    if (brainRef.current?.continueAfterTechnicalDifficulties()) {
+      useSessionStore.getState().logTiming("live: model trouble — caller continued current session");
+    }
+  }, [modelTroubleContinueSignal, phase]);
 
   // ─── Brain helpers ────────────────────────────────────────────────────────────
 
@@ -593,10 +610,10 @@ export default function LiveSessionController({
 
   /**
    * Model trouble (Tyler: "say his brain is busted and ask if they want to start
-   * over with a different model" — no silent swap). The brain has already spoken
-   * the in-character busted line and is ending the session; here we just surface
-   * the restart prompt by stashing a different suggested model in the store. The
-   * page-level modal owns Yes (restart with that model) / Cancel (back to landing).
+   * over with a different model" — no silent swap). The brain pauses after its
+   * in-character busted line; here we surface the decision by stashing a
+   * different suggested model in the store. The page-level modal owns Start Over
+   * (restart with that model) / Continue (keep the current live session).
    */
   function promptModelRestart(failedModel: string): void {
     const store = useSessionStore.getState();

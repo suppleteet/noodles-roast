@@ -109,9 +109,9 @@ function MainApp() {
   // roasting → stopped → requesting-permissions so LiveSessionController's stop
   // runs (clean teardown) before the new-model session auto-starts.
   const pendingModelFallbackRestartRef = useRef(false);
-  // Set when the user cancels the model-trouble prompt — bounce
-  // roasting → stopped → idle (landing) instead of the share screen.
-  const pendingModelTroubleCancelRef = useRef(false);
+  // Incremented when the caller elects to keep the existing call going after a
+  // recoverable model failure. The live controller forwards it to the brain.
+  const [modelTroubleContinueSignal, setModelTroubleContinueSignal] = useState(0);
   const [visionElapsedSecs, setVisionElapsedSecs] = useState<number | null>(null);
 
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
@@ -661,9 +661,9 @@ function MainApp() {
     }
   }
 
-  // Bounce-on-stopped handlers. The three pending refs are mutually exclusive by
-  // construction — each is set by exactly one caller (mock toggle / modal Accept /
-  // modal Cancel) that never sets another — so their order here doesn't race.
+  // Bounce-on-stopped handlers. The two pending refs are mutually exclusive by
+  // construction — each is set by exactly one caller (mock toggle / modal restart)
+  // that never sets the other, so their order here doesn't race.
   useEffect(() => {
     if (phase === "stopped" && pendingMockRestartRef.current) {
       pendingMockRestartRef.current = false;
@@ -676,10 +676,6 @@ function MainApp() {
       // Auto-restart with the already-swapped model (running synchronously here
       // beats LiveSessionController.stopLiveSession's async share navigation).
       setPhase("requesting-permissions", "SESSION_RESTART");
-    }
-    if (phase === "stopped" && pendingModelTroubleCancelRef.current) {
-      pendingModelTroubleCancelRef.current = false;
-      setPhase("idle", "SESSION_RESTART");
     }
   }, [phase]);
 
@@ -751,6 +747,7 @@ function MainApp() {
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
           warmupGreetingAudio={warmupGreetingAudioRef.current}
           warmupCannedOpener={warmupCannedOpenerRef.current}
+          modelTroubleContinueSignal={modelTroubleContinueSignal}
           mockMode={mockMode}
         />
       )}
@@ -907,16 +904,12 @@ function MainApp() {
               setPhase("requesting-permissions", "SESSION_RESTART");
             }
           }}
-          onCancel={() => {
-            // Back to the landing screen — no new session.
+          onContinue={() => {
+            // Keep the current live session and let the brain abandon its
+            // technical-exit line. This deliberately does not change phase or
+            // create a new session.
             setModelUnavailable(null);
-            if (phase === "roasting") {
-              // Bounce roasting → stopped (teardown) → idle, skipping the share screen.
-              pendingModelTroubleCancelRef.current = true;
-              setPhase("stopped", "STOP_CLICKED");
-            } else if (phase === "stopped") {
-              setPhase("idle", "SESSION_RESTART");
-            }
+            setModelTroubleContinueSignal((signal) => signal + 1);
           }}
         />
       )}
@@ -927,19 +920,20 @@ function MainApp() {
 function ModelFallbackPrompt({
   suggestedFallback,
   onAccept,
-  onCancel,
+  onContinue,
 }: {
   suggestedFallback: string;
   onAccept: () => void;
-  onCancel: () => void;
+  onContinue: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
       <div className="w-full max-w-md rounded-2xl border border-orange-300/30 bg-gray-950 p-6 shadow-2xl">
         <h2 className="mb-3 text-lg font-bold text-orange-200">His brain glitched out</h2>
         <p className="mb-5 text-sm text-white/80">
-          The comedian&apos;s brain froze up. Want to start over with a different
-          model (<span className="font-mono text-orange-200">{suggestedFallback}</span>)?
+          The comedian&apos;s brain froze up. Start over with a different model
+          (<span className="font-mono text-orange-200">{suggestedFallback}</span>), or
+          continue this call and try the current one again.
         </p>
         <div className="flex gap-3">
           <button
@@ -951,10 +945,10 @@ function ModelFallbackPrompt({
           </button>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={onContinue}
             className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 font-medium text-white/80 transition-colors hover:bg-white/10"
           >
-            Cancel
+            Continue
           </button>
         </div>
       </div>

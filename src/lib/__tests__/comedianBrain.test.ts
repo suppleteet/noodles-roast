@@ -251,7 +251,7 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
   });
 
-  it("watchdog: a generation hang runs the brain-busted exit and offers a model restart", async () => {
+  it("watchdog: a generation hang waits for recovery and can continue the same call", async () => {
     vi.useFakeTimers();
     const onSessionEnd = vi.fn();
     const onModelTrouble = vi.fn();
@@ -266,17 +266,22 @@ describe("ComedianBrain — Q&A cycle", () => {
     expect(getStates(deps)).toContain("generating");
     (deps.queueSpeak as ReturnType<typeof vi.fn>).mockClear();
 
-    // Watchdog (generationTimeoutMs): no silent model swap, no canned limp-along.
-    // The comedian speaks the in-character busted line and the session wraps up.
+    // Watchdog (generationTimeoutMs): no silent model swap. The comedian speaks
+    // the in-character busted line and waits for the recovery dialog choice.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(getStates(deps)).toContain("wrapup");
     expect(deps.queueSpeak).toHaveBeenCalled(); // brain-busted line was spoken
     // Controller is told which model failed so it can prompt a different-model restart.
     expect(onModelTrouble).toHaveBeenCalledWith("gemini-3.5-flash");
 
-    // The closing line drains → session ends.
+    // The recovery dialog keeps the live session open rather than ending it.
     brain.onTtsQueueDrained();
-    expect(onSessionEnd).toHaveBeenCalled();
+    expect(onSessionEnd).not.toHaveBeenCalled();
+
+    expect(brain.continueAfterTechnicalDifficulties()).toBe(true);
+    expect(deps.cancelSpeech).toHaveBeenCalled();
+    expect(getStates(deps)).toContain("ask_question");
+    expect(onSessionEnd).not.toHaveBeenCalled();
   });
 
   it("does not immediately commit an unfinalized sentence starter", async () => {
