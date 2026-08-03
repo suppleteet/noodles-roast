@@ -668,6 +668,48 @@ describe("ComedianBrain", () => {
       expect(facts).not.toContain("hometown:Seattle");
     });
 
+    it("cancels a pending endpoint when speech resumes before the next STT chunk", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        const brain = new ComedianBrain(deps);
+        brain.start();
+        brain.onTtsQueueDrained();
+
+        brain.onInputTranscription("I work");
+        brain.onVadSpeechEnd();
+        brain.onVadSpeechStart();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(stateHistory(deps)).not.toContain("generating");
+        brain.onInputTranscription(" at a company.", true);
+        expect(deps.setUserAnswer).toHaveBeenLastCalledWith("I work at a company.");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("uses a bounded post-VAD wait when speech ends before any transcript", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        const brain = new ComedianBrain(deps);
+        brain.start();
+        brain.onTtsQueueDrained();
+
+        brain.onVadSpeechStart();
+        brain.onVadSpeechEnd();
+        brain.onInputTranscription("Tyler", true);
+
+        expect(stateHistory(deps)).toContain("generating");
+        expect(deps.logTiming).toHaveBeenCalledWith(
+          expect.stringContaining("VAD speech-end — awaiting first STT chunk"),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("gives punctuated but unfinalized STT a brief grace window", async () => {
       vi.useFakeTimers();
       try {

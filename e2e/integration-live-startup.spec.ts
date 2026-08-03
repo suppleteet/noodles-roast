@@ -132,6 +132,8 @@ test.describe("Real live startup", () => {
     expect(apiFailures).toEqual([]);
     expect(pageErrors).toEqual([]);
 
-    await page.getByRole("button", { name: "End Session" }).click();
+    // The unlocked debug timeline can overlap the fixed call controls in test
+    // viewports. Cleanup is not the behavior under test, so bypass hit testing.
+    await page.getByRole("button", { name: "End Session" }).click({ force: true });
   });
 });

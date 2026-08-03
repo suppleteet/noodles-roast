@@ -55,6 +55,8 @@ import {
   type TranscriptRepairResult,
 } from "@/lib/transcriptRepair";
 import { sanitizeSpokenText } from "@/lib/spokenText";
+import { LIVE_REALTIME_INPUT_CONFIG } from "@/lib/liveInputConfig";
+import { mergeLiveTranscript } from "@/lib/liveTranscript";
 
 type SpeechHandoff = "filler" | "filler-to-joke";
 
@@ -122,6 +124,11 @@ export default function LiveSessionController({
   const micChunkLoggedRef = useRef(false);
   const micSentLoggedRef = useRef(false);
   const micBlockedLoggedRef = useRef(false);
+  const userTranscriptTurnOpenRef = useRef(false);
+  const userTranscriptBufferRef = useRef("");
+  const vadSpeechStartedAtRef = useRef<number | null>(null);
+  const vadSpeechEndedAtRef = useRef<number | null>(null);
+  const lastSttChunkAtRef = useRef<number | null>(null);
 
   const kickoffTimeRef = useRef<number | null>(null);
   const firstSpeechRecordedRef = useRef(false);
@@ -196,15 +203,33 @@ export default function LiveSessionController({
   // Silero VAD — fast end-of-speech detection (~200ms vs 300ms silence timer fallback)
   const vad = useVad({
     onSpeechEnd: () => {
+      const now = Date.now();
+      const durationMs = vadSpeechStartedAtRef.current === null
+        ? null
+        : now - vadSpeechStartedAtRef.current;
+      vadSpeechEndedAtRef.current = now;
+      const sinceSttMs = lastSttChunkAtRef.current === null
+        ? null
+        : now - lastSttChunkAtRef.current;
+      useSessionStore.getState().logTiming(
+        `vad: speech end${durationMs === null ? "" : ` duration=${durationMs}ms`}${sinceSttMs === null ? "" : ` since-stt=${sinceSttMs}ms`}`,
+      );
       if (isRunningRef.current) {
         useSessionStore.getState().setIsUserSpeaking(false);
       }
       brainRef.current?.onVadSpeechEnd();
     },
     onSpeechStart: () => {
+      vadSpeechStartedAtRef.current = Date.now();
+      vadSpeechEndedAtRef.current = null;
+      const diagnostics = mic.getDiagnostics();
+      useSessionStore.getState().logTiming(
+        `vad: speech start raw=${diagnostics.rawRms.toFixed(3)} sent=${diagnostics.outputRms.toFixed(3)} gain=${diagnostics.gain.toFixed(2)} peak=${diagnostics.peak.toFixed(3)}`,
+      );
       if (isRunningRef.current) {
         useSessionStore.getState().setIsUserSpeaking(true);
       }
+      brainRef.current?.onVadSpeechStart();
     },
   });
 
@@ -217,6 +242,8 @@ export default function LiveSessionController({
     const text = pendingDebugTranscription;
     useSessionStore.getState().clearPendingDebugTranscription();
     useSessionStore.getState().pushTranscriptEntry("user", text);
+    userTranscriptTurnOpenRef.current = true;
+    userTranscriptBufferRef.current = text;
     useSessionStore.getState().logTiming(`debug-input: "${text}"`);
     brainRef.current.onInputTranscription(text, true);
   }, [pendingDebugTranscription]);
@@ -313,7 +340,19 @@ export default function LiveSessionController({
         handoff: options?.handoff,
       });
       let delivered = queued;
-      if (!queued && audioBuffer.failed && isRunningRef.current && ttsGenerationRef.current === gen) {
+      if (
+        !queued &&
+        audioBuffer.failed &&
+        options?.handoff === "filler" &&
+        isRunningRef.current &&
+        ttsGenerationRef.current === gen
+      ) {
+        // A backchannel is optional. Retrying it over REST held the actual joke
+        // behind another network round-trip; let the chain advance instead.
+        useSessionStore.getState().logTiming(
+          `tts: optional filler failed — skipping REST "${text.trim().slice(0, 40)}"`,
+        );
+      } else if (!queued && audioBuffer.failed && isRunningRef.current && ttsGenerationRef.current === gen) {
         // The WS route previously translated EL failures into a normal `done`,
         // silently dropping the whole line. Use the independent REST transport
         // as a no-delay failover while the chain remains blocked on this turn.
@@ -592,12 +631,15 @@ export default function LiveSessionController({
     }
     const ttsSpanId = useSessionStore.getState().beginSpan("tts", text.slice(0, 22));
     const requestAbort = new AbortController();
+    const firstAudioTimeoutMs = meta?.handoff === "filler"
+      ? (COMEDIAN_CONFIG.ttsFillerFirstAudioTimeoutMs ?? COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs)
+      : COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs;
     const watchdog = armTtsStreamWatchdog(audio, () => requestAbort.abort(), {
-      firstAudioMs: COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs,
+      firstAudioMs: firstAudioTimeoutMs,
       completionMs: COMEDIAN_CONFIG.ttsCompletionTimeoutMs,
       onTimeout: (reason) => {
         useSessionStore.getState().logTiming(
-          `tts: ${reason} timeout (${reason === "first-audio" ? COMEDIAN_CONFIG.ttsFirstAudioTimeoutMs : COMEDIAN_CONFIG.ttsCompletionTimeoutMs}ms) "${text.slice(0, 32)}"`,
+          `tts: ${reason} timeout (${reason === "first-audio" ? firstAudioTimeoutMs : COMEDIAN_CONFIG.ttsCompletionTimeoutMs}ms) "${text.slice(0, 32)}"`,
         );
       },
     });
@@ -815,6 +857,12 @@ export default function LiveSessionController({
         return false;
       }
       const encoded = await response.arrayBuffer();
+      if (encoded.byteLength === 0) {
+        useSessionStore.getState().logTiming(
+          `tts: REST failover returned empty audio "${text.slice(0, 32)}"`,
+        );
+        return false;
+      }
       if (!firstSpeechRecordedRef.current) {
         useSessionStore.getState().setPuppetRevealed(true);
         startVideoRecordingIfNeeded();
@@ -988,6 +1036,7 @@ export default function LiveSessionController({
           systemInstruction: getLiveTranscriptionPrompt(),
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          realtimeInputConfig: LIVE_REALTIME_INPUT_CONFIG,
         },
         callbacks: {
           onopen: () => {
@@ -1077,17 +1126,38 @@ export default function LiveSessionController({
     // Input transcription — user is speaking
     if (sc.inputTranscription?.text) {
       const text = sc.inputTranscription.text;
+      const finished = sc.inputTranscription.finished ?? false;
+      const now = Date.now();
+      const vadEndAgoMs = vadSpeechEndedAtRef.current === null
+        ? null
+        : now - vadSpeechEndedAtRef.current;
+      const diagnostics = mic.getDiagnostics();
+      lastSttChunkAtRef.current = now;
+      store.logTiming(
+        `live: STT ${finished ? "final" : "partial"} chars=${text.length}${vadEndAgoMs === null ? "" : ` post-vad=${vadEndAgoMs}ms`} raw=${diagnostics.rawRms.toFixed(3)} sent=${diagnostics.outputRms.toFixed(3)} gain=${diagnostics.gain.toFixed(2)}`,
+      );
       store.setIsUserSpeaking(true);
       store.addConversationEvent("user-start", text.slice(0, 40));
       store.setTranscript(text.slice(-200));
-      store.pushTranscriptEntry("user", text);
+      if (!userTranscriptTurnOpenRef.current) {
+        store.pushTranscriptEntry("user", text);
+        userTranscriptTurnOpenRef.current = true;
+        userTranscriptBufferRef.current = text;
+      } else {
+        userTranscriptBufferRef.current = mergeLiveTranscript(
+          userTranscriptBufferRef.current,
+          text,
+          finished,
+        );
+        store.replaceLatestUserTranscript(userTranscriptBufferRef.current);
+      }
 
       // Infer puppet listening animation
       const [motion, intensity] = inferMotionFromTranscript(text, store.audioAmplitude);
       store.setActiveMotionState(motion, intensity);
 
       // Route to brain (pass finished flag so brain can use authoritative final text)
-      brainRef.current?.onInputTranscription(text, sc.inputTranscription.finished ?? false);
+      brainRef.current?.onInputTranscription(text, finished);
 
       // Start user speaking span
       if (!userSpeakingSpanRef.current) {
@@ -1486,6 +1556,11 @@ export default function LiveSessionController({
     micChunkLoggedRef.current = false;
     micSentLoggedRef.current = false;
     micBlockedLoggedRef.current = false;
+    userTranscriptTurnOpenRef.current = false;
+    userTranscriptBufferRef.current = "";
+    vadSpeechStartedAtRef.current = null;
+    vadSpeechEndedAtRef.current = null;
+    lastSttChunkAtRef.current = null;
     pendingVadStreamRef.current = null;
     vadStartRequestedRef.current = false;
     useSessionStore.getState().setError(null); // clear any prior quota/session error
@@ -1576,9 +1651,24 @@ export default function LiveSessionController({
       getTownFlavor: () => useSessionStore.getState().townFlavorBlurb,
       getVoiceSettings: () => useSessionStore.getState().voiceSettings,
       getSessionId: () => comedianSessionIdRef.current,
-      setBrainState: (s) => useSessionStore.getState().setBrainState(s),
+      setBrainState: (s) => {
+        useSessionStore.getState().setBrainState(s);
+        if (s === "ask_question" || s === "delivering" || s === "check_vision") {
+          userTranscriptTurnOpenRef.current = false;
+          userTranscriptBufferRef.current = "";
+        }
+      },
       setCurrentQuestion: (q) => useSessionStore.getState().setCurrentQuestion(q),
-      setUserAnswer: (a) => useSessionStore.getState().setUserAnswer(a),
+      setUserAnswer: (a) => {
+        const store = useSessionStore.getState();
+        store.setUserAnswer(a);
+        // Keep one canonical saved user utterance instead of one entry per
+        // Gemini syllable. Late fragments and accepted repairs update it.
+        if (a.trim() && userTranscriptTurnOpenRef.current) {
+          userTranscriptBufferRef.current = a;
+          store.replaceLatestUserTranscript(a);
+        }
+      },
       repairTranscript: async (
         request: TranscriptRepairRequest,
         signal: AbortSignal,
@@ -1755,8 +1845,11 @@ export default function LiveSessionController({
         useSessionStore.getState().logTiming("live: mic ready");
         const micStream = mic.getStream();
         if (micStream) {
+          const track = micStream.getAudioTracks()[0];
+          const settings = track?.getSettings();
+          const diagnostics = mic.getDiagnostics();
           useSessionStore.getState().logTiming(
-            `mic: stream ready (${micStream.getAudioTracks().length} audio tracks)`,
+            `mic: stream ready (${micStream.getAudioTracks().length} audio tracks) trackRate=${settings?.sampleRate ?? "?"} ctxRate=${diagnostics.contextSampleRate || "?"} channels=${settings?.channelCount ?? "?"} echo=${settings?.echoCancellation ?? "?"} noise=${settings?.noiseSuppression ?? "?"} agc=${settings?.autoGainControl ?? "?"}`,
           );
           micRecordingDisconnectRef.current = playback.addInputToRecording(micStream);
           pendingVadStreamRef.current = micStream;

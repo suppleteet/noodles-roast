@@ -10,13 +10,13 @@
 const defaults = {
   // Timing (milliseconds)
   answerSilenceMs: 300,          // fallback silence timer (Silero VAD is primary, ~150ms)
-  unfinalizedAnswerSilenceMs: 1600, // wait longer for trailing STT chunks before committing partial answers
-  unfinalizedCompleteSilenceMs: 650, // punctuated-but-unfinalized STT needs one brief grace window for a final segment
+  unfinalizedAnswerSilenceMs: 1100, // protect genuine danglers/natural pauses while bounding a missing Gemini final marker
+  unfinalizedCompleteSilenceMs: 500, // viable unfinalized answer debounce; server VAD is also tuned to flush at 500ms
   lateTranscriptSilenceMs: 1100, // regroup a materially extended/corrected answer before restarting generation
   answerWaitMs: 6000,            // silence before first prod
   earlyListenMs: 1200,           // switch mic to listening this many ms before question ends
   rephraseTimeoutMs: 1200,       // inline question-rephrase race cap. 450ms never beat a cold LLM, so questions shipped generic/impersonal (no name) and read canned. Higher = personalization lands; worst case is this much dead air before the bridged-original fallback.
-  transcriptRepairTimeoutMs: 1200, // repair only entity-like answers and never let the utility call dominate turn latency
+  transcriptRepairTimeoutMs: 1000, // repair only entity-like answers and never let the utility call dominate turn latency
   yesNoBranchSelectionWaitMs: 250, // brief cache-hit grace; miss falls through to normal streaming generation
   yesNoBranchPrefetchTimeoutMs: 6000, // speculative branches are stateless and disposable — never leave them running indefinitely
   visionIntervalMs: 5000,        // how often vision analyze fires
@@ -77,6 +77,7 @@ const defaults = {
 
   // TTS watchdogs — a stuck first streamed joke used to hold the serialized
   // playback chain forever, blocking later jokes that had already synthesized.
+  ttsFillerFirstAudioTimeoutMs: 1500, // optional backchannels fail open quickly; never hold the joke behind REST retry
   ttsFirstAudioTimeoutMs: 2200,
   ttsCompletionTimeoutMs: 7000,
   ttsFallbackTextWaitMs: 1200,

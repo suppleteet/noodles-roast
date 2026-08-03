@@ -1,14 +1,24 @@
 "use client";
 import { useRef, useCallback } from "react";
 import { MIC_SAMPLE_RATE } from "@/lib/liveConstants";
+import { levelMicrophonePcm } from "@/lib/audioUtils";
+
+export interface MicCaptureDiagnostics {
+  contextSampleRate: number;
+  rawRms: number;
+  outputRms: number;
+  peak: number;
+  gain: number;
+}
 
 export interface MicCaptureHandle {
   start(sourceStream?: MediaStream | null): Promise<void>;
   stop(): void;
   isCapturing(): boolean;
   getStream(): MediaStream | null;
-  /** Current mic input RMS (0-1). Updated every ~100ms from AnalyserNode. */
+  /** Peak recent RMS of the leveled PCM actually sent to Gemini. */
   getInputAmplitude(): number;
+  getDiagnostics(): MicCaptureDiagnostics;
 }
 
 /**
@@ -23,14 +33,20 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const pullGainRef = useRef<GainNode | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserBuf = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const inputAmplitudeRef = useRef(0);
   const peakAmplitudeRef = useRef(0);
   const peakTsRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
   const ownsStreamRef = useRef(false);
   const capturingRef = useRef(false);
+  const diagnosticsRef = useRef<MicCaptureDiagnostics>({
+    contextSampleRate: 0,
+    rawRms: 0,
+    outputRms: 0,
+    peak: 0,
+    gain: 1,
+  });
+  const gainRef = useRef(5);
   const onChunkRef = useRef(onChunk);
   onChunkRef.current = onChunk;
 
@@ -52,9 +68,6 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
     sourceRef.current = null;
     pullGainRef.current?.disconnect();
     pullGainRef.current = null;
-
-    analyserRef.current?.disconnect();
-    analyserRef.current = null;
 
     if (ctxRef.current?.state !== "closed") {
       ctxRef.current?.close();
@@ -101,6 +114,7 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
         ctx = new AudioContext({ latencyHint: "interactive" });
       }
       ctxRef.current = ctx;
+      diagnosticsRef.current = { ...diagnosticsRef.current, contextSampleRate: ctx.sampleRate };
 
       if (ctx.state === "suspended") {
         await ctx.resume();
@@ -113,60 +127,27 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
       pullGain.connect(ctx.destination);
       pullGainRef.current = pullGain;
 
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.3;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      analyserBuf.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
-
-      // Software gain on top of the platform AGC. Real sessions had Gemini
-      // missing transcripts entirely when the user spoke at normal volume
-      // from across the room — RMS hovered around 0.005-0.006 (the platform
-      // AGC was being conservative because the puppet TTS was already loud
-      // through the same stack and echoCancellation kept clamping things
-      // down). Boost is enough to push speech well clear of Gemini's
-      // STT noise floor; clipping is hard-limited to ±1.0.
-      //
-      // Declared BEFORE updateAmplitude so the analyser reading reflects what
-      // we actually send to Gemini — otherwise the brain's `inputAmplitudeMin`
-      // threshold (0.02) compares against raw 0.006 levels and rejects normal
-      // speech while we ship the boosted 0.030 to STT.
-      const MIC_GAIN = 5.0;
-
-      const updateAmplitude = () => {
-        if (!analyserRef.current || !analyserBuf.current) return;
-        analyserRef.current.getByteTimeDomainData(analyserBuf.current);
-        let sum = 0;
-        for (let i = 0; i < analyserBuf.current.length; i++) {
-          const v = (analyserBuf.current[i] - 128) / 128;
-          sum += v * v;
-        }
-        // Multiply by MIC_GAIN so the brain's amplitude threshold lives in
-        // the same units as what's actually being sent to the recognizer.
-        // Clamp at 1.0 to mirror the per-chunk hard limiter below.
-        const rms = Math.min(1, Math.sqrt(sum / analyserBuf.current.length) * MIC_GAIN);
-        inputAmplitudeRef.current = rms;
-
-        const now = performance.now();
-        if (rms >= peakAmplitudeRef.current) {
-          peakAmplitudeRef.current = rms;
-          peakTsRef.current = now;
-        } else if (now - peakTsRef.current > 800) {
-          peakAmplitudeRef.current = rms;
-        }
-      };
-
       let gotFirstChunk = false;
       const handlePcmChunk = (pcm: Float32Array) => {
         gotFirstChunk = true;
-        const boosted = new Float32Array(pcm.length);
-        for (let i = 0; i < pcm.length; i++) {
-          const v = pcm[i] * MIC_GAIN;
-          boosted[i] = v > 1 ? 1 : v < -1 ? -1 : v;
+        const leveled = levelMicrophonePcm(pcm, { previousGain: gainRef.current });
+        gainRef.current = leveled.gain;
+        inputAmplitudeRef.current = leveled.outputRms;
+        diagnosticsRef.current = {
+          contextSampleRate: ctx.sampleRate,
+          rawRms: leveled.rawRms,
+          outputRms: leveled.outputRms,
+          peak: leveled.peak,
+          gain: leveled.gain,
+        };
+        const now = performance.now();
+        if (leveled.outputRms >= peakAmplitudeRef.current) {
+          peakAmplitudeRef.current = leveled.outputRms;
+          peakTsRef.current = now;
+        } else if (now - peakTsRef.current > 800) {
+          peakAmplitudeRef.current = leveled.outputRms;
         }
-        onChunkRef.current(boosted);
-        updateAmplitude();
+        onChunkRef.current(leveled.pcm);
       };
 
       const startScriptProcessor = () => {
@@ -235,5 +216,6 @@ export function useMicCapture(onChunk: (pcm: Float32Array) => void): MicCaptureH
     isCapturing: () => capturingRef.current,
     getStream: () => streamRef.current,
     getInputAmplitude: () => peakAmplitudeRef.current,
+    getDiagnostics: () => diagnosticsRef.current,
   };
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { LIVE_MODEL, LIVE_VOICE_NAME } from "@/lib/liveConstants";
 import { getLiveTranscriptionPrompt } from "@/lib/livePrompts";
+import { LIVE_REALTIME_INPUT_CONFIG } from "@/lib/liveInputConfig";
 
 /**
  * Creates an ephemeral auth token for client-side Gemini Live API connections.
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
             // Must be in constraints — client-side additions are ignored when token is used
             inputAudioTranscription: {},
             outputAudioTranscription: {},
+            realtimeInputConfig: LIVE_REALTIME_INPUT_CONFIG,
           },
         },
       },

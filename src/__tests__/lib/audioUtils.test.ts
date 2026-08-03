@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   float32ToBase64Pcm16,
   base64Pcm16ToFloat32,
+  levelMicrophonePcm,
   pcmToAudioBuffer,
 } from "@/lib/audioUtils";
 
@@ -33,6 +34,30 @@ describe("float32ToBase64Pcm16", () => {
     const roundTrip = base64Pcm16ToFloat32(base64);
     expect(roundTrip[0]).toBeCloseTo(1.0, 3);
     expect(roundTrip[1]).toBeCloseTo(-1.0, 3);
+  });
+});
+
+describe("levelMicrophonePcm", () => {
+  it("boosts a quiet signal toward the recognizer target", () => {
+    const input = new Float32Array([0.005, -0.005, 0.005, -0.005]);
+    const result = levelMicrophonePcm(input, { previousGain: 5 });
+
+    expect(result.gain).toBe(5);
+    expect(result.outputRms).toBeCloseTo(0.025, 4);
+  });
+
+  it("backs off fixed gain for a close speaker without clipping peaks", () => {
+    const input = new Float32Array([0.6, -0.6, 0.2, -0.2]);
+    const result = levelMicrophonePcm(input, { previousGain: 5 });
+
+    expect(result.gain).toBeLessThan(2);
+    expect(result.peak).toBeLessThanOrEqual(0.95);
+    expect(Array.from(result.pcm).some((sample) => Math.abs(sample) < 0.95)).toBe(true);
+  });
+
+  it("holds quiet-speech gain through silence for the next onset", () => {
+    const result = levelMicrophonePcm(new Float32Array(1600), { previousGain: 5 });
+    expect(result.gain).toBe(5);
   });
 });
 

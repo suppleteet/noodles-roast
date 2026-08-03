@@ -74,6 +74,7 @@ import {
   isGenuinelyYesNoQuestion,
   type YesNoAnswer,
 } from "@/lib/yesNoBranching";
+import { mergeLiveTranscript } from "@/lib/liveTranscript";
 
 const CONTEXTUAL_QUESTION_TIMEOUT_MS = 5_000;
 
@@ -302,42 +303,6 @@ function normalizeAnswerToken(text: string): string {
   return text.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "").trim();
 }
 
-// ─── Smart transcript joining ────────────────────────────────────────────────────
-// Gemini sends syllable-level chunks ("Ye", "s", ", one", "dog.").
-// Blind space-join produces "Ye s , one dog." — garbled. This helper joins
-// intelligently: no space if the new chunk looks like a word continuation.
-
-function smartJoin(buffer: string, chunk: string): string {
-  if (!buffer) return chunk;
-  if (!chunk) return buffer;
-
-  const lastChar = buffer[buffer.length - 1];
-  const firstChar = chunk[0];
-
-  // New chunk starts with punctuation or space — no extra space needed
-  if (/^[\s,;:.!?'"\-)]/.test(firstChar)) return buffer + chunk;
-
-  // Previous buffer ends with space or opening bracket — no extra space
-  if (/[\s(["']$/.test(lastChar)) return buffer + chunk;
-
-  // Previous buffer ends with a letter and chunk starts with lowercase letter, with no
-  // leading space on the chunk. STT consistently emits a leading space on real word
-  // boundaries — its absence is a strong signal that this is a continuation of the same
-  // word ("agri" + "cul" → "agricul", "Ye" + "s" → "Yes"). Always concat without space.
-  if (/[a-zA-Z]$/.test(lastChar) && /^[a-z]/.test(firstChar)) {
-    return buffer + chunk;
-  }
-
-  // Digit followed by digit — likely a number continuation ("4" + "2" → "42")
-  if (/[0-9]$/.test(lastChar) && /^[0-9]/.test(firstChar)) return buffer + chunk;
-
-  // Digit/letter followed by uppercase — likely compound ("3" + "D" → "3D")
-  if (/[a-zA-Z0-9]$/.test(lastChar) && /^[A-Z]$/.test(chunk)) return buffer + chunk;
-
-  // Default: add space
-  return buffer + " " + chunk;
-}
-
 // ─── Levenshtein similarity (cheap approximate) ─────────────────────────────────
 
 function isSimilarAnswer(a: string, b: string): boolean {
@@ -388,6 +353,8 @@ export class ComedianBrain {
   private answerBuffer = "";
   /** True once Gemini Live sent inputTranscription with finished=true for this answer turn. */
   private sttHadFinalSegment = false;
+  /** Local Silero edge retained even when it arrives before Gemini's text. */
+  private vadSpeechEndedAt: number | null = null;
   private earlyListenActivated = false; // true once question TTS is nearly done — gate for early answer capture
   private fillerFiredForAnswer = false; // prevent double filler on late-transcription re-entry
   /** Incremented each time enterGenerating fires — stale stream callbacks check this to avoid double delivery. */
@@ -703,6 +670,7 @@ export class ComedianBrain {
   onVadSpeechEnd(): void {
     // During confirmation: VAD speech-end completes the yes/no response
     if (this.state === "confirm_answer") {
+      this.vadSpeechEndedAt = Date.now();
       const response = this.confirmBuffer.trim();
       if (!response) return; // no transcript yet
       this.deps.logTiming(`brain: VAD speech-end in confirm → "${response}"`);
@@ -712,8 +680,25 @@ export class ComedianBrain {
     }
 
     if (this.state !== "wait_answer" && this.state !== "pre_generate") return;
+    this.vadSpeechEndedAt = Date.now();
     const answer = this.answerBuffer.trim();
-    if (!answer) return; // no transcript yet — let the silence timer handle it
+    if (!answer) {
+      // Silero commonly beats Gemini's transcript stream. Preserve the edge and
+      // give the server one bounded flush window; otherwise this answer falls
+      // back to the full prod timer even though the user just spoke.
+      this.deps.logTiming("brain: VAD speech-end — awaiting first STT chunk");
+      this._clearTimers();
+      this.silenceTimer = setTimeout(() => {
+        if (
+          (this.state === "wait_answer" || this.state === "pre_generate") &&
+          !this.answerBuffer.trim()
+        ) {
+          this.deps.logTiming("brain: VAD ended but no STT arrived — prodding");
+          this.enterProdding();
+        }
+      }, COMEDIAN_CONFIG.unfinalizedAnswerSilenceMs);
+      return;
+    }
 
     // A bare, unfinalized "yes"/"no" is exactly where speculative branching
     // saves the most time — and exactly where a late "but actually..." could
@@ -753,18 +738,30 @@ export class ComedianBrain {
     this._onAnswerComplete();
   }
 
+  /** Cancel a pending endpoint as soon as Silero sees speech resume. */
+  onVadSpeechStart(): void {
+    this.vadSpeechEndedAt = null;
+    if (this.state === "wait_answer" || this.state === "pre_generate") {
+      if (this.silenceTimer) {
+        clearTimeout(this.silenceTimer);
+        this.silenceTimer = null;
+      }
+      // A final marker describes the preceding speech segment, not necessarily
+      // the whole answer when the user resumes after a natural pause.
+      this.sttHadFinalSegment = false;
+    } else if (this.state === "confirm_answer") {
+      this._clearConfirmTimer();
+    }
+    this.deps.logTiming(`brain: VAD speech-start (${this.state})`);
+  }
+
   /**
    * Accumulate text into the answer buffer.
-   * When `finished` is true, the text is the authoritative final transcription
-   * for the current speech segment — replace the buffer wholesale to fix
-   * smartJoin artifacts (e.g. "4 2" → "42").
+   * Gemini usually marks its last delta as `finished`, but some model revisions
+   * send a cumulative corrected final. mergeLiveTranscript accepts both shapes.
    */
   private _accumulateAnswer(text: string, finished: boolean): void {
-    if (finished && text.trim()) {
-      this.answerBuffer = text;
-    } else {
-      this.answerBuffer = smartJoin(this.answerBuffer, text);
-    }
+    this.answerBuffer = mergeLiveTranscript(this.answerBuffer, text, finished);
     this.deps.setUserAnswer(this.answerBuffer);
   }
 
@@ -785,11 +782,7 @@ export class ComedianBrain {
     // Confirmation state: accumulate into confirmBuffer for yes/no classification
     if (this.state === "confirm_answer") {
       this._clearConfirmTimer();
-      if (finished && text.trim()) {
-        this.confirmBuffer = text;
-      } else {
-        this.confirmBuffer = smartJoin(this.confirmBuffer, text);
-      }
+      this.confirmBuffer = mergeLiveTranscript(this.confirmBuffer, text, finished);
       this.deps.logTiming(`brain: confirm heard "${text}" → buffer "${this.confirmBuffer}"`);
       if (finished) {
         this._processConfirmResponse();
@@ -948,7 +941,10 @@ export class ComedianBrain {
       this._clearTimers();
       this._accumulateAnswer(text, finished);
       if (finished) this.sttHadFinalSegment = true;
-      this.deps.logTiming(`brain: heard "${text}" → buffer now "${this.answerBuffer}" (${wordCount(this.answerBuffer)}w)`);
+      const postVadMs = this.vadSpeechEndedAt === null
+        ? ""
+        : ` post-vad=${Date.now() - this.vadSpeechEndedAt}ms`;
+      this.deps.logTiming(`brain: heard[${finished ? "final" : "partial"}] "${text}" → buffer now "${this.answerBuffer}" (${wordCount(this.answerBuffer)}w)${postVadMs}`);
 
       // Transcript-based early endpointing: complete immediately when the final transcript
       // looks like a complete thought OR a viable short answer (name/yes-no/number).
@@ -1522,6 +1518,7 @@ export class ComedianBrain {
     this._transition("ask_question");
     this._cancelYesNoBranchPrefetch();
     this.answerBuffer = "";
+    this.vadSpeechEndedAt = null;
     this.earlyListenActivated = false;
     this.prodCount = 0;
     this.confirmAttempts = 0;
@@ -1669,11 +1666,15 @@ export class ComedianBrain {
 
   private _startAnswerSilenceTimer(): void {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
-    const silenceMs = this._answerNeedsMoreStt()
+    const needsMoreStt = this._answerNeedsMoreStt();
+    const silenceMs = needsMoreStt
       ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.unfinalizedAnswerSilenceMs ?? 1000)
       : !this.sttHadFinalSegment
         ? Math.max(COMEDIAN_CONFIG.answerSilenceMs, COMEDIAN_CONFIG.unfinalizedCompleteSilenceMs)
         : COMEDIAN_CONFIG.answerSilenceMs;
+    this.deps.logTiming(
+      `brain: endpoint timer ${silenceMs}ms (final=${this.sttHadFinalSegment} postVad=${this.vadSpeechEndedAt !== null} needsMore=${needsMoreStt})`,
+    );
     this.silenceTimer = setTimeout(() => {
       if (this.state === "wait_answer" || this.state === "pre_generate") {
         this._onAnswerComplete();
@@ -1701,6 +1702,7 @@ export class ComedianBrain {
     if (!answer || this.sttHadFinalSegment) return false;
     if (ComedianBrain._looksComplete(answer)) return false;
     const words = wordCount(answer);
+    const lastWord = lastWordToken(answer.replace(/[.?!,]+\s*$/, "")).toLowerCase();
     const firstWord = (answer.match(/[A-Za-z']+/)?.[0] ?? "").toLowerCase();
     const incompleteStarters = new Set([
       "i", "i'm", "im", "i've", "ive", "i'll", "ill", "my", "we", "we're", "were",
@@ -1713,11 +1715,15 @@ export class ComedianBrain {
       "there", "there's", "theres", "here", "here's", "heres",
     ]);
     if (words <= 2 && incompleteStarters.has(firstWord)) return true;
+    if (ComedianBrain.END_DANGLER_WORDS.has(lastWord)) return true;
     // Any single word that isn't a yes/no/wave-off / complete-name response
     // is too thin to commit on. Wait for the user to finish the thought.
     if (words <= 1 && !this._isViableAnswer(answer)) return true;
     if (words <= 1 && this._isViableAnswer(answer)) return false;
-    return words >= 2;
+    // A viable multi-word answer with no grammatical dangler can use the
+    // shorter debounce. Requiring punctuation sent every normal answer down
+    // the old 1.6-second worst-case path.
+    return false;
   }
 
   private enterProdding(): void {
