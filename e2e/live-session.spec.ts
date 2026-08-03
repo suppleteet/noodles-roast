@@ -11,6 +11,22 @@ async function startRoasting(page: Page, mock: LiveSessionMock): Promise<void> {
   await mock.waitForConnect();
 }
 
+async function mockAudibleTts(page: Page): Promise<void> {
+  await page.route("/api/tts-ws", async (route) => {
+    const sampleRate = 24_000;
+    const samples = new Int16Array(sampleRate * 2);
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = Math.round(Math.sin((2 * Math.PI * 220 * index) / sampleRate) * 12_000);
+    }
+    const pcm = Buffer.from(samples.buffer).toString("base64");
+    const body = [
+      `data: ${JSON.stringify({ type: "audio", chunk: pcm })}\n\n`,
+      `data: ${JSON.stringify({ type: "done" })}\n\n`,
+    ].join("");
+    await route.fulfill({ status: 200, contentType: "text/event-stream", body });
+  });
+}
+
 // ─── Startup speed test ───────────────────────────────────────────────────────
 // In brain mode, the comedian brain starts the vision opening immediately.
 
@@ -164,6 +180,63 @@ test.describe("TTS pipeline (brain-driven)", () => {
     driver.sendInterrupted();
     await page.waitForTimeout(200);
     await expect(page.locator("[data-testid='hud-overlay']")).toBeVisible();
+  });
+
+  test("end-call gives audible TTS a bounded zero-amplitude tail", async ({ page }) => {
+    // Override the silent default with a representative sustained utterance.
+    // A non-zero waveform proves the 20ms path, not the already-silent shortcut.
+    await mockAudibleTts(page);
+
+    await startRoasting(page, driver);
+    await expect.poll(
+      () => page.evaluate(() =>
+        (window as unknown as Record<string, number>).__DEBUG_AMP__ ?? 0),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(0.05);
+
+    await page.getByRole("button", { name: "End Session" }).click();
+    await expect(page.getByTestId("share-screen")).toBeVisible({ timeout: 15_000 });
+    const timing = await page.evaluate(
+      () => JSON.parse(localStorage.getItem("roastie-timing-log") ?? "[]") as string[],
+    );
+    const scheduled = timing.find((line) => line.includes("audio: interruption tail="));
+    expect(scheduled).toContain("tail=20ms");
+    const settled = timing.find((line) => line.includes("audio: interruption settled"));
+    expect(settled).toBeTruthy();
+    const settledMs = Number(settled?.match(/settled (\d+)ms/)?.[1] ?? Number.NaN);
+    // Media encoding can defer this UI-thread callback even though GainNode and
+    // source.stop were scheduled exactly 20ms apart on the audio render clock.
+    // Guard only against a runaway shutdown timer here.
+    expect(settledMs).toBeLessThan(200);
+    console.log(`[interrupt-tail] audio-clock=20ms callback=${settledMs}ms`);
+  });
+
+  test("user-speech barge-in transitions immediately while audible TTS fades", async ({ page }) => {
+    await mockAudibleTts(page);
+    await startRoasting(page, driver);
+    await driver.waitForBrainState("ask_question", 15_000);
+    await expect.poll(
+      () => page.evaluate(() =>
+        (window as unknown as Record<string, number>).__DEBUG_AMP__ ?? 0),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(0.05);
+
+    const interruptedAt = Date.now();
+    driver.send({
+      serverContent: {
+        inputTranscription: { text: "No, I said Tyler", finished: true },
+      },
+    });
+    await driver.waitForBrainStateOneOf(["pre_generate", "generating", "delivering"], 1_000);
+    const transitionMs = Date.now() - interruptedAt;
+    expect(transitionMs).toBeLessThan(500);
+    console.log(`[barge-in] state-transition=${transitionMs}ms audio-clock-tail=20ms`);
+
+    const timing = await page.evaluate(
+      () => JSON.parse(localStorage.getItem("roastie-timing-log") ?? "[]") as string[],
+    );
+    expect(timing.some((line) => line.includes("user barge-in during ask_question"))).toBe(true);
+    expect(timing.some((line) => line.includes("audio: interruption tail=20ms"))).toBe(true);
   });
 
   test("multiple TTS requests fire as brain progresses through states", async ({ page }) => {

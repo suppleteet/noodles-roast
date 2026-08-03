@@ -5,6 +5,12 @@ import { OUTPUT_SAMPLE_RATE } from "@/lib/liveConstants";
 import { base64Pcm16ToFloat32 } from "@/lib/audioUtils";
 
 const AMPLITUDE_THRESHOLD = 0.01;
+export const TTS_INTERRUPT_FADE_MS = 20;
+
+/** Already-quiet output is a safe boundary and does not need an audible tail. */
+export function interruptionTailMs(amplitude: number): number {
+  return amplitude <= AMPLITUDE_THRESHOLD ? 0 : TTS_INTERRUPT_FADE_MS;
+}
 
 /** Linear-interpolate Float32 PCM from one sample rate to another. */
 function resampleLinear(input: Float32Array, fromRate: number, toRate: number): Float32Array {
@@ -27,7 +33,9 @@ export interface PcmPlaybackHandle {
   enqueueChunk(base64Pcm: string, gain?: number): void;
   /** Decode a raw MP3/AAC ArrayBuffer and schedule it for playback. */
   decodeAndEnqueue(arrayBuffer: ArrayBuffer, gain?: number): Promise<void>;
-  flush(): void;
+  /** Cancel speech immediately at the state-machine level and resolve after a
+   *  bounded zero-amplitude audio tail has reached both speakers and recording. */
+  flush(): Promise<void>;
   getDestinationStream(): MediaStream | null;
   getAudioContext(): AudioContext | null;
   /** Returns true when all queued audio has finished playing. */
@@ -74,6 +82,7 @@ export function shouldUseMediaElementPlaybackBridge(): false {
 export function usePcmPlayback(): PcmPlaybackHandle {
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const ttsGateRef = useRef<GainNode | null>(null);
   const recordingDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const queueEndRef = useRef<number>(0);
@@ -83,6 +92,8 @@ export function usePcmPlayback(): PcmPlaybackHandle {
   const amplitudeDataRef = useRef<Float32Array<ArrayBuffer>>(new Float32Array(256));
   const preRollDoneRef = useRef<boolean>(false);
   const ctxRunningSinceRef = useRef<number | null>(null);
+  const gateReadyAtRef = useRef<number>(0);
+  const flushPromiseRef = useRef<Promise<void> | null>(null);
 
   function getOrCreateContext(): AudioContext {
     let ctx = ctxRef.current;
@@ -107,6 +118,14 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.3;
       analyserRef.current = analyser;
+
+      // Every assistant buffer passes through one shared gate before branching
+      // to speakers and MediaRecorder. Interrupts can therefore end at a true
+      // zero-amplitude boundary without desynchronizing the two outputs.
+      const ttsGate = ctx.createGain();
+      ttsGate.gain.value = 1;
+      ttsGate.connect(analyser);
+      ttsGateRef.current = ttsGate;
 
       // ── Output chains ────────────────────────────────────────────────
       // RECORDING: analyser → recordingDest (un-attenuated, full quality
@@ -194,16 +213,18 @@ export function usePcmPlayback(): PcmPlaybackHandle {
       const g = ctx.createGain();
       g.gain.value = gain;
       src.connect(g);
-      g.connect(analyserRef.current!);
+      g.connect(ttsGateRef.current!);
       src.onended = () => {
         sourcesRef.current.delete(src);
         try { g.disconnect(); } catch { /* already gone */ }
       };
     } else {
-      src.connect(analyserRef.current!);
+      src.connect(ttsGateRef.current!);
       src.onended = () => sourcesRef.current.delete(src);
     }
-    const startTime = Math.max(ctx.currentTime, queueEndRef.current);
+    // A new response arriving exceptionally quickly after a barge-in waits only
+    // for the prior 20ms gate ramp to finish, preventing old/new speech overlap.
+    const startTime = Math.max(ctx.currentTime, queueEndRef.current, gateReadyAtRef.current);
     src.start(startTime);
     queueEndRef.current = startTime + buffer.duration;
     sourcesRef.current.add(src);
@@ -238,27 +259,76 @@ export function usePcmPlayback(): PcmPlaybackHandle {
     scheduleBuffer(buffer, gain);
   }, [scheduleBuffer]);
 
-  /** Flush all queued/playing audio — called on barge-in interrupt. */
-  const flush = useCallback(() => {
+  /**
+   * Cancel queued/playing speech on the audio clock. A loud interruption ramps
+   * to literal zero over 20ms; an already-quiet envelope stops immediately.
+   * State-machine cancellation remains synchronous—the Promise is only for
+   * end-call recording shutdown, which must retain the tiny fade in the MP4.
+   */
+  const flush = useCallback((): Promise<void> => {
+    if (flushPromiseRef.current) return flushPromiseRef.current;
+    const ctx = ctxRef.current;
+    const gate = ttsGateRef.current;
+    const sourceCount = sourcesRef.current.size;
+    if (!ctx || !gate || sourceCount === 0) {
+      queueEndRef.current = 0;
+      lastAmplitudeRef.current = 0;
+      useSessionStore.getState().setAudioAmplitude(0);
+      return Promise.resolve();
+    }
+
+    const amplitude = lastAmplitudeRef.current;
+    const fadeMs = interruptionTailMs(amplitude);
+    const flushStartedAt = performance.now();
+    const now = ctx.currentTime;
+    const stopAt = now + fadeMs / 1000;
+    // One audio sample after zero is sufficient to restore the gate for future
+    // speech without allowing the cancelled sources back through.
+    const readyAt = stopAt + 1 / ctx.sampleRate;
+    gateReadyAtRef.current = readyAt;
+    gate.gain.cancelScheduledValues(now);
+    gate.gain.setValueAtTime(gate.gain.value, now);
+    if (fadeMs > 0) gate.gain.linearRampToValueAtTime(0, stopAt);
+    else gate.gain.setValueAtTime(0, now);
+    gate.gain.setValueAtTime(1, readyAt);
+
     for (const src of sourcesRef.current) {
       try {
-        src.stop();
-        src.disconnect();
+        // Web Audio executes this on its render thread, so the source ends at
+        // the gate's zero point even if the UI thread is busy on mobile.
+        src.stop(stopAt);
       } catch {
         // Already stopped
       }
     }
     sourcesRef.current.clear();
     queueEndRef.current = 0;
-    lastAmplitudeRef.current = 0;
-    useSessionStore.getState().setAudioAmplitude(0);
+    useSessionStore.getState().logTiming(
+      `audio: interruption tail=${fadeMs}ms amplitude=${amplitude.toFixed(3)} sources=${sourceCount}`,
+    );
+
+    const settleMs = fadeMs > 0 ? fadeMs + 4 : 0;
+    const promise = new Promise<void>((resolve) => {
+      window.setTimeout(() => {
+        lastAmplitudeRef.current = 0;
+        useSessionStore.getState().setAudioAmplitude(0);
+        useSessionStore.getState().logTiming(
+          `audio: interruption settled ${Math.round(performance.now() - flushStartedAt)}ms`,
+        );
+        gateReadyAtRef.current = 0;
+        flushPromiseRef.current = null;
+        resolve();
+      }, settleMs);
+    });
+    flushPromiseRef.current = promise;
+    return promise;
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
-      flush();
+      void flush();
       if (ctxRef.current?.state !== "closed") {
         ctxRef.current?.close();
       }

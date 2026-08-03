@@ -532,7 +532,7 @@ export default function LiveSessionController({
   function cancelSpeech(): void {
     ttsGenerationRef.current++;
     ttsChainRef.current = Promise.resolve();
-    playback.flush();
+    void playback.flush();
     lastSpokenTextRef.current = lastAudibleTextRef.current;
     lastQueuedVoiceSettingsRef.current = lastAudibleVoiceSettingsRef.current;
     lastQueuedGainRef.current = lastAudibleGainRef.current;
@@ -818,7 +818,7 @@ export default function LiveSessionController({
       if (audio.done) break;
     }
 
-    if (ttsGenerationRef.current !== gen) playback.flush();
+    if (ttsGenerationRef.current !== gen) void playback.flush();
     return queuedAny;
   }
 
@@ -1934,7 +1934,9 @@ export default function LiveSessionController({
     vadStartRequestedRef.current = false;
     vad.stop();
     mic.stop();
-    playback.flush();
+    // Preserve the click-free interruption tail in the MP4 before stopping
+    // MediaRecorder. This adds at most 24ms and does not delay the phase change.
+    await playback.flush();
 
     try { sessionRef.current?.close(); } catch { /* may be closed */ }
     sessionRef.current = null;
