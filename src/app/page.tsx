@@ -825,7 +825,6 @@ function MainApp() {
               </svg>
               <span className="sr-only">End Session</span>
             </button>
-            <span className="call-control-label">End</span>
           </div>
         )}
 
