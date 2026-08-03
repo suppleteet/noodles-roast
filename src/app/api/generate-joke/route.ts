@@ -11,7 +11,11 @@ import { generateText, type UserPart } from "@/lib/llmClient";
 import { trimObservations } from "@/lib/visionDiff";
 import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiRequest";
 import { isRoastModelId } from "@/lib/modelCatalog";
-import { ensureVisionOpeningArrival } from "@/lib/visionOpening";
+import {
+  ensureVisionOpeningArrival,
+  ROAST_VISION_OPENING_INTENSITY,
+  ROAST_VISION_OPENING_MOTION,
+} from "@/lib/visionOpening";
 
 export type JokeContext =
   | "greeting"
@@ -204,6 +208,7 @@ export async function POST(req: NextRequest) {
     const parsed = JSON.parse(jsonMatch[0]) as JokeResponse;
 
     const isVisionOpening = body.context === "vision_opening";
+    const isRoastVisionOpening = isVisionOpening && experienceType === "roast";
     const response: JokeResponse = {
       relevant: parsed.relevant ?? true,
       jokes: Array.isArray(parsed.jokes)
@@ -212,6 +217,11 @@ export async function POST(req: NextRequest) {
             text: isVisionOpening && typeof joke.text === "string"
               ? ensureVisionOpeningArrival(joke.text)
               : joke.text,
+            // The very first vision line is the arrival beat. Keep its motion
+            // restrained so the voice and puppet do not launch into a shout;
+            // all later roast lines retain the model-selected delivery.
+            motion: isRoastVisionOpening ? ROAST_VISION_OPENING_MOTION : joke.motion,
+            intensity: isRoastVisionOpening ? ROAST_VISION_OPENING_INTENSITY : joke.intensity,
           }))
         : [],
       redirect: parsed.redirect,
