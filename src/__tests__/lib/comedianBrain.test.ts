@@ -913,7 +913,7 @@ describe("ComedianBrain", () => {
       }
     });
 
-    it("queues both inert branches and delivers only the clearly selected one", async () => {
+    it("queues both inert branches for a personalized binary question and delivers the clear selected one", async () => {
       const branchSignals: Partial<Record<"yes" | "no", AbortSignal>> = {};
       const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
         const body = JSON.parse(String(init?.body ?? "{}")) as { branchPrefetch?: "yes" | "no" };
@@ -955,7 +955,7 @@ describe("ComedianBrain", () => {
       };
       brain.currentQuestion = binaryQuestion;
       brain.state = "ask_question";
-      brain._startYesNoBranchPrefetch(binaryQuestion.question);
+      brain._startYesNoBranchPrefetch("So, Tyler, are you married?");
       await Promise.resolve();
 
       const branchBodies = fetchMock.mock.calls
@@ -967,7 +967,7 @@ describe("ComedianBrain", () => {
       brain.state = "generating";
       brain.deliveryGeneration = 4;
       expect(
-        brain._consumeYesNoBranchPrefetch("Yeah, I do.", binaryQuestion, [], undefined, 4),
+        brain._consumeYesNoBranchPrefetch("Yes. <noise>", binaryQuestion, [], undefined, 4),
       ).toBe(true);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
 

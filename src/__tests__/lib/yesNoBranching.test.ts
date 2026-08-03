@@ -8,6 +8,7 @@ describe("yes/no branching", () => {
   it("recognizes authored and elliptical binary questions", () => {
     expect(isGenuinelyYesNoQuestion("Are you single?")).toBe(true);
     expect(isGenuinelyYesNoQuestion("Okay. You actually married?")).toBe(true);
+    expect(isGenuinelyYesNoQuestion("So, Tyler, are you married?")).toBe(true);
     expect(isGenuinelyYesNoQuestion("Do you work from home?")).toBe(true);
   });
 
@@ -19,6 +20,7 @@ describe("yes/no branching", () => {
 
   it("classifies explicit natural answers", () => {
     expect(classifyClearYesNoAnswer("Yeah, I am.")) .toBe("yes");
+    expect(classifyClearYesNoAnswer("Yes. <noise>")) .toBe("yes");
     expect(classifyClearYesNoAnswer("Uh-huh.")) .toBe("yes");
     expect(classifyClearYesNoAnswer("Nope, I'm not.")) .toBe("no");
     expect(classifyClearYesNoAnswer("Not really.")) .toBe("no");

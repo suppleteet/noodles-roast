@@ -13,6 +13,10 @@ export function isGenuinelyYesNoQuestion(question: string): boolean {
   const normalized = question
     .replace(/^[\s"'“”]+|[\s"'“”]+$/g, "")
     .replace(/^(?:okay|alright|anyway|moving on|but seriously|so|now|let me ask you this)[,.!?\s-]+/i, "")
+    // The question rephraser may naturally address the caller before a binary
+    // question (for example, "Tyler, are you married?"). That address should
+    // not stop the branch prefetch from recognizing the actual question.
+    .replace(/^[A-Za-z][A-Za-z'’-]{1,30}\s*,\s*/, "")
     .trim();
   if (!normalized.endsWith("?")) return false;
   if (OPEN_QUESTION_WORD.test(normalized) || EITHER_OR.test(normalized)) return false;
@@ -33,7 +37,11 @@ export function classifyClearYesNoAnswer(answer: string): YesNoAnswer | null {
   const normalized = answer
     .toLowerCase()
     .replace(/[’]/g, "'")
+    // Gemini's input transcript can include non-speech annotations. They do
+    // not add caller intent, so "Yes. <noise>" should remain a clear yes.
+    .replace(/(?:<|\[)\s*(?:(?:background\s+)?noise|inaudible|silence)\s*(?:>|\])/gi, " ")
     .replace(/^[\s,.!?;:—–-]*(?:uh+(?![ -]?huh)|um+|er+|ah+|well|okay|ok)\b[\s,.!?;:—–-]*/i, "")
+    .replace(/\s+/g, " ")
     .trim();
   if (!normalized || AMBIGUOUS.test(normalized)) return null;
 
