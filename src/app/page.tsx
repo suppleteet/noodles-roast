@@ -136,6 +136,7 @@ function MainApp() {
   const audioPlayerRef = useRef<AudioPlayerHandle>(null);
   const videoRecorderRef = useRef<VideoRecorderHandle>(null);
   const puppetCanvasRef = useRef<HTMLCanvasElement>(null);
+  const callSurfaceCanvasRef = useRef<HTMLCanvasElement>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const callFrameRef = useRef<HTMLElement>(null);
@@ -144,6 +145,7 @@ function MainApp() {
 
   const compositorHandle = useCompositor(
     puppetCanvasRef,
+    callSurfaceCanvasRef,
     webcamVideoRef,
     callFrameRef,
     pipVideoRef,
@@ -796,6 +798,18 @@ function MainApp() {
           )}
         </div>
         )}
+
+        <canvas
+          ref={callSurfaceCanvasRef}
+          data-testid="recorded-call-surface"
+          aria-hidden="true"
+          className={`call-recording-surface ${
+            phase === "roasting" &&
+            (sessionMode === "monologue" || puppetRevealed || isEnding)
+              ? "call-recording-surface--active"
+              : ""
+          }`}
+        />
 
         {phase === "roasting" && (
           <div ref={callControlsRef} data-testid="call-controls" className="call-controls">

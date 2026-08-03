@@ -114,6 +114,111 @@ test("Puppet Line centers real puppet contacts and updates the single call targe
   await context.close();
 });
 
+test("the displayed call canvas is the recorded surface, including current end-control styling", async ({ page }) => {
+  const recorderLogs: string[] = [];
+  page.on("console", (message) => {
+    if (message.text().includes("[recorder]")) recorderLogs.push(message.text());
+  });
+  const driver = new ComedianBrainDriver(page);
+  await driver.setup();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Call Roastie" }).click();
+  await driver.waitForConnect();
+
+  const surface = page.getByTestId("recorded-call-surface");
+  await expect(surface).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => recorderLogs.join("\n"), { timeout: 10_000 }).toContain("started mime=");
+
+  const liveEvidence = await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-testid='recorded-call-surface']");
+    const frame = document.querySelector<HTMLElement>("[data-testid='call-frame']");
+    const button = document.querySelector<HTMLButtonElement>(".call-end-button");
+    if (!canvas || !frame || !button) throw new Error("Call surface is incomplete");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas context unavailable");
+    const frameRect = frame.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const sample = {
+      x: ((buttonRect.left - frameRect.left) / frameRect.width) * canvas.width,
+      y: ((buttonRect.top - frameRect.top) / frameRect.height) * canvas.height,
+      width: (buttonRect.width / frameRect.width) * canvas.width,
+      height: (buttonRect.height / frameRect.height) * canvas.height,
+    };
+    const pixels = context.getImageData(
+      Math.max(0, Math.floor(sample.x)),
+      Math.max(0, Math.floor(sample.y)),
+      Math.max(1, Math.ceil(sample.width)),
+      Math.max(1, Math.ceil(sample.height)),
+    ).data;
+    let red = 0;
+    let white = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const r = pixels[index];
+      const g = pixels[index + 1];
+      const b = pixels[index + 2];
+      if (r > 140 && r > g * 1.45 && r > b * 1.45) red += 1;
+      if (r > 180 && g > 180 && b > 180) white += 1;
+    }
+    const pixelCount = pixels.length / 4;
+    return {
+      redFraction: red / pixelCount,
+      whiteFraction: white / pixelCount,
+      normalizedSample: {
+        x: sample.x / canvas.width,
+        y: sample.y / canvas.height,
+        width: sample.width / canvas.width,
+        height: sample.height / canvas.height,
+      },
+    };
+  });
+  expect(liveEvidence.redFraction).toBeGreaterThan(0.45);
+  expect(liveEvidence.whiteFraction).toBeGreaterThan(0.005);
+
+  // Give MediaRecorder multiple encoded frames with the stable control before stopping.
+  await page.waitForTimeout(800);
+  await page.getByRole("button", { name: "End Session" }).click();
+  await expect(page.getByTestId("share-screen")).toBeVisible({ timeout: 15_000 });
+  const video = page.getByTestId("share-video-shell").locator("video");
+  await expect.poll(
+    () => video.evaluate((element) => (element as HTMLVideoElement).videoWidth),
+    { timeout: 10_000 },
+  ).toBeGreaterThan(0);
+
+  const recordedEvidence = await video.evaluate(async (element, normalizedSample) => {
+    const videoElement = element as HTMLVideoElement;
+    videoElement.muted = true;
+    await videoElement.play();
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    videoElement.pause();
+    const canvas = document.createElement("canvas");
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Decode canvas unavailable");
+    context.drawImage(videoElement, 0, 0);
+    const x = Math.floor(normalizedSample.x * canvas.width);
+    const y = Math.floor(normalizedSample.y * canvas.height);
+    const width = Math.max(1, Math.ceil(normalizedSample.width * canvas.width));
+    const height = Math.max(1, Math.ceil(normalizedSample.height * canvas.height));
+    const pixels = context.getImageData(x, y, width, height).data;
+    let red = 0;
+    let white = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const r = pixels[index];
+      const g = pixels[index + 1];
+      const b = pixels[index + 2];
+      if (r > 120 && r > g * 1.35 && r > b * 1.35) red += 1;
+      if (r > 160 && g > 160 && b > 160) white += 1;
+    }
+    const pixelCount = pixels.length / 4;
+    return { redFraction: red / pixelCount, whiteFraction: white / pixelCount };
+  }, liveEvidence.normalizedSample);
+  expect(recordedEvidence.redFraction).toBeGreaterThan(0.35);
+  expect(recordedEvidence.whiteFraction).toBeGreaterThan(0.002);
+});
+
 test("short landscape viewports keep the puppet selector above the bottom call controls", async ({ page }) => {
   const recorderLogs: string[] = [];
   page.on("console", (message) => {

@@ -72,7 +72,7 @@ export default function HUDOverlay({ onStartSession }: Props) {
         (brainState === "wait_answer" || brainState === "prodding" ||
          brainState === "pre_generate" || brainState === "generating") && (
         <div className={`absolute ${isDev ? "top-16" : "top-4"} left-4 max-w-[200px] pointer-events-none`}>
-          <p className="text-[11px] text-white/40 leading-snug truncate">
+          <p data-recording-text="heard-answer" className="text-[11px] text-white/40 leading-snug truncate">
             {userAnswer}
           </p>
         </div>

@@ -52,6 +52,191 @@ function truncateText(
   return `${shortened.trimEnd()}…`;
 }
 
+function hasVisibleColor(color: string): boolean {
+  return color !== "transparent" && !/rgba\([^)]*,\s*0(?:\.0+)?\)/.test(color);
+}
+
+function splitCssArguments(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (character === "," && depth === 0) {
+      parts.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  parts.push(value.slice(start).trim());
+  return parts;
+}
+
+function linearGradientFromCss(
+  ctx: CanvasRenderingContext2D,
+  backgroundImage: string,
+  rect: RecordingRect,
+): CanvasGradient | null {
+  const match = backgroundImage.match(/^linear-gradient\((.*)\)$/);
+  if (!match) return null;
+  const args = splitCssArguments(match[1]);
+  if (args.length < 2) return null;
+
+  let angle = 180;
+  const angleMatch = args[0].match(/^(-?[\d.]+)deg$/);
+  if (angleMatch) {
+    angle = Number.parseFloat(angleMatch[1]);
+    args.shift();
+  }
+  if (args.length < 2) return null;
+
+  // CSS angles point upward at 0deg and rightward at 90deg.
+  const radians = (angle * Math.PI) / 180;
+  const dx = Math.sin(radians);
+  const dy = -Math.cos(radians);
+  const halfLength = (Math.abs(rect.width * dx) + Math.abs(rect.height * dy)) / 2;
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  const gradient = ctx.createLinearGradient(
+    centerX - dx * halfLength,
+    centerY - dy * halfLength,
+    centerX + dx * halfLength,
+    centerY + dy * halfLength,
+  );
+
+  args.forEach((stop, index) => {
+    const stopMatch = stop.match(/^(rgba?\([^)]*\)|#[\da-fA-F]{3,8}|[a-zA-Z]+)(?:\s+([\d.]+)%?)?$/);
+    if (!stopMatch) return;
+    const fallbackOffset = args.length === 1 ? 0 : index / (args.length - 1);
+    const offset = stopMatch[2]
+      ? Math.min(1, Math.max(0, Number.parseFloat(stopMatch[2]) / 100))
+      : fallbackOffset;
+    gradient.addColorStop(offset, stopMatch[1]);
+  });
+  return gradient;
+}
+
+function drawDomBox(
+  ctx: CanvasRenderingContext2D,
+  element: HTMLElement,
+  frameRect: RecordingRect,
+  recordingFrame: RecordingRect,
+): RecordingRect {
+  const rect = mapElementToRecording(
+    frameRect,
+    rectOf(element.getBoundingClientRect()),
+    recordingFrame,
+  );
+  const scale = recordingFrame.width / Math.max(1, frameRect.width);
+  const style = getComputedStyle(element);
+  const radius = (Number.parseFloat(style.borderTopLeftRadius) || 0) * scale;
+
+  const background = linearGradientFromCss(ctx, style.backgroundImage, rect);
+  if (background || hasVisibleColor(style.backgroundColor)) {
+    ctx.fillStyle = background ?? style.backgroundColor;
+    roundedPath(ctx, rect, radius);
+    ctx.fill();
+  }
+
+  const borderWidth = (Number.parseFloat(style.borderTopWidth) || 0) * scale;
+  if (borderWidth > 0 && hasVisibleColor(style.borderTopColor)) {
+    ctx.strokeStyle = style.borderTopColor;
+    ctx.lineWidth = borderWidth;
+    roundedPath(ctx, rect, radius);
+    ctx.stroke();
+  }
+  return rect;
+}
+
+function transformedText(text: string, transform: string): string {
+  if (transform === "uppercase") return text.toUpperCase();
+  if (transform === "lowercase") return text.toLowerCase();
+  if (transform === "capitalize") {
+    return text.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+  }
+  return text;
+}
+
+/**
+ * Paint text from the live DOM using its resolved geometry and typography.
+ * The DOM remains the authoring model; the visible/captured canvas consumes it.
+ */
+function drawDomText(
+  ctx: CanvasRenderingContext2D,
+  element: HTMLElement,
+  frameRect: RecordingRect,
+  recordingFrame: RecordingRect,
+): void {
+  const text = transformedText(
+    element.textContent?.trim() ?? "",
+    getComputedStyle(element).textTransform,
+  );
+  if (!text) return;
+
+  const rect = mapElementToRecording(
+    frameRect,
+    rectOf(element.getBoundingClientRect()),
+    recordingFrame,
+  );
+  const scale = recordingFrame.width / Math.max(1, frameRect.width);
+  const style = getComputedStyle(element);
+  const fontSize = (Number.parseFloat(style.fontSize) || 12) * scale;
+  const maxWidth = Math.max(0, rect.width);
+  ctx.fillStyle = style.color;
+  ctx.font = `${style.fontStyle} ${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = style.textAlign === "right" || style.textAlign === "center"
+    ? style.textAlign
+    : "left";
+  const x = ctx.textAlign === "right"
+    ? rect.x + rect.width
+    : ctx.textAlign === "center"
+      ? rect.x + rect.width / 2
+      : rect.x;
+  ctx.fillText(truncateText(ctx, text, maxWidth), x, rect.y + rect.height / 2, maxWidth);
+}
+
+/** Draw the exact live SVG paths by mapping their browser CTM into recording pixels. */
+function drawDomSvg(
+  ctx: CanvasRenderingContext2D,
+  svg: SVGSVGElement,
+  frameRect: RecordingRect,
+  recordingFrame: RecordingRect,
+): void {
+  const scaleX = recordingFrame.width / Math.max(1, frameRect.width);
+  const scaleY = recordingFrame.height / Math.max(1, frameRect.height);
+  for (const pathElement of svg.querySelectorAll("path")) {
+    const pathData = pathElement.getAttribute("d");
+    const matrix = pathElement.getScreenCTM();
+    if (!pathData || !matrix) continue;
+    const style = getComputedStyle(pathElement);
+    const path = new Path2D(pathData);
+
+    ctx.save();
+    ctx.setTransform(
+      matrix.a * scaleX,
+      matrix.b * scaleY,
+      matrix.c * scaleX,
+      matrix.d * scaleY,
+      recordingFrame.x + (matrix.e - frameRect.x) * scaleX,
+      recordingFrame.y + (matrix.f - frameRect.y) * scaleY,
+    );
+    ctx.lineWidth = Number.parseFloat(style.strokeWidth) || 1;
+    ctx.lineCap = style.strokeLinecap as CanvasLineCap;
+    ctx.lineJoin = style.strokeLinejoin as CanvasLineJoin;
+    if (hasVisibleColor(style.fill) && style.fill !== "none") {
+      ctx.fillStyle = style.fill;
+      ctx.fill(path);
+    }
+    if (hasVisibleColor(style.stroke) && style.stroke !== "none") {
+      ctx.strokeStyle = style.stroke;
+      ctx.stroke(path);
+    }
+    ctx.restore();
+  }
+}
+
 /**
  * Draws the same responsive call composition the user sees into a captureStream:
  * puppet stage, mirrored self-view, live HUD/vignette, and the end-call control.
@@ -60,6 +245,7 @@ function truncateText(
  */
 export function useCompositor(
   puppetCanvasRef: React.RefObject<HTMLCanvasElement | null>,
+  surfaceCanvasRef: React.RefObject<HTMLCanvasElement | null>,
   webcamVideoRef: React.RefObject<HTMLVideoElement | null>,
   callFrameRef: React.RefObject<HTMLElement | null>,
   selfViewRef: React.RefObject<HTMLVideoElement | null>,
@@ -75,7 +261,11 @@ export function useCompositor(
   const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    const canvas = document.createElement("canvas");
+    // This is intentionally the canvas mounted over the live call, not a second
+    // offscreen reconstruction. MediaRecorder therefore captures the exact same
+    // pixels the caller sees.
+    const canvas = surfaceCanvasRef.current;
+    if (!canvas) return;
     canvas.width = 720;
     canvas.height = 720;
     const stream = canvas.captureStream(30);
@@ -90,10 +280,6 @@ export function useCompositor(
     let previousEnding = false;
     let revealStartedAt: number | null = null;
     let endingStartedAt: number | null = null;
-    const hangupPath = new Path2D(
-      "M6.6 10.8c3.48-2.15 7.32-2.15 10.8 0l1.26-1.72a1.55 1.55 0 0 1 2.16-.34l1.17.86c.68.5.83 1.45.34 2.13l-2.2 3a1.55 1.55 0 0 1-2.13.36l-1.16-.82a1.52 1.52 0 0 1-.54-1.76 8.85 8.85 0 0 0-8.6 0 1.52 1.52 0 0 1-.54 1.76L6 15.09a1.55 1.55 0 0 1-2.13-.36l-2.2-3a1.54 1.54 0 0 1 .34-2.13l1.17-.86a1.55 1.55 0 0 1 2.16.34L6.6 10.8Z",
-    );
-
     const configure = (lock: boolean): PreparedCompositor | null => {
       const frame = callFrameRef.current?.getBoundingClientRect();
       const size = recordingSizeForFrame(frame?.width ?? 0, frame?.height ?? 0);
@@ -205,39 +391,11 @@ export function useCompositor(
         );
       }
 
-      // Production HUD: same top-left live status and top-right heard text.
-      if (state.phase === "roasting" || state.phase === "stopped") {
-        const hudX = recordingFrame.x + 16 * scale;
-        const hudY = recordingFrame.y + 20 * scale;
-        ctx.fillStyle = state.phase === "roasting" ? "#ef4444" : "#6b7280";
-        ctx.beginPath();
-        ctx.arc(hudX + 4 * scale, hudY, 4 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,0.72)";
-        ctx.font = `700 ${Math.max(10, 12 * scale)}px sans-serif`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(
-          state.phase === "roasting" ? "LIVE · CONVERSATION" : "STOPPED · CONVERSATION",
-          hudX + 14 * scale,
-          hudY,
-        );
-
-        if (
-          state.phase === "roasting" &&
-          state.userAnswer &&
-          ["wait_answer", "prodding", "pre_generate", "generating"].includes(state.brainState ?? "")
-        ) {
-          ctx.fillStyle = "rgba(255,255,255,0.42)";
-          ctx.font = `400 ${Math.max(9, 11 * scale)}px sans-serif`;
-          ctx.textAlign = "right";
-          ctx.fillText(
-            truncateText(ctx, state.userAnswer, 200 * scale),
-            recordingFrame.x + recordingFrame.width - 16 * scale,
-            recordingFrame.y + 20 * scale,
-          );
-        }
-      }
+      // Recordable DOM text is authored once in the HUD and painted from its
+      // resolved layout/style. This removes the old recording-only LIVE badge.
+      frameElement?.querySelectorAll<HTMLElement>("[data-recording-text]").forEach((element) => {
+        drawDomText(ctx, element, frameRect, recordingFrame);
+      });
 
       // Mirrored self-view, mapped from its actual responsive DOM rectangle.
       const video = webcamVideoRef.current;
@@ -246,11 +404,12 @@ export function useCompositor(
         const pip = mapElementToRecording(frameRect, rectOf(selfView.getBoundingClientRect()), recordingFrame);
         const pipRadiusCss = Number.parseFloat(getComputedStyle(selfView).borderTopLeftRadius) || 0;
         const pipRadius = pipRadiusCss * scale;
+        const selfViewStyle = getComputedStyle(selfView);
         ctx.save();
         ctx.shadowColor = "rgba(0,0,0,0.42)";
         ctx.shadowBlur = 24 * scale;
         ctx.shadowOffsetY = 10 * scale;
-        ctx.fillStyle = "#17120f";
+        ctx.fillStyle = selfViewStyle.backgroundColor;
         roundedPath(ctx, pip, pipRadius);
         ctx.fill();
         ctx.restore();
@@ -275,60 +434,27 @@ export function useCompositor(
           );
           ctx.restore();
         }
-        ctx.strokeStyle = "rgba(255,255,255,0.32)";
-        ctx.lineWidth = Math.max(1, scale);
-        roundedPath(ctx, pip, pipRadius);
-        ctx.stroke();
+        const pipBorderWidth = (Number.parseFloat(selfViewStyle.borderTopWidth) || 0) * scale;
+        if (pipBorderWidth > 0 && hasVisibleColor(selfViewStyle.borderTopColor)) {
+          ctx.strokeStyle = selfViewStyle.borderTopColor;
+          ctx.lineWidth = pipBorderWidth;
+          roundedPath(ctx, pip, pipRadius);
+          ctx.stroke();
+        }
       }
 
-      // Draw the same end-call dock that is visible over the live call.
+      // The DOM owns layout, colors, typography, and the SVG path. The canvas
+      // consumes those resolved values, so call-control edits automatically
+      // become both the visible surface and the recording.
       const controls = callControlsRef.current;
       const endButton = endButtonRef.current;
       if (state.phase === "roasting" && controls && endButton) {
-        const controlsRect = mapElementToRecording(
-          frameRect,
-          rectOf(controls.getBoundingClientRect()),
-          recordingFrame,
-        );
-        const buttonRect = mapElementToRecording(
-          frameRect,
-          rectOf(endButton.getBoundingClientRect()),
-          recordingFrame,
-        );
-        ctx.fillStyle = "rgba(14,9,7,0.64)";
-        roundedPath(ctx, controlsRect, 28 * scale);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.14)";
-        ctx.lineWidth = Math.max(1, scale);
-        ctx.stroke();
-
-        const red = ctx.createLinearGradient(buttonRect.x, buttonRect.y, buttonRect.x, buttonRect.y + buttonRect.height);
-        red.addColorStop(0, "#fb4d42");
-        red.addColorStop(1, "#cc211b");
-        ctx.fillStyle = red;
-        roundedPath(ctx, buttonRect, buttonRect.width / 2);
-        ctx.fill();
-
-        const iconSize = 28 * scale;
-        ctx.save();
-        ctx.translate(
-          buttonRect.x + (buttonRect.width - iconSize) / 2,
-          buttonRect.y + (buttonRect.height - iconSize) / 2,
-        );
-        ctx.scale(iconSize / 24, iconSize / 24);
-        ctx.fillStyle = "#fff";
-        ctx.fill(hangupPath);
-        ctx.restore();
-
-        ctx.fillStyle = "rgba(255,255,255,0.68)";
-        ctx.font = `700 ${Math.max(8, 10 * scale)}px sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(
-          "END",
-          controlsRect.x + controlsRect.width / 2,
-          controlsRect.y + controlsRect.height - 6 * scale,
-        );
+        drawDomBox(ctx, controls, frameRect, recordingFrame);
+        drawDomBox(ctx, endButton, frameRect, recordingFrame);
+        const icon = endButton.querySelector<SVGSVGElement>("svg");
+        if (icon) drawDomSvg(ctx, icon, frameRect, recordingFrame);
+        const label = controls.querySelector<HTMLElement>(".call-control-label");
+        if (label) drawDomText(ctx, label, frameRect, recordingFrame);
       }
 
       ctx.restore();
@@ -351,7 +477,7 @@ export function useCompositor(
       handle.current.canvas = null;
       handle.current.stream = null;
     };
-  }, [callControlsRef, callFrameRef, endButtonRef, puppetCanvasRef, selfViewRef, webcamVideoRef]);
+  }, [callControlsRef, callFrameRef, endButtonRef, puppetCanvasRef, selfViewRef, surfaceCanvasRef, webcamVideoRef]);
 
   return handle;
 }
