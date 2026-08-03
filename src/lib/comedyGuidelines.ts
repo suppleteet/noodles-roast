@@ -1,8 +1,8 @@
 /**
  * Distilled comedy guidelines learned from audience feedback.
  *
- * GLOBAL_COMEDY_GUIDELINES apply to all personas.
- * PERSONA_COMEDY_GUIDELINES apply to specific personas only.
+ * GLOBAL_COMEDY_GUIDELINES apply to all personas. Character-only rules live
+ * beside the rest of that character in src/lib/comedians/*.ts (`jokeRules`).
  *
  * Keep the list short so system prompts stay focused.
  */
@@ -15,24 +15,11 @@ export const GLOBAL_COMEDY_GUIDELINES: string[] = [
   "Mean-generic doesn't land ('you miserable bastard', 'pale screen-lit complexion'); the laugh comes from an observation so specific the target recognizes themselves in it — earn the meanness with accuracy first",
 ];
 
-export const PERSONA_COMEDY_GUIDELINES: Record<string, string[]> = {
-  kvetch: [
-    "Stay cranky and put-upon the WHOLE time — one continuous grumble at different temperatures; never bubbly, never hyped, even when a line kills",
-  ],
-  // hype: [],
-  // sweetheart: [],
-  // menace: [],
-};
-
 /**
  * Returns a formatted guidelines block ready for system prompt injection.
  * Returns empty string if no guidelines exist.
  */
-export function getComedyGuidelinesBlock(personaId?: string): string {
-  const lines = [
-    ...GLOBAL_COMEDY_GUIDELINES,
-    ...(personaId ? (PERSONA_COMEDY_GUIDELINES[personaId] ?? []) : []),
-  ];
-  if (lines.length === 0) return "";
-  return lines.map((g) => `- ${g}`).join("\n");
+export function getComedyGuidelinesBlock(): string {
+  if (GLOBAL_COMEDY_GUIDELINES.length === 0) return "";
+  return GLOBAL_COMEDY_GUIDELINES.map((g) => `- ${g}`).join("\n");
 }

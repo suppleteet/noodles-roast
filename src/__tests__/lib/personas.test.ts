@@ -36,6 +36,11 @@ describe("PersonaConfig shape", () => {
         expect(p.roastTechniques.length).toBeGreaterThan(0);
         expect(p.antiPatterns.length).toBeGreaterThan(0);
         expect(p.motionPreferences.length).toBeGreaterThan(0);
+        expect(p.visionOpening.arrivalInstruction).toContain("Arrival Beat");
+        expect(p.visionOpening.fallbackArrival.trim()).toBeTruthy();
+        expect(p.scriptedLines.greetingFallback.trim()).toBeTruthy();
+        expect(p.scriptedLines.answerFallbackRoasts.length).toBeGreaterThan(0);
+        expect(p.scriptedLines.technicalDifficulties.length).toBeGreaterThan(0);
       });
 
       it("has populated canned intro pools in both modes", () => {

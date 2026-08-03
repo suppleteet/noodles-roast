@@ -295,6 +295,7 @@ export async function POST(req: NextRequest) {
             body.context ?? "answer_roast",
             session.contentMode,
             session.experienceType,
+            session.persona,
           );
           const userParts = buildUserParts(body, taskPreamble);
           textStream = sendMessageStream(body.sessionId!, userParts);

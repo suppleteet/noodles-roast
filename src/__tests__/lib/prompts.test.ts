@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { getJokePrompt } from "@/lib/prompts";
 import { getContextInstructions } from "@/lib/chatSessionStore";
 import { getToastContextInstructions } from "@/lib/toastPrompts";
+import { hype } from "@/lib/comedians/hype";
+import { kvetch } from "@/lib/comedians/kvetch";
 
 describe("getJokePrompt", () => {
   describe("context-specific instructions", () => {
@@ -18,11 +20,11 @@ describe("getJokePrompt", () => {
 
     it("requires a calm arrival beat before every Roast vision observation", () => {
       const directPrompt = getJokePrompt("vision_opening", "hype", 3, "clean");
-      const sessionPrompt = getContextInstructions("vision_opening");
+      const sessionPrompt = getContextInstructions("vision_opening", "clean", "roast", "hype");
 
-      expect(directPrompt).toContain("Arrival Beat (HARD)");
-      expect(sessionPrompt).toContain("Arrival Beat (HARD)");
-      expect(directPrompt).toContain("must not be shouted");
+      expect(directPrompt).toContain(hype.visionOpening.arrivalInstruction);
+      expect(sessionPrompt).toContain(hype.visionOpening.arrivalInstruction);
+      expect(directPrompt).toContain("Do not shout");
     });
 
     it("requires Toastie to greet before her first vision beat", () => {
@@ -143,6 +145,11 @@ describe("getJokePrompt", () => {
       const prompt = getJokePrompt("greeting", "kvetch", 3, "clean");
       // Should contain some persona name (not testing exact name to avoid coupling)
       expect(prompt).toMatch(/You are ".*"/);
+    });
+
+    it("injects character-specific joke rules from the comedian config", () => {
+      const prompt = getJokePrompt("answer_roast", "kvetch", 3, "clean");
+      expect(prompt).toContain(kvetch.jokeRules[0]);
     });
 
     it("uses default persona (kvetch) when none specified", () => {

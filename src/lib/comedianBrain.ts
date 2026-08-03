@@ -36,13 +36,10 @@ import {
   ECHO_FILLER_PROBABILITY,
   QUESTION_BRIDGES,
   CONFIRM_DENIED_LINE,
-  ANSWER_FALLBACK_ROASTS,
-  GREETING_FALLBACK,
   TOAST_VISION_GREETING_BRIDGE,
   TOAST_VISION_FALLBACK,
   WRAPUP_FALLBACK,
   WRAPUP_BRIDGES,
-  TECHNICAL_DIFFICULTIES_LINES,
   NOISE_ANSWER_LINES,
   TOAST_NOISE_ANSWER_LINES,
   TOAST_CONFIRM_ECHO_TEMPLATES,
@@ -1065,7 +1062,9 @@ export class ComedianBrain {
     intensity: number;
   } {
     // Toast's fallback "save" line is warmer + drunker than the roast version.
-    const pool = this._isToast() ? TOAST_ANSWER_FALLBACK_ROASTS : ANSWER_FALLBACK_ROASTS;
+    const pool = this._isToast()
+      ? TOAST_ANSWER_FALLBACK_ROASTS
+      : PERSONAS[this.deps.getPersona()].scriptedLines.answerFallbackRoasts;
     // Never repeat a canned save line within a session — pick from the unused
     // ones first, and only recycle once the whole pool has been heard.
     let candidates = pool.filter((line) => !this.usedFallbackLines.has(line));
@@ -1465,7 +1464,7 @@ export class ComedianBrain {
     if (this._isToast()) {
       return TOAST_VISION_FALLBACK;
     }
-    return GREETING_FALLBACK;
+    return PERSONAS[this.deps.getPersona()].scriptedLines.greetingFallback;
   }
 
   private _maybeAdvanceFromGreeting(): void {
@@ -2167,8 +2166,7 @@ export class ComedianBrain {
     // persona (Toast is one character). Roast uses the per-persona table.
     const lines = this._isToast()
       ? TOAST_TECHNICAL_DIFFICULTIES_LINES
-      : TECHNICAL_DIFFICULTIES_LINES[this.deps.getPersona()] ??
-        TECHNICAL_DIFFICULTIES_LINES.kvetch;
+      : PERSONAS[this.deps.getPersona()].scriptedLines.technicalDifficulties;
     const line = lines[Math.floor(Math.random() * lines.length)];
     this.technicalDifficultiesLine = line;
     this.deps.logTiming(`brain: technical-difficulties exit — "${line.slice(0, 60)}"`);

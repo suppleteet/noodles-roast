@@ -17,7 +17,16 @@
 
 import type { JokeContext } from "@/app/api/generate-joke/route";
 import type { BurnIntensity } from "@/lib/prompts";
-import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
+
+/** Toastie's own first-beat configuration; Toast does not use PersonaConfig. */
+export const TOAST_VISION_OPENING = {
+  arrivalInstruction: `## Arrival Beat (HARD)
+Your very first spoken words must be a brief, calm, natural greeting before the toast beat.
+Use 2-6 words such as "Well, hello.", "Hey there.", or "Wow, look at you—hello."
+The greeting may carry gentle character attitude, but it must not be shouted, highly aggressive,
+or a punchline. After that short beat, pivot directly into the specific visual observation.`,
+  fallbackArrival: "Well, hello.",
+} as const;
 
 /**
  * Toast's drunk-thinking fillers — spoken while a roast is being written, same
@@ -246,7 +255,7 @@ Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First substantive spoken content of the call. Use what you SEE to land one
 toast-shaped beat about the user — confident drunk-assumption energy.
-${VISION_OPENING_ARRIVAL_RULE}
+${TOAST_VISION_OPENING.arrivalInstruction}
 Keep the full greeting-plus-toast beat to 24 words or fewer. Do not ask a question or refer to an earlier intro.${vulgarSuffix}
 Set "relevant": true. Generate exactly 1 joke.`,
 

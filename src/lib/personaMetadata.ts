@@ -11,6 +11,13 @@ export const PERSONA_NAMES: Record<PersonaId, string> = {
   menace: "The Menace",
 };
 
+/**
+ * Legacy monologue-only canned greetings. These remain in the lightweight
+ * client-safe metadata module because SessionController runs in the browser;
+ * the full comedian config files contain server-side prompt bodies and must
+ * not be bundled there. Conversation-mode openings use `visionOpening` in
+ * src/lib/comedians/*.ts instead.
+ */
 export const PERSONA_GREETINGS: Record<PersonaId, readonly string[]> = {
   kvetch: [
     "Alright, let's see what kind of catastrophe wandered in today.",

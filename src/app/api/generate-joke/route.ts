@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getJokePrompt } from "@/lib/prompts";
-import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
+import {
+  getToastBasePrompt,
+  getToastContextInstructions,
+  TOAST_VISION_OPENING,
+} from "@/lib/toastPrompts";
 import type { BurnIntensity } from "@/lib/prompts";
-import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
+import { getPersona, PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { MotionState } from "@/lib/motionStates";
 import { getSession, getContextInstructions, sendMessage, compactStableContext } from "@/lib/chatSessionStore";
 import { QuotaError, ModelUnavailableError } from "@/lib/llmClient";
@@ -153,6 +157,7 @@ export async function POST(req: NextRequest) {
         body.context ?? "hopper",
         session.contentMode,
         session.experienceType,
+        session.persona,
       );
       const userParts: UserPart[] = [];
       userParts.push({ text: buildUserText(body, taskPreamble) });
@@ -209,13 +214,19 @@ export async function POST(req: NextRequest) {
 
     const isVisionOpening = body.context === "vision_opening";
     const isRoastVisionOpening = isVisionOpening && experienceType === "roast";
+    const personaId = session?.persona ?? (PERSONA_IDS.includes(body.persona)
+      ? body.persona
+      : DEFAULT_PERSONA);
+    const visionOpening = experienceType === "toast"
+      ? TOAST_VISION_OPENING
+      : getPersona(personaId).visionOpening;
     const response: JokeResponse = {
       relevant: parsed.relevant ?? true,
       jokes: Array.isArray(parsed.jokes)
         ? parsed.jokes.map((joke) => ({
             ...joke,
             text: isVisionOpening && typeof joke.text === "string"
-              ? ensureVisionOpeningArrival(joke.text)
+              ? ensureVisionOpeningArrival(joke.text, visionOpening)
               : joke.text,
             // The very first vision line is the arrival beat. Keep its motion
             // restrained so the voice and puppet do not launch into a shout;

@@ -24,6 +24,13 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   toastPrompts.ts.)
  * - echoFillers → occasional active-listening templates for the first filler.
  *   Eligibility and cadence are guarded centrally by ComedianBrain.
+ * - visionOpening → the first 2-6 spoken words before the opening visual
+ *   roast. `arrivalInstruction` is sent to the LLM for that one turn and
+ *   `fallbackArrival` is spoken only when the model omits an arrival beat.
+ * - jokeRules → character-specific LLM rules beyond the shared comedy policy.
+ * - scriptedLines → spoken recovery lines used only when generation fails;
+ *   these stay in the comedian's voice without constraining normal freeform
+ *   joke generation.
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.
@@ -40,6 +47,12 @@ export interface PersonaConfig {
   /** Persona-specific topics to avoid, merged with GLOBAL_AVOID_TOPICS at prompt build time */
   avoidTopics?: string[];
   motionPreferences: MotionState[];
+  /** The calm first beat before this comedian's opening visual roast. */
+  visionOpening: VisionOpeningConfig;
+  /** Character-specific LLM rules beyond the shared comedy policy. */
+  jokeRules: string[];
+  /** Character-specific spoken lines used only when normal generation fails. */
+  scriptedLines: PersonaScriptedLines;
   cannedIntros: CannedIntros;
   /** Short "thinking" filler lines spoken while a roast is being written
    *  (covers LLM latency so there's no dead air). Spoken verbatim, not sent to
@@ -49,6 +62,27 @@ export interface PersonaConfig {
    *  then bridge into the joke. Every entry MUST contain the "{answer}" token.
    *  See the field docs above. */
   echoFillers: string[];
+}
+
+/**
+ * Persona-owned controls for the first spoken line after a caller connects.
+ * Keep the arrival concise and natural; the visual roast follows immediately.
+ */
+export interface VisionOpeningConfig {
+  /** Prompt instruction used only while generating the first vision roast. */
+  arrivalInstruction: string;
+  /** Spoken verbatim only if the model returns a bare visual punchline. */
+  fallbackArrival: string;
+}
+
+/** Short, verbatim recovery speech. These are never used for normal LLM jokes. */
+export interface PersonaScriptedLines {
+  /** Used when a vision-opening generation returns no usable joke. */
+  greetingFallback: string;
+  /** Used when an answer-roast generation fails; lines rotate without repeats. */
+  answerFallbackRoasts: string[];
+  /** Used when the model fails long enough that the caller must choose how to proceed. */
+  technicalDifficulties: string[];
 }
 
 /** One pool of canned video-call intro lines. `early` (5-9am) and `late`

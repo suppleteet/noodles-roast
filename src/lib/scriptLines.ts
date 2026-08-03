@@ -1,5 +1,3 @@
-import type { PersonaId } from "@/lib/personas";
-
 /**
  * ════════════════════════════════════════════════════════════════════════════
  *  SCRIPT LINES — every canned thing the puppet says, in ONE editable place.
@@ -16,7 +14,8 @@ import type { PersonaId } from "@/lib/personas";
  *   • Questions ....................... src/lib/questionBank.ts
  *       (each question also carries its own prod lines + vulgar variants)
  *   • Per-persona canned intros ....... src/lib/comedians/*.ts (cannedIntros: {...})
- *   • Per-persona fallback roasts ..... src/lib/fallbackRoasts.ts
+ *   • Per-persona fallback + recovery lines
+ *       ............................... src/lib/comedians/*.ts (scriptedLines)
  *   • The actual JOKES ................ written live by the LLM — never canned.
  *   • Timing / cadence knobs .......... src/lib/comedianConfig.ts
  * ────────────────────────────────────────────────────────────────────────────
@@ -103,55 +102,10 @@ export const ECHO_REJECTION_TEMPLATES = [
 /** Spoken when the user denies the puppet's confirmation guess. */
 export const CONFIRM_DENIED_LINE = "One more time?";
 
-// ─── Fallback roasts (only used when the LLM returns nothing) ────────────────
-// Generic save-the-moment lines so the puppet never goes silent after an answer.
-export const ANSWER_FALLBACK_ROASTS = [
-  "Stunning. Real edge-of-my-seat material there.",
-  "Yeah. The roast practically writes itself.",
-  "Riveting. Honestly, give me a second to recover.",
-  "Cool. Cool cool cool. Anyway.",
-  "Mhm. Just stunning material to work with.",
-  "Wow. The depth on display here is staggering.",
-  "Sure. Let's just keep moving.",
-];
-
-/** Spoken if the very first greeting/vision joke fails to generate. */
-export const GREETING_FALLBACK = "The camera took one look and requested hazard pay.";
-
 export const TOAST_VISION_GREETING_BRIDGE = "Oh—hi!";
 export const TOAST_VISION_FALLBACK = "Look at you—already giving the toast something to recover from.";
 
 // ─── Technical-difficulties exit ────────────────────────────────────────────
-/** Spoken when the joke-generation watchdog fires — the LLM hung past
- *  COMEDIAN_CONFIG.generationTimeoutMs and the puppet is about to fall back to
- *  canned filler indefinitely. Better to admit it's broken in character and
- *  end the session than grind through more dead air. Per-persona so the
- *  goodbye sounds like the puppet, not a corporate error message.
- *  Length: keep to ~15-22 words — enough to land "something broke, come back
- *  later" without dragging out the awkward moment. */
-export const TECHNICAL_DIFFICULTIES_LINES: Record<PersonaId, string[]> = {
-  kvetch: [
-    "Oy. My brain just stopped. Look, this is on me, not you — try this again later, kid.",
-    "Hold on. No, it's gone — the lights are flickering up here. Come back later, please.",
-    "Something just snapped in my head. We're done. I'm sorry, try me again later.",
-  ],
-  hype: [
-    "AY — my brain just CRASHED on me, I am OUT. Hit me up later, alright? We'll go again.",
-    "Yo my circuits just went DOWN, I cannot do this right now. Catch me later.",
-    "NOPE. Something just snapped up here. We're done, come back to me, we'll run this back.",
-  ],
-  sweetheart: [
-    "Oh no... my brain just stopped working. I'm so sorry. Try me again later, okay?",
-    "Sweetie, something just broke in my head. This isn't your fault. Come back another time.",
-    "Oh honey — I think I just lost it. Let's pick this up later. I'm sorry.",
-  ],
-  menace: [
-    "Hold up — my brain just ate itself. We're done here. Come back when I'm working.",
-    "Yeah, no. Something just went sideways up here. Try me later, we'll have a worse time.",
-    "My circuits just took a personal day. We're tapping out. Try me again later.",
-  ],
-};
-
 // ─── Toast experience: scripted lines ─────────────────────────────────────
 /** Toast's mid-thought greetings — she's been mid-conversation with someone
  *  offstage, fully WASTED, and is just now noticing the camera. Loud, sloppy,

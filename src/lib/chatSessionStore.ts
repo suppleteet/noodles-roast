@@ -17,9 +17,8 @@ import { GoogleGenAI, type Chat } from "@google/genai";
 import { ROAST_MODEL } from "@/lib/constants";
 import { getBaseJokePrompt } from "@/lib/prompts";
 import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
-import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
 import type { BurnIntensity } from "@/lib/prompts";
-import type { PersonaId } from "@/lib/personas";
+import { getPersona, type PersonaId, DEFAULT_PERSONA } from "@/lib/personas";
 import type { JokeContext } from "@/app/api/generate-joke/route";
 import {
   generateText,
@@ -441,10 +440,12 @@ export function getContextInstructions(
   context: JokeContext,
   contentMode: "clean" | "vulgar" = "clean",
   experienceType: ExperienceType = "roast",
+  personaId: PersonaId = DEFAULT_PERSONA,
 ): string {
   if (experienceType === "toast") {
     return getToastContextInstructions(context, contentMode);
   }
+  const persona = getPersona(personaId);
   // These are the task-specific parts from prompts.ts contextInstructions,
   // but without the persona/character setup (that's in the chat systemInstruction).
   const wrapupVulgarSuffix = contentMode === "vulgar"
@@ -459,7 +460,7 @@ Use at least 3 concrete observations when available.
 Set "relevant": true. Generate exactly 1 joke.`,
 
     vision_opening: `TASK: First vision joke. 1 sharp opening observation about what you see.
-${VISION_OPENING_ARRIVAL_RULE}
+${persona.visionOpening.arrivalInstruction}
 Keep the full greeting-plus-observation to 24 words or fewer, with the visual punchline at the end.
 Set "relevant": true. Generate exactly 1 joke.`,
 

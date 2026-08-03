@@ -1,7 +1,6 @@
 import { getPersona, type PersonaId, DEFAULT_PERSONA } from "@/lib/personas";
 import { getAvoidTopicsBlock } from "@/lib/avoidTopics";
 import { getComedyGuidelinesBlock } from "@/lib/comedyGuidelines";
-import { VISION_OPENING_ARRIVAL_RULE } from "@/lib/visionOpening";
 import type { JokeContext } from "@/app/api/generate-joke/route";
 
 export type BurnIntensity = 1 | 2 | 3 | 4 | 5;
@@ -62,6 +61,22 @@ const CURRENT_LOCATION_RULE = `## Current Location Rule
 - If you use a place from geolocation, phrase it as current whereabouts: "I see you're in ____", "what are you doing in ____", "apparently you're in ____", or make the place a reference point.
 - The joke is about them being there right now, not about being a resident or native of that place.`;
 
+function getAudienceFeedbackBlock(): string {
+  const guidelines = getComedyGuidelinesBlock();
+  return guidelines
+    ? `\n\n## Audience Feedback Guidelines
+These patterns have been identified from real audience reactions. Adjust your comedy accordingly:
+${guidelines}`
+    : "";
+}
+
+function getPersonaJokeRulesBlock(jokeRules: string[]): string {
+  return jokeRules.length > 0
+    ? `\n\n## Character-Specific Joke Rules
+${jokeRules.map((rule) => `- ${rule}`).join("\n")}`
+    : "";
+}
+
 export function getGreetingSystemPrompt(personaId: PersonaId = DEFAULT_PERSONA): string {
   const p = getPersona(personaId);
   return `You are "${p.name}", a Muppet-style puppet comedian meeting someone for the first time on a live webcam.
@@ -90,7 +105,7 @@ ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 ## What You NEVER Joke About
 ${getAvoidTopicsBlock(p.avoidTopics)}
 
-${CURRENT_LOCATION_RULE}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}
+${CURRENT_LOCATION_RULE}${getAudienceFeedbackBlock()}${getPersonaJokeRulesBlock(p.jokeRules)}
 
 Return ONLY a valid JSON object in exactly this shape:
 {
@@ -144,7 +159,7 @@ ${getAvoidTopicsBlock(p.avoidTopics, contentMode)}
 
 ${READ_THE_ROOM_BLOCK}
 
-${CURRENT_LOCATION_RULE}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}`;
+${CURRENT_LOCATION_RULE}${getAudienceFeedbackBlock()}${getPersonaJokeRulesBlock(p.jokeRules)}`;
 
   const responseSchema = `
 Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
@@ -189,7 +204,7 @@ Generate exactly 1 joke. Keep it quick.`,
     vision_opening: `## Task: First Vision Joke
 You've just seen this person for the first time. Generate exactly 1 sharp opening observation joke.
 Based on CURRENT OBSERVATIONS provided. Be specific — reference what you actually see.
-${VISION_OPENING_ARRIVAL_RULE}
+${p.visionOpening.arrivalInstruction}
 Keep the full greeting-plus-observation to 24 words or fewer. The visual observation still needs its punchline at the end.
 
 BACKGROUND RULE:
@@ -376,7 +391,7 @@ ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 - NEVER include stage directions, asterisks, or action descriptions in joke text (no *gestures*, *pauses*, *looks around*, etc.) — this is spoken audio, not a script. Only plain spoken words.
 
 ## What You NEVER Joke About
-${getAvoidTopicsBlock(p.avoidTopics, contentMode)}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}
+${getAvoidTopicsBlock(p.avoidTopics, contentMode)}${getAudienceFeedbackBlock()}${getPersonaJokeRulesBlock(p.jokeRules)}
 
 ${READ_THE_ROOM_BLOCK}
 
@@ -437,7 +452,7 @@ ${p.antiPatterns.map((a) => `- ${a}`).join("\n")}
 ## What You NEVER Joke About
 ${getAvoidTopicsBlock(p.avoidTopics)}
 
-${CURRENT_LOCATION_RULE}${(() => { const g = getComedyGuidelinesBlock(personaId); return g ? `\n\n## Audience Feedback Guidelines\nThese patterns have been identified from real audience reactions. Adjust your comedy accordingly:\n${g}` : ""; })()}
+${CURRENT_LOCATION_RULE}${getAudienceFeedbackBlock()}${getPersonaJokeRulesBlock(p.jokeRules)}
 
 ## Format Rules (CRITICAL — ALL PERSONAS)
 - Rapid-fire, one-liner-dense. No long stories or extended setups.
