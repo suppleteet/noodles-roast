@@ -730,7 +730,7 @@ describe("ComedianBrain._classifyConfirmResponse", () => {
   });
 });
 
-// ─── Filler picking (production uses low-information backchannels) ──────────
+// ─── Filler picking (occasional guarded answer echoes) ──────────────────────
 
 describe("ComedianBrain — filler backchannel gating", () => {
   /** Drive through to entering `generating`. Returns the first queueSpeak call after entry. */
@@ -758,10 +758,9 @@ describe("ComedianBrain — filler backchannel gating", () => {
     return (calls[0]?.[0] as string) ?? "";
   }
 
-  it("does not echo a complete short name even at the lowest random value", async () => {
+  it("echoes a complete short name when the cadence roll hits", async () => {
     const filler = await captureFillerForAnswer("Tyler", 0);
-    expect(filler.toLowerCase()).not.toContain("tyler");
-    expect(PERSONAS.kvetch.fillers).toContain(filler);
+    expect(filler).toBe("Tyler, huh.");
   });
 
   it("uses a non-echo filler when echo probability misses", async () => {
@@ -800,10 +799,9 @@ describe("ComedianBrain — filler backchannel gating", () => {
     expect(filler.toLowerCase()).not.toContain("software engineer at");
   });
 
-  it("does not echo a sentence-terminated short answer", async () => {
+  it("echoes a sentence-terminated short answer", async () => {
     const filler = await captureFillerForAnswer("Just a baker.", 0);
-    expect(filler.toLowerCase()).not.toContain("baker");
-    expect(PERSONAS.kvetch.fillers).toContain(filler);
+    expect(filler.toLowerCase()).toContain("baker");
   });
 
   it("does NOT echo a long answer — falls back to non-word filler", async () => {

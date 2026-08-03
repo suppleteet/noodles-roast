@@ -22,8 +22,8 @@ import type { PersonaId } from "@/lib/personaMetadata";
  *   Lead with a soft/voiced sound (an "Mm/Oh/Yeah" hum) — the breath beat is added
  *   in code, so don't bake in a leading "...". (Toast has its own pool, in
  *   toastPrompts.ts.)
- * - echoFillers → legacy experimental templates. Production sets their chance
- *   to zero so fillers never repeat or paraphrase the user's answer.
+ * - echoFillers → occasional active-listening templates for the first filler.
+ *   Eligibility and cadence are guarded centrally by ComedianBrain.
  * - energy → reserved metadata, not currently injected.
  *
  * View the fully-assembled prompt at /api/debug-prompt?persona=<id>.

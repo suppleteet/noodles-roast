@@ -29,10 +29,10 @@ import type { PersonaId } from "@/lib/personas";
 //   - Toast's drunk fillers → TOAST_FILLER_LINES in src/lib/toastPrompts.ts.
 // Only the cross-persona cadence knob stays global here:
 
-/** Echo fillers sounded like the comedian was paraphrasing or prematurely
- *  replying to the answer. Keep the legacy templates available for experiments,
- *  but production backchannels are intentionally low-information. */
-export const ECHO_FILLER_PROBABILITY = 0;
+/** Chance (0-1) that the first filler repeats a short, complete answer as
+ *  active listening (for example, "Tyler, huh."). Longer, incomplete, vulgar,
+ *  repaired, and recent-roast-echo answers still use a generic backchannel. */
+export const ECHO_FILLER_PROBABILITY = 0.35;
 
 // ─── Canned intros (instant opener — doubles as the "name" question) ────────
 // PER-PERSONA — the banks live in each comedian's file (src/lib/comedians/*.ts,

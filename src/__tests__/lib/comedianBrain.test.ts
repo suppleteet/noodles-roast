@@ -109,15 +109,14 @@ describe("ComedianBrain", () => {
   });
 
   describe("filler delivery", () => {
-    it("uses a low-information backchannel instead of echoing the answer", () => {
+    it("occasionally echoes a short complete answer as active listening", () => {
       vi.spyOn(Math, "random").mockReturnValue(0);
       const brain = new ComedianBrain(makeDeps()) as unknown as {
         _pickFiller: (answer: string) => string;
       };
 
       const filler = brain._pickFiller("Gerard.");
-      expect(filler).toBe(PERSONAS.kvetch.fillers[0]);
-      expect(filler).not.toContain("Gerard");
+      expect(filler).toBe("Gerard, huh.");
     });
 
     it("removes a repeated answer lead from a joke after echo filler", () => {
