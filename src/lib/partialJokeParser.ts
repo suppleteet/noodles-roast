@@ -234,18 +234,10 @@ export function createStreamingJokeParser(): StreamingJokeParser {
       joke.intensity = r.value;
     }
 
-    // 3. Emit joke-start once both are known
-    if (!joke.startEmitted) {
-      events.push({
-        type: "joke-start",
-        index: joke.index,
-        motion: joke.motion,
-        intensity: joke.intensity,
-      });
-      joke.startEmitted = true;
-    }
-
-    // 4. Locate text value opener
+    // 3. Locate text value opener before opening ElevenLabs. Opening a WS as
+    // soon as motion metadata arrives can leave it idle while a deliberative
+    // model is still composing the actual line; ElevenLabs then closes it with
+    // input_timeout_exceeded before any text is sent.
     if (joke.textValueStart === undefined) {
       const pos = findTextValueStart(buffer, joke.startPos);
       if (pos === -1) return events;
@@ -253,12 +245,24 @@ export function createStreamingJokeParser(): StreamingJokeParser {
       joke.textCursor = pos;
     }
 
-    // 5. Stream text deltas until closing `"`
+    // 4. Scan what text is currently available. Do not emit joke-start until
+    // at least one non-whitespace character exists, but keep start ordered
+    // before its first delta. Buffer leading whitespace so an empty/whitespace
+    // joke never opens an idle ElevenLabs socket.
     if (!joke.textEnded) {
       const scan = scanStringValue(buffer, joke.textCursor);
-      if (scan.delta.length > 0) {
+      joke.textAccum += scan.delta;
+      if (!joke.startEmitted && /\S/u.test(joke.textAccum)) {
+        events.push({
+          type: "joke-start",
+          index: joke.index,
+          motion: joke.motion,
+          intensity: joke.intensity,
+        });
+        joke.startEmitted = true;
+        events.push({ type: "joke-text-delta", index: joke.index, delta: joke.textAccum });
+      } else if (joke.startEmitted && scan.delta.length > 0) {
         events.push({ type: "joke-text-delta", index: joke.index, delta: scan.delta });
-        joke.textAccum += scan.delta;
       }
       joke.textCursor = scan.newCursor;
       if (!scan.ended) return events;
@@ -266,7 +270,7 @@ export function createStreamingJokeParser(): StreamingJokeParser {
       joke.textCursor = scan.newCursor + 1; // skip past closing "
     }
 
-    // 6. Score → joke-end
+    // 5. Score → joke-end
     if (joke.score === undefined) {
       const r = extractNumberField(buffer, joke.textCursor, "score");
       if (!r) return events;
@@ -274,6 +278,20 @@ export function createStreamingJokeParser(): StreamingJokeParser {
     }
 
     if (!joke.endEmitted) {
+      // A completed empty/whitespace-only joke is invalid. Consume it without
+      // emitting start/end so neither TTS nor downstream delivery can claim it.
+      if (!joke.startEmitted) {
+        joke.endEmitted = true;
+        let p = joke.textCursor;
+        while (p < buffer.length && buffer[p] !== "}") p++;
+        scanCursor = p + 1;
+        // The public sequence must remain contiguous. Reuse this internal
+        // index for the next valid joke so ordered playback never waits for
+        // an index that was intentionally suppressed.
+        nextIndex = joke.index;
+        currentJoke = null;
+        return events;
+      }
       events.push({
         type: "joke-end",
         index: joke.index,
@@ -323,14 +341,13 @@ export function createStreamingJokeParser(): StreamingJokeParser {
           endEmitted: false,
         };
       }
-      const before = events.length;
       const more = tryParseCurrentJoke();
       events.push(...more);
       // If currentJoke is still set (meaning joke-end not emitted), we need more data.
       if (currentJoke) break;
       // If currentJoke cleared, loop and try the next one.
-      // Safety: if no progress was made and joke didn't clear, also break (shouldn't happen).
-      if (events.length === before) break;
+      // It may have been an invalid empty joke that emitted no public event;
+      // scanCursor still advanced, so continue looking for a valid successor.
     }
 
     return events;

@@ -98,6 +98,10 @@ const defaults = {
   // ("if it hangs longer than 8 seconds") — a healthy generation delivers its first joke
   // in 1-4s, well inside this window.
   generationTimeoutMs: 8_000,
+  // Streaming progress may extend the stall watchdog, but never beyond this total
+  // wall-clock ceiling. This prevents a provider that dribbles whitespace or JSON
+  // scaffolding from holding the turn indefinitely without producing a usable joke.
+  generationAbsoluteTimeoutMs: 16_000,
 };
 
 const windowOverride =

@@ -38,6 +38,67 @@ const JOKE_WITH_NEWLINE = `{"relevant":true,"jokes":[{"motion":"emphasis","inten
 const TEXT_FIRST_JOKE = `{"relevant":true,"jokes":[{"text":"Wrong order.","motion":"smug","intensity":0.7,"score":8}]}`;
 
 describe("createStreamingJokeParser — well-formed single joke", () => {
+  it("does not open TTS from motion metadata before the first text character", () => {
+    const parser = createStreamingJokeParser();
+    const beforeText = parser.feed(
+      '{"jokes":[{"motion":"smug","intensity":0.7,"text":"',
+    );
+    expect(beforeText.some((event) => event.type === "joke-start")).toBe(false);
+
+    const withText = parser.feed("Hello");
+    expect(withText.map((event) => event.type)).toEqual([
+      "joke-start",
+      "joke-text-delta",
+    ]);
+  });
+
+  it("does not open TTS for a completed empty or whitespace-only joke", () => {
+    for (const text of ["", "   "]) {
+      const parser = createStreamingJokeParser();
+      const events = parser.feed(
+        `{"jokes":[{"motion":"smug","intensity":0.7,"text":"${text}","score":1}]}`,
+      );
+      expect(events.some((event) => event.type === "joke-start")).toBe(false);
+      expect(events.some((event) => event.type === "joke-end")).toBe(false);
+    }
+  });
+
+  it("discards an empty first joke and still emits the valid successor contiguously", () => {
+    const parser = createStreamingJokeParser();
+    const events = parser.feed(
+      '{"jokes":['
+      + '{"motion":"smug","intensity":0.2,"text":"","score":1},'
+      + '{"motion":"laugh","intensity":0.8,"text":"Actual joke.","score":8}'
+      + ']}',
+    );
+
+    expect(events.filter((event) => event.type === "joke-start")).toEqual([
+      { type: "joke-start", index: 0, motion: "laugh", intensity: 0.8 },
+    ]);
+    expect(events.find((event) => event.type === "joke-end")).toEqual({
+      type: "joke-end",
+      index: 0,
+      motion: "laugh",
+      intensity: 0.8,
+      text: "Actual joke.",
+      score: 8,
+    });
+  });
+
+  it("buffers leading whitespace until the first playable text character", () => {
+    const parser = createStreamingJokeParser();
+    const whitespace = parser.feed(
+      '{"jokes":[{"motion":"smug","intensity":0.7,"text":"   ',
+    );
+    expect(whitespace.some((event) => event.type === "joke-start")).toBe(false);
+
+    const withText = parser.feed("Hello");
+    expect(withText).toEqual([
+      { type: "joke-start", index: 0, motion: "smug", intensity: 0.7 },
+      { type: "joke-text-delta", index: 0, delta: "   Hello" },
+    ]);
+  });
+
   it("emits joke-start, text-delta, joke-end in order when fed all at once", () => {
     const parser = createStreamingJokeParser();
     const events = feedAll(parser, [SINGLE_JOKE]);

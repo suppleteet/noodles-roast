@@ -42,6 +42,7 @@ vi.mock("@/lib/comedianConfig", () => ({
     bridgeFallbackMs: 45,
     bridgePostPrimaryGraceMs: 40,
     generationTimeoutMs: 8000,
+    generationAbsoluteTimeoutMs: 16000,
     ttsFirstAudioTimeoutMs: 2200,
     ttsCompletionTimeoutMs: 7000,
     ttsFallbackTextWaitMs: 1200,
@@ -602,6 +603,131 @@ describe("ComedianBrain", () => {
         expect(onJoke).toHaveBeenCalledWith(
           expect.objectContaining({ text: "Tyler sounds like a warranty claim." }),
           false,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("measures the watchdog from real stream progress instead of total cold-request time", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps({
+          getDualLaneResponses: vi.fn(() => true),
+          openBridgeStream: vi.fn(() => ({
+            pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+          })),
+          playCachedAcknowledgement: vi.fn(() => "Mm-hmm."),
+          getVoiceSettings: vi.fn(() => ({
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.2,
+            use_speaker_boost: true,
+            speed: 1,
+          })),
+          getSpeechContext: vi.fn(() => ({ previousText: "Question?", previousVoiceSettings: null })),
+          openJokeStream: vi.fn(() => ({
+            pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+          })),
+        });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          deliveryGeneration: number;
+          _armGenerationWatchdog(answer: string): void;
+          _generateJokeStream(
+            params: { context: "answer_roast"; userAnswer: string },
+            onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+            onMeta: (meta: { relevant: boolean }) => void,
+            onError: () => void,
+            signal?: AbortSignal,
+            generation?: number,
+          ): void;
+        };
+        let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({
+          start(controller) { streamController = controller; },
+        }), { status: 200 })));
+        brain.state = "generating";
+        brain.deliveryGeneration = 11;
+        brain._armGenerationWatchdog("Tyler");
+        brain._generateJokeStream(
+          { context: "answer_roast", userAnswer: "Tyler" },
+          vi.fn(), vi.fn(), vi.fn(), undefined, 11,
+        );
+        await vi.runAllTicks();
+
+        await vi.advanceTimersByTimeAsync(7_000);
+        streamController?.enqueue(new TextEncoder().encode(
+          `data: ${JSON.stringify({ type: "progress", stage: "model-first-token", elapsedMs: 5_600 })}\n\n`,
+        ));
+        await vi.runAllTicks();
+        await Promise.resolve();
+
+        await vi.advanceTimersByTimeAsync(7_999);
+        expect(deps.logTiming).not.toHaveBeenCalledWith(
+          expect.stringContaining("generation watchdog fired"),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+        expect(deps.logTiming).toHaveBeenCalledWith(
+          expect.stringContaining("generation watchdog fired"),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("enforces an absolute ceiling even when the provider keeps reporting progress", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps({
+          getDualLaneResponses: vi.fn(() => true),
+          openBridgeStream: vi.fn(() => ({
+            pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+          })),
+          playCachedAcknowledgement: vi.fn(() => "Mm-hmm."),
+        });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          deliveryGeneration: number;
+          _armGenerationWatchdog(answer: string): void;
+          _generateJokeStream(
+            params: { context: "answer_roast"; userAnswer: string },
+            onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+            onMeta: (meta: { relevant: boolean }) => void,
+            onError: () => void,
+            signal?: AbortSignal,
+            generation?: number,
+          ): void;
+        };
+        let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({
+          start(controller) { streamController = controller; },
+        }), { status: 200 })));
+        brain.state = "generating";
+        brain.deliveryGeneration = 13;
+        brain._armGenerationWatchdog("Tyler");
+        brain._generateJokeStream(
+          { context: "answer_roast", userAnswer: "Tyler" },
+          vi.fn(), vi.fn(), vi.fn(), undefined, 13,
+        );
+        await vi.runAllTicks();
+
+        for (const elapsedMs of [7_000, 14_000]) {
+          await vi.advanceTimersByTimeAsync(elapsedMs === 7_000 ? 7_000 : 7_000);
+          streamController?.enqueue(new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: "progress", stage: "model-stream", elapsedMs })}\n\n`,
+          ));
+          await vi.runAllTicks();
+          await Promise.resolve();
+        }
+
+        await vi.advanceTimersByTimeAsync(1_999);
+        expect(deps.logTiming).not.toHaveBeenCalledWith(
+          expect.stringContaining("generation watchdog fired"),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+        expect(deps.logTiming).toHaveBeenCalledWith(
+          expect.stringContaining("generation watchdog fired"),
         );
       } finally {
         vi.useRealTimers();

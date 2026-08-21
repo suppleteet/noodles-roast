@@ -25,6 +25,11 @@ import { ApiRequestError, isValidImageBase64, readLimitedJson } from "@/lib/apiR
 import { isRoastModelId } from "@/lib/modelCatalog";
 
 type StreamEvent =
+  | {
+      type: "progress";
+      stage: "route-ready" | "model-first-token" | "model-stream" | "joke-structure";
+      elapsedMs: number;
+    }
   | { type: "joke"; index?: number; text: string; motion: string; intensity: number; score: number }
   | { type: "joke-meta"; index: number; motion: string; intensity: number }
   | { type: "audio"; index: number; chunk: string }
@@ -199,6 +204,8 @@ export async function POST(req: NextRequest) {
           // controller closed — ignore
         }
       };
+      const routeStartedAt = Date.now();
+      safeEnqueue({ type: "progress", stage: "route-ready", elapsedMs: 0 });
 
       /** Hard ceiling per EL WS stream — if neither onDone nor onError fires within this
        *  window, force-close so the SSE response isn't pinned open by a stuck connection.
@@ -330,12 +337,36 @@ export async function POST(req: NextRequest) {
           });
         }
 
+        let lastModelProgressAt = routeStartedAt;
+        let modelTokenSeen = false;
         for await (const chunkText of textStream) {
           if (!chunkText) continue;
+          const progressAt = Date.now();
+          if (!modelTokenSeen) {
+            modelTokenSeen = true;
+            lastModelProgressAt = progressAt;
+            safeEnqueue({
+              type: "progress",
+              stage: "model-first-token",
+              elapsedMs: progressAt - routeStartedAt,
+            });
+          } else if (progressAt - lastModelProgressAt >= 1_000) {
+            lastModelProgressAt = progressAt;
+            safeEnqueue({
+              type: "progress",
+              stage: "model-stream",
+              elapsedMs: progressAt - routeStartedAt,
+            });
+          }
           accumulated += chunkText;
 
           for (const ev of parser.feed(chunkText)) {
             if (ev.type === "joke-start") {
+              safeEnqueue({
+                type: "progress",
+                stage: "joke-structure",
+                elapsedMs: Date.now() - routeStartedAt,
+              });
               if (useStreamingTts) {
                 openTtsForJoke(ev.index, ev.motion, ev.intensity);
                 safeEnqueue({
@@ -364,6 +395,11 @@ export async function POST(req: NextRequest) {
         // Flush any pending events from the parser at end-of-stream.
         for (const ev of parser.finish()) {
           if (ev.type === "joke-start") {
+            safeEnqueue({
+              type: "progress",
+              stage: "joke-structure",
+              elapsedMs: Date.now() - routeStartedAt,
+            });
             if (useStreamingTts) {
               openTtsForJoke(ev.index, ev.motion, ev.intensity);
               safeEnqueue({

@@ -473,6 +473,9 @@ export class ComedianBrain {
   /** Latest proof that the streaming model is still advancing. The watchdog
    * measures a provider stall, not total model + TTS wall time. */
   private generationProgressAt = 0;
+  /** Wall-clock start for the request. Progress can postpone a stall timeout,
+   * but it cannot extend generation beyond the absolute response ceiling. */
+  private generationStartedAt = 0;
   private transcriptRepairAbort: AbortController | null = null;
 
   // Availability flags
@@ -2143,16 +2146,26 @@ export class ComedianBrain {
     // motion events arrive seconds after the fallback already played.
     try { this.generationAbort?.abort(); } catch { /* best-effort */ }
     this.generationAbort = new AbortController();
-    this.generationProgressAt = Date.now();
+    this.generationStartedAt = Date.now();
+    this.generationProgressAt = this.generationStartedAt;
     const checkForStall = () => {
       this.generationWatchdog = null;
       // If a joke arrived we've already left "generating" — nothing to rescue.
       if (this.state !== "generating") return;
-      const quietForMs = Date.now() - this.generationProgressAt;
-      if (quietForMs < COMEDIAN_CONFIG.generationTimeoutMs) {
+      const now = Date.now();
+      const quietForMs = now - this.generationProgressAt;
+      const totalForMs = now - this.generationStartedAt;
+      const absoluteRemainingMs = COMEDIAN_CONFIG.generationAbsoluteTimeoutMs - totalForMs;
+      if (
+        absoluteRemainingMs > 0
+        && quietForMs < COMEDIAN_CONFIG.generationTimeoutMs
+      ) {
         this.generationWatchdog = setTimeout(
           checkForStall,
-          COMEDIAN_CONFIG.generationTimeoutMs - quietForMs,
+          Math.min(
+            COMEDIAN_CONFIG.generationTimeoutMs - quietForMs,
+            absoluteRemainingMs,
+          ),
         );
         return;
       }
@@ -2167,7 +2180,7 @@ export class ComedianBrain {
       // comedian says (in character) that his brain's busted and waits for the
       // caller to restart with another model or continue this session.
       this.deps.logTiming(
-        `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — brain-busted exit`,
+        `brain: generation watchdog fired (quiet=${quietForMs}ms total=${totalForMs}ms) — brain-busted exit`,
       );
       this._enterTechnicalDifficultiesExit(this.deps.getRoastModel());
     };
@@ -4841,7 +4854,12 @@ export class ComedianBrain {
             clearAllJokeAudioFallbacks();
             return true; // signal caller to stop reading more SSE chunks
           }
-          if (event.type === "joke-meta" && streamingTtsEnabled) {
+          if (event.type === "progress") {
+            this.generationProgressAt = Date.now();
+            this.deps.logTiming(
+              `brain: joke progress stage=${String(event.stage ?? "unknown")} server=${typeof event.elapsedMs === "number" ? `${event.elapsedMs}ms` : "?"} client=${Date.now() - requestStartedAt}ms`,
+            );
+          } else if (event.type === "joke-meta" && streamingTtsEnabled) {
             // Opening the server-side EL stream is not yet audible readiness.
             // Retain only motion metadata until audio-end confirms a complete
             // playable transaction.
