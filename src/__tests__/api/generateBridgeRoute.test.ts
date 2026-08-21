@@ -88,6 +88,44 @@ describe("POST /api/generate-bridge", () => {
     }));
   });
 
+  it("uses the repaired name directly for the fast name-repeat beat", async () => {
+    const response = await POST(request({
+      turnId: "turn-name",
+      bridgeSessionId: "bridge-session",
+      questionId: "name",
+      question: "What is your name?",
+      answer: "Tyler.",
+    }));
+    const body = await response.text();
+
+    expect(body).toContain('"text":"Tyler, huh..."');
+    expect(body).toContain('"model":"deterministic-name-echo"');
+    expect(mocks.sendMessageStream).not.toHaveBeenCalled();
+    expect(mocks.generateTextStream).not.toHaveBeenCalled();
+    expect(mocks.openElTtsStream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "I'm not sure",
+    "I am an accountant",
+    "Uh Tyler",
+    "Tyler Smith",
+  ])("fails uncertain name input to the neutral cache without invoking a model: %s", async (answer) => {
+    const response = await POST(request({
+      turnId: "turn-uncertain-name",
+      bridgeSessionId: "bridge-session",
+      questionId: "name",
+      question: "What is your name?",
+      answer,
+    }));
+    const body = await response.text();
+
+    expect(body).toContain('"error":"invalid_bridge"');
+    expect(mocks.sendMessageStream).not.toHaveBeenCalled();
+    expect(mocks.generateTextStream).not.toHaveBeenCalled();
+    expect(mocks.openElTtsStream).not.toHaveBeenCalled();
+  });
+
   it("fails closed before TTS when the model invents unsupported material", async () => {
     mocks.sendMessageStream.mockImplementation(async function* () {
       yield "Tyler from Seattle. Alright.";

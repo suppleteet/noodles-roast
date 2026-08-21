@@ -71,3 +71,29 @@ export function validateConversationBridge(
 export function bridgeWordCount(text: string): number {
   return words(text).length;
 }
+
+/** The name turn does not need an LLM to invent a neutral reaction. Building
+ * the old “Tyler, huh...” beat directly from the repaired answer removes a
+ * model round-trip while retaining the same fail-closed evidence validation. */
+export function deterministicNameBridge(answer: string): string | null {
+  const normalized = answer
+    .trim()
+    .replace(/[.?!,]+$/g, "")
+    .trim();
+  const nameToken = "([\\p{L}][\\p{L}'’\\-]{1,19})";
+  // Full-string matches only. Capturing the first token of a longer phrase
+  // turned “I'm not sure” into “not, huh...”, which reinforced uncertainty as
+  // a fact. Multiword or dangling material must use the neutral cache instead.
+  const introduced = normalized.match(new RegExp(
+    `^(?:my name is|my name['’]s|call me|this is|i['’]m|i am|it['’]s|it is)\\s+${nameToken}$`,
+    "iu",
+  ));
+  const direct = normalized.match(new RegExp(`^${nameToken}$`, "iu"));
+  const firstName = introduced?.[1] ?? direct?.[1] ?? "";
+  if (!/^[\p{L}][\p{L}'’\-]{1,19}$/u.test(firstName)) return null;
+  if (/^(?:a|an|the|not|no|none|is|are|am|it|this|that|what|who|why|how|yes|yeah|yep|okay|sorry|sure|unsure|maybe|unknown|uh|um|huh)$/i.test(firstName)) {
+    return null;
+  }
+  const candidate = `${firstName}, huh...`;
+  return validateConversationBridge(candidate, { answer }) ? candidate : null;
+}

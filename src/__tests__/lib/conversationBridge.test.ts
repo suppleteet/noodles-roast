@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { bridgeWordCount, validateConversationBridge } from "@/lib/conversationBridge";
+import {
+  bridgeWordCount,
+  deterministicNameBridge,
+  validateConversationBridge,
+} from "@/lib/conversationBridge";
 
 describe("validateConversationBridge", () => {
   it("accepts a short answer-grounded acknowledgement", () => {
@@ -36,5 +40,22 @@ describe("validateConversationBridge", () => {
 describe("bridgeWordCount", () => {
   it("counts hyphenated and apostrophized speech as words", () => {
     expect(bridgeWordCount("Mm-hmm, you're an accountant.")).toBe(4);
+  });
+});
+
+describe("deterministicNameBridge", () => {
+  it("restores the grounded name-repeat beat without a model call", () => {
+    expect(deterministicNameBridge("Tyler.")).toBe("Tyler, huh...");
+    expect(deterministicNameBridge("My name is Tyler")).toBe("Tyler, huh...");
+    expect(deterministicNameBridge("My name is José")).toBe("José, huh...");
+  });
+
+  it("fails closed for non-name-shaped answers", () => {
+    expect(deterministicNameBridge("Is that a question?")).toBeNull();
+    expect(deterministicNameBridge("I have no idea what you mean")).toBeNull();
+    expect(deterministicNameBridge("I'm not sure")).toBeNull();
+    expect(deterministicNameBridge("I am an accountant")).toBeNull();
+    expect(deterministicNameBridge("Uh Tyler")).toBeNull();
+    expect(deterministicNameBridge("Tyler Smith")).toBeNull();
   });
 });

@@ -449,6 +449,7 @@ export class ComedianBrain {
   private bridgeClaim: "pending" | "bridge" | "cached" | "joke" | null = null;
   private bridgeAbort: AbortController | null = null;
   private bridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private bridgeSecondaryTimer: ReturnType<typeof setTimeout> | null = null;
   private bridgeText: string | null = null;
   private bridgeSink: JokeStreamSink | null = null;
   private bridgeSecondaryPlayed = false;
@@ -469,6 +470,9 @@ export class ComedianBrain {
   private generationWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Abort controller for the in-flight generate-speak fetch — let the watchdog cancel it. */
   private generationAbort: AbortController | null = null;
+  /** Latest proof that the streaming model is still advancing. The watchdog
+   * measures a provider stall, not total model + TTS wall time. */
+  private generationProgressAt = 0;
   private transcriptRepairAbort: AbortController | null = null;
 
   // Availability flags
@@ -2139,10 +2143,19 @@ export class ComedianBrain {
     // motion events arrive seconds after the fallback already played.
     try { this.generationAbort?.abort(); } catch { /* best-effort */ }
     this.generationAbort = new AbortController();
-    this.generationWatchdog = setTimeout(() => {
+    this.generationProgressAt = Date.now();
+    const checkForStall = () => {
       this.generationWatchdog = null;
       // If a joke arrived we've already left "generating" — nothing to rescue.
       if (this.state !== "generating") return;
+      const quietForMs = Date.now() - this.generationProgressAt;
+      if (quietForMs < COMEDIAN_CONFIG.generationTimeoutMs) {
+        this.generationWatchdog = setTimeout(
+          checkForStall,
+          COMEDIAN_CONFIG.generationTimeoutMs - quietForMs,
+        );
+        return;
+      }
       // Cancel the hung fetch so a late response can't double-fire on top of what's next.
       try { this.generationAbort?.abort(); } catch { /* best-effort */ }
       this.generationAbort = null;
@@ -2157,7 +2170,8 @@ export class ComedianBrain {
         `brain: generation watchdog fired (${COMEDIAN_CONFIG.generationTimeoutMs}ms) — brain-busted exit`,
       );
       this._enterTechnicalDifficultiesExit(this.deps.getRoastModel());
-    }, COMEDIAN_CONFIG.generationTimeoutMs);
+    };
+    this.generationWatchdog = setTimeout(checkForStall, COMEDIAN_CONFIG.generationTimeoutMs);
   }
 
   /**
@@ -2325,6 +2339,10 @@ export class ComedianBrain {
       clearTimeout(this.bridgeFallbackTimer);
       this.bridgeFallbackTimer = null;
     }
+    if (this.bridgeSecondaryTimer) {
+      clearTimeout(this.bridgeSecondaryTimer);
+      this.bridgeSecondaryTimer = null;
+    }
     try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
     this.bridgeAbort = null;
     this.bridgeSink?.cancel();
@@ -2390,6 +2408,7 @@ export class ComedianBrain {
       body: JSON.stringify({
         turnId,
         bridgeSessionId,
+        questionId: this.currentQuestion?.id,
         question: this.currentQuestion?.question ?? "",
         answer,
         persona: this.deps.getPersona(),
@@ -2453,6 +2472,10 @@ export class ComedianBrain {
           this.bridgeClaim = "bridge";
           this.bridgeClaimedAt = Date.now();
           this.bridgeSink = sink;
+          if (this.bridgeSecondaryTimer) {
+            clearTimeout(this.bridgeSecondaryTimer);
+            this.bridgeSecondaryTimer = null;
+          }
           if (this.bridgeFallbackTimer) {
             clearTimeout(this.bridgeFallbackTimer);
             this.bridgeFallbackTimer = null;
@@ -2524,6 +2547,10 @@ export class ComedianBrain {
     }
     if (this.bridgeClaim === "bridge" || this.bridgeClaim === "cached") {
       if (this.bridgeClaim === "cached") {
+        if (this.bridgeSecondaryTimer) {
+          clearTimeout(this.bridgeSecondaryTimer);
+          this.bridgeSecondaryTimer = null;
+        }
         try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
         this.bridgeAbort = null;
       }
@@ -2549,14 +2576,37 @@ export class ComedianBrain {
       `bridge: audio drained turn=${this.bridgeTurnId} duration=${this.bridgeClaimedAt === null ? "?" : `${drainedAt - this.bridgeClaimedAt}ms`} secondary=${this.bridgeSecondaryPlayed}`,
     );
     if (this.bridgeSecondaryPlayed) return false;
-    // The primary cache has now drained. A still-pending dynamic request has
-    // missed its useful handoff window; abort it before the secondary so a
-    // provider hang cannot turn into a multi-second silent gap.
+    if (this.bridgeSecondaryTimer) return true;
+    // The primary cache has now drained. Give a nearly-complete personalized
+    // bridge one short conversational beat to land (notably “Tyler, huh...” on
+    // the name turn). A hung request is still bounded and the joke may preempt
+    // this grace at any time.
     if (this.bridgeClaim === "cached" && this.bridgeAbort !== null) {
-      try { this.bridgeAbort.abort(); } catch { /* best-effort */ }
-      this.bridgeAbort = null;
-      this.deps.logTiming(`bridge: dynamic cancelled after primary drain turn=${this.bridgeTurnId}`);
+      const turnId = this.bridgeTurnId;
+      const generation = this.deliveryGeneration;
+      this.bridgeSecondaryTimer = setTimeout(() => {
+        this.bridgeSecondaryTimer = null;
+        if (
+          this.bridgeTurnId !== turnId ||
+          this.deliveryGeneration !== generation ||
+          this.bridgeClaim !== "cached" ||
+          this.state !== "generating"
+        ) return;
+        try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
+        this.bridgeAbort = null;
+        this.deps.logTiming(`bridge: personalized grace expired turn=${turnId}`);
+        this._playSecondaryBridge();
+      }, COMEDIAN_CONFIG.bridgePostPrimaryGraceMs);
+      this.deps.logTiming(
+        `bridge: awaiting personalized tail ${COMEDIAN_CONFIG.bridgePostPrimaryGraceMs}ms turn=${turnId}`,
+      );
+      return true;
     }
+    return this._playSecondaryBridge();
+  }
+
+  private _playSecondaryBridge(): boolean {
+    if (!this.bridgeTurnId || this.bridgeSecondaryPlayed || this.state !== "generating") return false;
     this.bridgeSecondaryPlayed = true;
     const text = this.deps.playCachedAcknowledgement?.("secondary");
     if (!text) return false;
@@ -4631,9 +4681,21 @@ export class ComedianBrain {
     const pendingJokes = new Map<number, JokeItem>();
     const deliveredJokeIndexes = new Set<number>();
     const jokeFallbackWaits = new Set<number>();
+    const jokeAudioFallbackTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    const requestStartedAt = Date.now();
     let nextJokeIndex = 0;
     let jokesSeen = 0;
     let jokeEventsSeen = 0;
+
+    const clearJokeAudioFallback = (index: number) => {
+      const timer = jokeAudioFallbackTimers.get(index);
+      if (timer) clearTimeout(timer);
+      jokeAudioFallbackTimers.delete(index);
+    };
+    const clearAllJokeAudioFallbacks = () => {
+      for (const timer of jokeAudioFallbackTimers.values()) clearTimeout(timer);
+      jokeAudioFallbackTimers.clear();
+    };
 
     // Debug LLM log: legible record of what we're asking for.
     {
@@ -4755,6 +4817,7 @@ export class ComedianBrain {
           }
 
           deliveredJokeIndexes.add(index);
+          clearJokeAudioFallback(index);
           onJoke(joke, sinkOpened);
           jokesSeen++;
           nextJokeIndex++;
@@ -4775,6 +4838,7 @@ export class ComedianBrain {
               for (const s of jokeSinks.values()) s.cancel();
               jokeSinks.clear();
             }
+            clearAllJokeAudioFallbacks();
             return true; // signal caller to stop reading more SSE chunks
           }
           if (event.type === "joke-meta" && streamingTtsEnabled) {
@@ -4785,6 +4849,10 @@ export class ComedianBrain {
             const motion = ((event.motion as string) ?? "idle") as MotionState;
             const intensity = (event.intensity as number) ?? 0.7;
             jokeMeta.set(index, { motion, intensity });
+            this.generationProgressAt = Date.now();
+            this.deps.logTiming(
+              `brain: joke model opened index=${index} at ${Date.now() - requestStartedAt}ms`,
+            );
           } else if (event.type === "audio" && streamingTtsEnabled) {
             const index = (event.index as number) ?? 0;
             const chunk = event.chunk as string | undefined;
@@ -4795,8 +4863,12 @@ export class ComedianBrain {
             }
           } else if (event.type === "audio-end" && streamingTtsEnabled) {
             const index = (event.index as number) ?? 0;
+            clearJokeAudioFallback(index);
             jokeAudioEnded.add(index);
             if (event.failed === true) jokeAudioFailed.add(index);
+            this.deps.logTiming(
+              `brain: joke audio ${event.failed === true ? "failed" : "complete"} index=${index} at ${Date.now() - requestStartedAt}ms chunks=${jokeAudio.get(index)?.length ?? 0}`,
+            );
             maybeDeliverJoke(index);
           } else if (event.type === "joke") {
             const joke = event as unknown as JokeItem & { index?: number };
@@ -4805,6 +4877,32 @@ export class ComedianBrain {
             jokeEventsSeen++;
             if (streamingTtsEnabled) {
               pendingJokes.set(index, joke);
+              // The comedy model has completed useful work. The 8-second
+              // generation watchdog must not race a healthy ElevenLabs tail
+              // and throw away this joke (a real first turn hit both at 8.0s).
+              // A separate per-joke timer below fails open to browser TTS if
+              // the server audio never reaches a complete playable buffer.
+              this._clearGenerationWatchdog();
+              this.deps.logTiming(
+                `brain: joke text ready index=${index} at ${Date.now() - requestStartedAt}ms — awaiting playable audio`,
+              );
+              if (!jokeAudioEnded.has(index) && !jokeAudioFallbackTimers.has(index)) {
+                const fallbackTimer = setTimeout(() => {
+                  jokeAudioFallbackTimers.delete(index);
+                  if (
+                    deliveredJokeIndexes.has(index) ||
+                    (gen !== undefined && this.deliveryGeneration !== gen) ||
+                    (this.state !== "generating" && this.state !== "delivering")
+                  ) return;
+                  jokeAudioEnded.add(index);
+                  jokeAudioFailed.add(index);
+                  this.deps.logTiming(
+                    `brain: joke audio incomplete after ${COMEDIAN_CONFIG.ttsCompletionTimeoutMs}ms — browser TTS fallback index=${index}`,
+                  );
+                  maybeDeliverJoke(index);
+                }, COMEDIAN_CONFIG.ttsCompletionTimeoutMs);
+                jokeAudioFallbackTimers.set(index, fallbackTimer);
+              }
               maybeDeliverJoke(index);
             } else {
               onJoke(joke, false);
@@ -4817,6 +4915,7 @@ export class ComedianBrain {
             // Cancel any in-flight sinks so playback unblocks.
             for (const s of jokeSinks.values()) s.cancel();
             jokeSinks.clear();
+            clearAllJokeAudioFallbacks();
             onError();
             return true;
           } else if (event.type === "error" && event.error === "model_unavailable") {
@@ -4826,6 +4925,7 @@ export class ComedianBrain {
             );
             for (const s of jokeSinks.values()) s.cancel();
             jokeSinks.clear();
+            clearAllJokeAudioFallbacks();
             this._enterTechnicalDifficultiesExit(failedModel);
             return true;
           } else if (event.type === "meta") {
@@ -4880,6 +4980,7 @@ export class ComedianBrain {
           this.deps.logTiming("brain: generate-speak stream ended without meta — synthesizing");
           onMeta({ relevant: true });
         }
+        clearAllJokeAudioFallbacks();
       })
       .catch((e) => {
         if ((e as Error).name !== "AbortError") {
@@ -4888,6 +4989,7 @@ export class ComedianBrain {
         // Cancel any open sinks so playback doesn't stall.
         for (const s of jokeSinks.values()) s.cancel();
         jokeSinks.clear();
+        clearAllJokeAudioFallbacks();
         onError();
       });
   }

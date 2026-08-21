@@ -68,6 +68,10 @@ const defaults = {
   // Dual-lane response race. A cached acknowledgement takes over if the
   // minimal bridge model has not produced playable audio by this deadline.
   bridgeFallbackMs: 450,
+  // Once the cached “Mm-hmm” drains, give an already-running personalized
+  // bridge one natural conversational beat to finish before the secondary
+  // canned line takes over. The joke can still preempt this grace immediately.
+  bridgePostPrimaryGraceMs: 400,
 
   // Filler pump — keeps audio flowing while the joke generates so there are no long pauses.
   // We add the breath beat ourselves (fillerBreathMs of real silence before each filler)

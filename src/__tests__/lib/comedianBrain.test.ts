@@ -40,6 +40,7 @@ vi.mock("@/lib/comedianConfig", () => ({
     fillerBreathMs: 10,
     fillerMaxStack: 2,
     bridgeFallbackMs: 45,
+    bridgePostPrimaryGraceMs: 40,
     generationTimeoutMs: 8000,
     ttsFirstAudioTimeoutMs: 2200,
     ttsCompletionTimeoutMs: 7000,
@@ -323,7 +324,7 @@ describe("ComedianBrain", () => {
       }
     });
 
-    it("aborts a hung dynamic bridge and queues the secondary when primary audio drains", async () => {
+    it("gives the personalized bridge a short grace, then bounds a hung provider", async () => {
       vi.useFakeTimers();
       try {
         const { brain, deps } = dualLaneBrain();
@@ -339,6 +340,10 @@ describe("ComedianBrain", () => {
         expect(deps.playCachedAcknowledgement).toHaveBeenCalledTimes(1);
 
         expect(brain._queueSecondaryBridgeIfNeeded()).toBe(true);
+        expect(requestSignal?.aborted).toBe(false);
+        expect(deps.playCachedAcknowledgement).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(40);
         expect(requestSignal?.aborted).toBe(true);
         expect(deps.playCachedAcknowledgement).toHaveBeenNthCalledWith(2, "secondary");
       } finally {
@@ -519,6 +524,83 @@ describe("ComedianBrain", () => {
         expect(deps.playCachedAcknowledgement).toHaveBeenCalledWith("primary");
         expect(onJoke).toHaveBeenCalledWith(
           expect.objectContaining({ text: "Browser fallback joke." }),
+          false,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not fire the generation watchdog after joke text is ready and TTS is still finishing", async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps({
+          getDualLaneResponses: vi.fn(() => true),
+          openBridgeStream: vi.fn(() => ({
+            pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+          })),
+          playCachedAcknowledgement: vi.fn(() => "Mm-hmm."),
+          getVoiceSettings: vi.fn(() => ({
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.2,
+            use_speaker_boost: true,
+            speed: 1,
+          })),
+          getSpeechContext: vi.fn(() => ({ previousText: "Question?", previousVoiceSettings: null })),
+          openJokeStream: vi.fn(() => ({
+            pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+          })),
+        });
+        const brain = new ComedianBrain(deps) as unknown as {
+          state: string;
+          deliveryGeneration: number;
+          _armGenerationWatchdog(answer: string): void;
+          _generateJokeStream(
+            params: { context: "answer_roast"; userAnswer: string },
+            onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+            onMeta: (meta: { relevant: boolean }) => void,
+            onError: () => void,
+            signal?: AbortSignal,
+            generation?: number,
+          ): void;
+        };
+        brain.state = "generating";
+        brain.deliveryGeneration = 7;
+        vi.stubGlobal("fetch", vi.fn(async () => {
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode([
+                { type: "joke-meta", index: 0, motion: "smug", intensity: 0.7 },
+                { type: "joke", index: 0, text: "Tyler sounds like a warranty claim.", motion: "smug", intensity: 0.7, score: 8 },
+              ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")));
+              // Deliberately leave the stream open: this reproduces complete
+              // model text followed by a slow ElevenLabs tail.
+            },
+          });
+          return new Response(stream, { status: 200 });
+        }));
+
+        const onJoke = vi.fn();
+        brain._armGenerationWatchdog("Tyler");
+        brain._generateJokeStream(
+          { context: "answer_roast", userAnswer: "Tyler" },
+          onJoke,
+          vi.fn(),
+          vi.fn(),
+          undefined,
+          7,
+        );
+        await vi.runAllTicks();
+        await Promise.resolve();
+
+        await vi.advanceTimersByTimeAsync(8_000);
+
+        expect(deps.logTiming).not.toHaveBeenCalledWith(
+          expect.stringContaining("generation watchdog fired"),
+        );
+        expect(onJoke).toHaveBeenCalledWith(
+          expect.objectContaining({ text: "Tyler sounds like a warranty claim." }),
           false,
         );
       } finally {

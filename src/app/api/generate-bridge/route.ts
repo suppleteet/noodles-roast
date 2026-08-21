@@ -5,7 +5,7 @@ import {
   sendMessageStream,
   BRIDGE_MODEL,
 } from "@/lib/chatSessionStore";
-import { validateConversationBridge } from "@/lib/conversationBridge";
+import { deterministicNameBridge, validateConversationBridge } from "@/lib/conversationBridge";
 import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
 import { openElTtsStream, getElevenLabsModelId } from "@/lib/elTtsStream";
 import { voiceIdForExperience } from "@/lib/constants";
@@ -17,6 +17,7 @@ import { DEFAULT_PERSONA, PERSONA_IDS, type PersonaId } from "@/lib/personas";
 export interface GenerateBridgeRequest {
   turnId: string;
   bridgeSessionId: string;
+  questionId?: string;
   question: string;
   answer: string;
   persona?: PersonaId;
@@ -94,9 +95,11 @@ function parseBridgeRequest(value: unknown): GenerateBridgeRequest | null {
   if (!isRecord(value)) return null;
   const turnId = boundedString(value.turnId, 128, true);
   const bridgeSessionId = boundedString(value.bridgeSessionId, 256, true);
+  const questionId = boundedString(value.questionId, 100);
   const question = boundedString(value.question, 1_000, true);
   const answer = boundedString(value.answer, 2_000, true);
   if (!turnId || !bridgeSessionId || !question || !answer) return null;
+  if (value.questionId !== undefined && questionId === undefined) return null;
 
   const knownFacts = boundedStringArray(value.knownFacts, 16, 500);
   const recentBridges = boundedStringArray(value.recentBridges, 8, 200);
@@ -116,6 +119,7 @@ function parseBridgeRequest(value: unknown): GenerateBridgeRequest | null {
   return {
     turnId,
     bridgeSessionId,
+    ...(questionId ? { questionId } : {}),
     question,
     answer,
     ...(value.persona !== undefined ? { persona: value.persona as PersonaId } : {}),
@@ -176,36 +180,53 @@ export async function POST(req: NextRequest) {
 
       try {
         const modelStartedAt = Date.now();
-        let generated = "";
         let firstTokenMs: number | null = null;
-        const userParts = [{ text: buildBridgeTurn(body) }];
-        const persona = PERSONA_IDS.includes(body.persona as PersonaId)
-          ? (body.persona as PersonaId)
-          : DEFAULT_PERSONA;
-        const textStream = session
-          ? sendMessageStream(body.bridgeSessionId, userParts, req.signal)
-          : generateTextStream({
-              model: BRIDGE_MODEL,
-              systemPrompt: getBridgeSystemPrompt(
-                persona,
-                body.experienceType === "toast" ? "toast" : "roast",
-              ),
-              userParts,
-              maxOutputTokens: 24,
-              reasoningProfile: "realtime-utility",
-              usageRoute: "generateBridge:stateless",
-              signal: req.signal,
-            });
-        for await (const chunk of textStream) {
-          if (req.signal.aborted) return close();
-          if (firstTokenMs === null && chunk) firstTokenMs = Date.now() - modelStartedAt;
-          generated += chunk;
+        let generated = "";
+        let bridge = body.questionId === "name"
+          ? deterministicNameBridge(body.answer)
+          : null;
+        let bridgeModel = bridge ? "deterministic-name-echo" : (session?.model || BRIDGE_MODEL);
+
+        // A failed name extraction is uncertainty, not permission to let an
+        // LLM guess what the caller meant. Fail closed so the coordinator keeps
+        // the already-playable neutral acknowledgement.
+        if (body.questionId === "name" && !bridge) {
+          enqueue({ type: "error", turnId: body.turnId, error: "invalid_bridge" });
+          enqueue({ type: "done", turnId: body.turnId });
+          return close();
         }
-        if (req.signal.aborted) return close();
-        const bridge = validateConversationBridge(generated ?? "", {
-          answer: body.answer,
-          knownFacts: body.knownFacts,
-        });
+
+        if (!bridge) {
+          const userParts = [{ text: buildBridgeTurn(body) }];
+          const persona = PERSONA_IDS.includes(body.persona as PersonaId)
+            ? (body.persona as PersonaId)
+            : DEFAULT_PERSONA;
+          const textStream = session
+            ? sendMessageStream(body.bridgeSessionId, userParts, req.signal)
+            : generateTextStream({
+                model: BRIDGE_MODEL,
+                systemPrompt: getBridgeSystemPrompt(
+                  persona,
+                  body.experienceType === "toast" ? "toast" : "roast",
+                ),
+                userParts,
+                maxOutputTokens: 24,
+                reasoningProfile: "realtime-utility",
+                usageRoute: "generateBridge:stateless",
+                signal: req.signal,
+              });
+          for await (const chunk of textStream) {
+            if (req.signal.aborted) return close();
+            if (firstTokenMs === null && chunk) firstTokenMs = Date.now() - modelStartedAt;
+            generated += chunk;
+          }
+          if (req.signal.aborted) return close();
+          bridge = validateConversationBridge(generated ?? "", {
+            answer: body.answer,
+            knownFacts: body.knownFacts,
+          });
+          bridgeModel = session?.model || BRIDGE_MODEL;
+        }
         if (!bridge) {
           console.warn(
             `[generate-bridge] rejected candidate model=${session?.model ?? BRIDGE_MODEL} text=${JSON.stringify(generated.slice(0, 160))}`,
@@ -220,8 +241,8 @@ export async function POST(req: NextRequest) {
           type: "bridge-meta",
           turnId: body.turnId,
           text: bridge,
-          model: session?.model || BRIDGE_MODEL,
-          firstTokenMs: firstTokenMs ?? modelMs,
+          model: bridgeModel,
+          firstTokenMs: firstTokenMs ?? 0,
           modelMs,
         });
 
