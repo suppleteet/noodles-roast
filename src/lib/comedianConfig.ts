@@ -65,6 +65,10 @@ const defaults = {
   skipScriptedLines: false,   // skip ALL canned speech (bridges, prods, confirm templates, reject templates)
   singleJokeMode: false,     // false: 1-2 jokes stream from one API call; true: pipeline 1 joke at a time
 
+  // Dual-lane response race. A cached acknowledgement takes over if the
+  // minimal bridge model has not produced playable audio by this deadline.
+  bridgeFallbackMs: 450,
+
   // Filler pump — keeps audio flowing while the joke generates so there are no long pauses.
   // We add the breath beat ourselves (fillerBreathMs of real silence before each filler)
   // rather than baking a leading "..." into the text — EL rendered the ellipsis flatly and

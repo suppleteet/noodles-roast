@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ComedianBrain, type ComedianBrainDeps } from "@/lib/comedianBrain";
 import type { ComedyQuestion } from "@/lib/questionBank";
-import type { JokeResponse } from "@/app/api/generate-joke/route";
+import type { JokeItem, JokeResponse } from "@/app/api/generate-joke/route";
 import { PERSONAS } from "@/lib/personas";
 
 // Mock COMEDIAN_CONFIG at module level (evaluated at import time)
@@ -39,6 +39,7 @@ vi.mock("@/lib/comedianConfig", () => ({
     singleJokeMode: true,
     fillerBreathMs: 10,
     fillerMaxStack: 2,
+    bridgeFallbackMs: 45,
     generationTimeoutMs: 8000,
     ttsFirstAudioTimeoutMs: 2200,
     ttsCompletionTimeoutMs: 7000,
@@ -100,6 +101,18 @@ function stateHistory(deps: ComedianBrainDeps): (string | null)[] {
   );
 }
 
+function bridgeSseResponse(events: Array<Record<string, unknown>>): Response {
+  const encoded = new TextEncoder().encode(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+  );
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoded);
+      controller.close();
+    },
+  }), { status: 200 });
+}
+
 describe("ComedianBrain", () => {
   describe("construction", () => {
     it("creates without error", () => {
@@ -131,6 +144,386 @@ describe("ComedianBrain", () => {
           "Gerard, huh.",
         ),
       ).toBe("Nobody under sixty has that name by accident.");
+    });
+  });
+
+  describe("dual-lane bridge race", () => {
+    function dualLaneBrain() {
+      const sink = {
+        pushAudio: vi.fn(),
+        finalize: vi.fn(),
+        endAudio: vi.fn(),
+        cancel: vi.fn(),
+      };
+      const deps = makeDeps({
+        getBridgeSessionId: vi.fn(() => "bridge-session"),
+        getDualLaneResponses: vi.fn(() => true),
+        getVoiceSettings: vi.fn(() => ({
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.2,
+          use_speaker_boost: true,
+          speed: 1,
+        })),
+        getSpeechContext: vi.fn(() => ({ previousText: "What is your name?", previousVoiceSettings: null })),
+        openBridgeStream: vi.fn(() => sink),
+        playCachedAcknowledgement: vi.fn((slot) => slot === "primary" ? "Mm-hmm." : "Okay... yeah."),
+      });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        deliveryGeneration: number;
+        bridgeClaim: string | null;
+        currentQuestion: ComedyQuestion;
+        _prepareBridgeTurn(generation: number): string;
+        _startBridgeRequest(answer: string, generation: number): void;
+        _claimJokeAgainstBridge(): boolean;
+        _queueSecondaryBridgeIfNeeded(): boolean;
+      };
+      brain.state = "generating";
+      brain.deliveryGeneration = 1;
+      brain.currentQuestion = {
+        id: "name",
+        question: "What is your name?",
+        jokeContext: "Name roast",
+        prodLines: [],
+      };
+      return { brain, deps, sink };
+    }
+
+    it("lets dynamic bridge PCM claim the turn before the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain, deps, sink } = dualLaneBrain();
+        const turnId = brain._prepareBridgeTurn(1);
+        // Replace matcher placeholder with the actual opaque turn id from the brain.
+        const internalTurnId = (brain as unknown as { bridgeTurnId: string }).bridgeTurnId;
+        vi.stubGlobal("fetch", vi.fn(async () => bridgeSseResponse([
+          { type: "bridge-meta", turnId: internalTurnId, text: "Tyler, huh...", modelMs: 18 },
+          { type: "audio", turnId: internalTurnId, chunk: "pcm" },
+          { type: "audio-end", turnId: internalTurnId },
+          { type: "done", turnId: internalTurnId },
+        ])));
+        expect(turnId).toBe("brief acknowledgement");
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.runAllTicks();
+        await Promise.resolve();
+        expect(deps.openBridgeStream).toHaveBeenCalledOnce();
+        expect(sink.finalize).toHaveBeenCalledWith("Tyler, huh...");
+        expect(sink.pushAudio).toHaveBeenCalledWith("pcm");
+        expect(sink.endAudio).toHaveBeenCalledWith(false);
+        await vi.advanceTimersByTimeAsync(45);
+        expect(deps.playCachedAcknowledgement).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not claim a bridge from partial PCM before audio-end", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain, deps, sink } = dualLaneBrain();
+        let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        const response = new Response(new ReadableStream<Uint8Array>({
+          start(controller) { streamController = controller; },
+        }), { status: 200 });
+        vi.stubGlobal("fetch", vi.fn(async () => response));
+
+        brain._prepareBridgeTurn(1);
+        const internalTurnId = (brain as unknown as { bridgeTurnId: string }).bridgeTurnId;
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.runAllTicks();
+        streamController?.enqueue(new TextEncoder().encode([
+          { type: "bridge-meta", turnId: internalTurnId, text: "Tyler, huh...", modelMs: 18 },
+          { type: "audio", turnId: internalTurnId, chunk: "partial-pcm" },
+        ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")));
+        await vi.runAllTicks();
+        await Promise.resolve();
+        expect(deps.openBridgeStream).not.toHaveBeenCalled();
+
+        streamController?.enqueue(new TextEncoder().encode(
+          `data: ${JSON.stringify({ type: "audio-end", turnId: internalTurnId })}\n\n`,
+        ));
+        streamController?.close();
+        await vi.runAllTicks();
+        await Promise.resolve();
+        expect(deps.openBridgeStream).toHaveBeenCalledOnce();
+        expect(sink.pushAudio).toHaveBeenCalledWith("partial-pcm");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("uses cached acknowledgement when the bridge misses 450ms-equivalent deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain, deps } = dualLaneBrain();
+        vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+        brain._prepareBridgeTurn(1);
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.advanceTimersByTimeAsync(45);
+        expect(deps.playCachedAcknowledgement).toHaveBeenCalledWith("primary");
+        expect(brain.bridgeClaim).toBe("cached");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("lets a personalized bridge follow the cached acknowledgement when the joke is still late", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain, deps, sink } = dualLaneBrain();
+        const internalTurnId = (brain as unknown as { bridgeTurnId: string | null });
+        let releaseBridge: ((response: Response) => void) | undefined;
+        vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+          releaseBridge = resolve;
+        })));
+
+        brain._prepareBridgeTurn(1);
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.advanceTimersByTimeAsync(45);
+        expect(deps.playCachedAcknowledgement).toHaveBeenCalledWith("primary");
+        expect(brain.bridgeClaim).toBe("cached");
+
+        releaseBridge?.(bridgeSseResponse([
+          { type: "bridge-meta", turnId: internalTurnId.bridgeTurnId, text: "Tyler, huh...", modelMs: 58 },
+          { type: "audio", turnId: internalTurnId.bridgeTurnId, chunk: "pcm-after-cache" },
+          { type: "audio-end", turnId: internalTurnId.bridgeTurnId },
+          { type: "done", turnId: internalTurnId.bridgeTurnId },
+        ]));
+        await vi.runAllTicks();
+        await Promise.resolve();
+
+        expect(deps.openBridgeStream).toHaveBeenCalledOnce();
+        expect(sink.finalize).toHaveBeenCalledWith("Tyler, huh...");
+        expect(sink.pushAudio).toHaveBeenCalledWith("pcm-after-cache");
+        expect(brain.bridgeClaim).toBe("bridge");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("aborts an in-flight personalized bridge when the joke becomes ready after cached audio", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain } = dualLaneBrain();
+        let requestSignal: AbortSignal | undefined;
+        vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined;
+          return new Promise<Response>(() => {});
+        }));
+
+        brain._prepareBridgeTurn(1);
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.advanceTimersByTimeAsync(45);
+        expect(brain.bridgeClaim).toBe("cached");
+        expect(brain._claimJokeAgainstBridge()).toBe(true);
+        expect(requestSignal?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("aborts a hung dynamic bridge and queues the secondary when primary audio drains", async () => {
+      vi.useFakeTimers();
+      try {
+        const { brain, deps } = dualLaneBrain();
+        let requestSignal: AbortSignal | undefined;
+        vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined;
+          return new Promise<Response>(() => {});
+        }));
+
+        brain._prepareBridgeTurn(1);
+        brain._startBridgeRequest("Tyler", 1);
+        await vi.advanceTimersByTimeAsync(45);
+        expect(deps.playCachedAcknowledgement).toHaveBeenCalledTimes(1);
+
+        expect(brain._queueSecondaryBridgeIfNeeded()).toBe(true);
+        expect(requestSignal?.aborted).toBe(true);
+        expect(deps.playCachedAcknowledgement).toHaveBeenNthCalledWith(2, "secondary");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("cancels the bridge when joke readiness wins and preserves a started bridge", () => {
+      vi.useFakeTimers();
+      try {
+        const first = dualLaneBrain();
+        first.brain._prepareBridgeTurn(1);
+        expect(first.brain._claimJokeAgainstBridge()).toBe(false);
+        expect(first.brain.bridgeClaim).toBe("joke");
+
+        const second = dualLaneBrain();
+        second.brain._prepareBridgeTurn(1);
+        second.brain.bridgeClaim = "bridge";
+        expect(second.brain._claimJokeAgainstBridge()).toBe(true);
+        expect(second.brain.bridgeClaim).toBe("bridge");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("delivers complete streamed joke audio in index order even when index 1 finishes first", async () => {
+      const sinkOrder: string[] = [];
+      const deps = makeDeps({
+        getDualLaneResponses: vi.fn(() => true),
+        openBridgeStream: vi.fn(() => ({
+          pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+        })),
+        playCachedAcknowledgement: vi.fn(() => "Mm-hmm."),
+        getVoiceSettings: vi.fn(() => ({
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.2,
+          use_speaker_boost: true,
+          speed: 1,
+        })),
+        getSpeechContext: vi.fn(() => ({ previousText: "Question?", previousVoiceSettings: null })),
+        openJokeStream: vi.fn((motion) => ({
+          pushAudio: vi.fn(),
+          finalize: vi.fn((text: string) => sinkOrder.push(`${motion}:${text}`)),
+          endAudio: vi.fn(),
+          cancel: vi.fn(),
+        })),
+      });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        deliveryGeneration: number;
+        _generateJokeStream(
+          params: { context: "answer_roast"; userAnswer: string },
+          onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+          onMeta: (meta: { relevant: boolean }) => void,
+          onError: () => void,
+          signal?: AbortSignal,
+          generation?: number,
+        ): void;
+      };
+      brain.state = "generating";
+      brain.deliveryGeneration = 3;
+      vi.stubGlobal("fetch", vi.fn(async () => bridgeSseResponse([
+        { type: "joke-meta", index: 0, motion: "smug", intensity: 0.7 },
+        { type: "joke-meta", index: 1, motion: "sarcastic", intensity: 0.8 },
+        { type: "audio", index: 0, chunk: "pcm-0" },
+        { type: "audio", index: 1, chunk: "pcm-1" },
+        { type: "joke", index: 0, text: "First joke.", motion: "smug", intensity: 0.7, score: 8 },
+        { type: "joke", index: 1, text: "Second joke.", motion: "sarcastic", intensity: 0.8, score: 8 },
+        { type: "audio-end", index: 1 },
+        { type: "audio-end", index: 0 },
+        { type: "meta", relevant: true },
+      ])));
+      const delivered: string[] = [];
+      brain._generateJokeStream(
+        { context: "answer_roast", userAnswer: "Accountant" },
+        (joke, sinkOpened) => { if (sinkOpened) delivered.push(joke.text); },
+        vi.fn(),
+        vi.fn(),
+        undefined,
+        3,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(delivered).toEqual(["First joke.", "Second joke."]);
+      expect(sinkOrder).toEqual(["smug:First joke.", "sarcastic:Second joke."]);
+    });
+
+    it("does not open a stale joke sink after a correction leaves generating", async () => {
+      const deps = makeDeps({
+        getDualLaneResponses: vi.fn(() => true),
+        openBridgeStream: vi.fn(() => ({
+          pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+        })),
+        playCachedAcknowledgement: vi.fn(() => "Mm-hmm."),
+        getVoiceSettings: vi.fn(() => ({
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.2,
+          use_speaker_boost: true,
+          speed: 1,
+        })),
+        getSpeechContext: vi.fn(() => ({ previousText: "Question?", previousVoiceSettings: null })),
+        openJokeStream: vi.fn(() => ({
+          pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+        })),
+      });
+      const brain = new ComedianBrain(deps) as unknown as {
+        state: string;
+        deliveryGeneration: number;
+        _generateJokeStream(
+          params: { context: "answer_roast"; userAnswer: string },
+          onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+          onMeta: (meta: { relevant: boolean }) => void,
+          onError: () => void,
+          signal?: AbortSignal,
+          generation?: number,
+        ): void;
+      };
+      brain.state = "pre_generate";
+      brain.deliveryGeneration = 4;
+      vi.stubGlobal("fetch", vi.fn(async () => bridgeSseResponse([
+        { type: "joke-meta", index: 0, motion: "smug", intensity: 0.7 },
+        { type: "audio", index: 0, chunk: "stale-pcm" },
+        { type: "joke", index: 0, text: "Stale joke.", motion: "smug", intensity: 0.7, score: 8 },
+        { type: "audio-end", index: 0 },
+      ])));
+
+      brain._generateJokeStream(
+        { context: "answer_roast", userAnswer: "Old answer" },
+        vi.fn(), vi.fn(), vi.fn(), undefined, 4,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(deps.openJokeStream).not.toHaveBeenCalled();
+    });
+
+    it("keeps the bridge/cache race alive when server-side joke TTS fails", async () => {
+      vi.useFakeTimers();
+      try {
+        const base = dualLaneBrain();
+        const deps = base.deps;
+        deps.openJokeStream = vi.fn(() => ({
+          pushAudio: vi.fn(), finalize: vi.fn(), endAudio: vi.fn(), cancel: vi.fn(),
+        }));
+        const brain = base.brain as unknown as typeof base.brain & {
+          _generateJokeStream(
+            params: { context: "answer_roast"; userAnswer: string },
+            onJoke: (joke: JokeItem, sinkOpened: boolean) => void,
+            onMeta: (meta: { relevant: boolean }) => void,
+            onError: () => void,
+            signal?: AbortSignal,
+            generation?: number,
+          ): void;
+        };
+        brain._prepareBridgeTurn(1);
+        vi.stubGlobal("fetch", vi.fn(async () => bridgeSseResponse([
+          { type: "joke-meta", index: 0, motion: "smug", intensity: 0.7 },
+          { type: "joke", index: 0, text: "Browser fallback joke.", motion: "smug", intensity: 0.7, score: 8 },
+          { type: "audio-end", index: 0, failed: true },
+          { type: "meta", relevant: true },
+        ])));
+        const onJoke = vi.fn();
+        brain._generateJokeStream(
+          { context: "answer_roast", userAnswer: "Accountant" },
+          onJoke, vi.fn(), vi.fn(), undefined, 1,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(44);
+        expect(onJoke).not.toHaveBeenCalled();
+        expect(deps.playCachedAcknowledgement).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(6);
+        expect(deps.playCachedAcknowledgement).toHaveBeenCalledWith("primary");
+        expect(onJoke).toHaveBeenCalledWith(
+          expect.objectContaining({ text: "Browser fallback joke." }),
+          false,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

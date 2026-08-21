@@ -14,7 +14,7 @@
  */
 
 import { GoogleGenAI, type Chat } from "@google/genai";
-import { ROAST_MODEL } from "@/lib/constants";
+import { BRIDGE_MODEL, ROAST_MODEL } from "@/lib/constants";
 import { getBaseJokePrompt } from "@/lib/prompts";
 import { getToastBasePrompt, getToastContextInstructions } from "@/lib/toastPrompts";
 import type { BurnIntensity } from "@/lib/prompts";
@@ -27,6 +27,7 @@ import {
   toModelUnavailableError,
   type UserPart,
 } from "@/lib/llmClient";
+import type { GeminiWorkload } from "@/lib/geminiThinking";
 import {
   estimateTokenCount,
   estimateUserPartsTokens,
@@ -43,10 +44,19 @@ interface HistoryEntry {
 }
 
 export type ExperienceType = "roast" | "toast";
+export type SessionPurpose = "joke" | "bridge";
+export { BRIDGE_MODEL };
 
-interface SessionEntry {
+type SessionResponseMimeType = "application/json" | "text/plain";
+
+export interface SessionEntry {
   model: string;
   systemPrompt: string;
+  purpose: SessionPurpose;
+  reasoningProfile: GeminiWorkload;
+  responseMimeType: SessionResponseMimeType;
+  maxOutputTokens: number;
+  historyReplayCap: number;
   /** Gemini only — native Chat object that manages its own history. */
   geminiChat?: Chat;
   /** Non-Gemini — explicit message history for replay. */
@@ -104,11 +114,12 @@ function isGemini(model: string): boolean {
 /** Most recent N history entries the non-Gemini path replays per turn.
  *  History grows un-cached every call, so cap it before it costs us
  *  hundreds of tokens of context overhead late in a session. */
-const HISTORY_REPLAY_CAP = 16;
+const JOKE_HISTORY_REPLAY_CAP = 16;
+const BRIDGE_HISTORY_REPLAY_CAP = 8;
 
-function buildHistoryText(history: HistoryEntry[]): string {
+function buildHistoryText(history: HistoryEntry[], cap: number): string {
   return history
-    .slice(-HISTORY_REPLAY_CAP)
+    .slice(-cap)
     .map((h) => `[${h.role === "user" ? "USER" : "ASSISTANT"}]: ${h.content}`)
     .join("\n\n");
 }
@@ -135,17 +146,90 @@ export function createSession(
       ? getToastBasePrompt(burnIntensity, contentMode)
       : getBaseJokePrompt(persona, burnIntensity, contentMode);
 
+  return createConfiguredSession(apiKey, {
+    model: resolvedModel,
+    systemPrompt,
+    purpose: "joke",
+    reasoningProfile: "comedy-deliberate",
+    responseMimeType: "application/json",
+    maxOutputTokens: 1024,
+    historyReplayCap: JOKE_HISTORY_REPLAY_CAP,
+    persona,
+    burnIntensity,
+    contentMode,
+    experienceType,
+  });
+}
+
+export function getBridgeSystemPrompt(
+  persona: PersonaId,
+  experienceType: ExperienceType,
+): string {
+  const character = experienceType === "toast"
+    ? "Toastie, a tipsy wedding-toast comic who reacts loosely but warmly"
+    : `${getPersona(persona).name}: ${getPersona(persona).toneDescription}`;
+  return `You are the fast conversational bridge voice for ${character}.
+
+Your only job is to acknowledge what the caller just said while a separate comedian writes the joke.
+- Return one natural spoken phrase of 2 to 9 words, plain text only.
+- Acknowledge only details explicitly present in the supplied answer or established facts.
+- You may briefly echo a name or short answer (for example, "Tyler, huh..." or "An accountant. Okay...").
+- After any echoed detail, finish with only one of: "huh", "okay", "I see", "alright", "oh, marvelous", or "thrilling stuff".
+- Do not write a joke, insult, punchline, question, setup that needs an answer, or stage direction.
+- Do not invent, correct, classify, or reinterpret the answer.
+- Never decide yes/no routing. Never mention that another model is working.
+- Keep it complete enough to stop cleanly after the phrase.`;
+}
+
+/** Create the independent minimal-latency acknowledgement session. */
+export function createBridgeSession(
+  apiKey: string,
+  persona: PersonaId,
+  burnIntensity: BurnIntensity,
+  contentMode: "clean" | "vulgar",
+  experienceType: ExperienceType = "roast",
+): string {
+  return createConfiguredSession(apiKey, {
+    model: BRIDGE_MODEL,
+    systemPrompt: getBridgeSystemPrompt(persona, experienceType),
+    purpose: "bridge",
+    reasoningProfile: "realtime-utility",
+    responseMimeType: "text/plain",
+    maxOutputTokens: 24,
+    historyReplayCap: BRIDGE_HISTORY_REPLAY_CAP,
+    persona,
+    burnIntensity,
+    contentMode,
+    experienceType,
+  });
+}
+
+interface ConfiguredSession {
+  model: string;
+  systemPrompt: string;
+  purpose: SessionPurpose;
+  reasoningProfile: GeminiWorkload;
+  responseMimeType: SessionResponseMimeType;
+  maxOutputTokens: number;
+  historyReplayCap: number;
+  persona: PersonaId;
+  burnIntensity: BurnIntensity;
+  contentMode: "clean" | "vulgar";
+  experienceType: ExperienceType;
+}
+
+function createConfiguredSession(apiKey: string, config: ConfiguredSession): string {
   let geminiChat: Chat | undefined;
 
-  if (isGemini(resolvedModel)) {
+  if (isGemini(config.model)) {
     const ai = new GoogleGenAI({ apiKey });
     geminiChat = ai.chats.create({
-      model: resolvedModel,
+      model: config.model,
       config: {
-        systemInstruction: systemPrompt,
-        thinkingConfig: geminiThinkingConfig(resolvedModel, "creative"),
-        maxOutputTokens: 1024,
-        responseMimeType: "application/json",
+        systemInstruction: config.systemPrompt,
+        thinkingConfig: geminiThinkingConfig(config.model, config.reasoningProfile),
+        maxOutputTokens: config.maxOutputTokens,
+        responseMimeType: config.responseMimeType,
       },
     });
   }
@@ -153,16 +237,11 @@ export function createSession(
   const id = generateId();
   const now = Date.now();
   sessions.set(id, {
-    model: resolvedModel,
-    systemPrompt,
+    ...config,
     geminiChat,
     history: [],
     createdAt: now,
     lastUsedAt: now,
-    persona,
-    burnIntensity,
-    contentMode,
-    experienceType,
     sentStableBlocks: {},
   });
 
@@ -232,7 +311,7 @@ export async function sendMessage(
   }
 
   // Non-Gemini: build capped message list with history
-  const historyText = buildHistoryText(session.history);
+  const historyText = buildHistoryText(session.history, session.historyReplayCap);
 
   const contextParts: UserPart[] = [];
   if (historyText) {
@@ -244,9 +323,9 @@ export async function sendMessage(
     model: session.model,
     systemPrompt: session.systemPrompt,
     userParts: contextParts,
-    maxOutputTokens,
-    reasoningProfile: "creative",
-    forceJsonObject: true,
+    maxOutputTokens: maxOutputTokens ?? session.maxOutputTokens,
+    reasoningProfile: session.reasoningProfile,
+    forceJsonObject: session.responseMimeType === "application/json",
   });
 
   session.history.push({ role: "user", content: userText });
@@ -263,6 +342,7 @@ export async function sendMessage(
 export async function* sendMessageStream(
   sessionId: string,
   userParts: UserPart[],
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   const session = getSession(sessionId);
   if (!session) return;
@@ -273,12 +353,29 @@ export async function* sendMessageStream(
     for (let attempt = 0; ; attempt++) {
       let yielded = false;
       try {
-        const stream = await session.geminiChat.sendMessageStream({ message: userParts });
+        const stream = await session.geminiChat.sendMessageStream({
+          message: userParts,
+          ...(signal
+            ? {
+                config: {
+                  abortSignal: signal,
+                  systemInstruction: session.systemPrompt,
+                  thinkingConfig: geminiThinkingConfig(
+                    session.model,
+                    session.reasoningProfile,
+                  ),
+                  maxOutputTokens: session.maxOutputTokens,
+                  responseMimeType: session.responseMimeType,
+                },
+              }
+            : {}),
+        });
         let accumulated = "";
         let promptTokenCount: number | undefined;
         let candidatesTokenCount: number | undefined;
         let totalTokenCount: number | undefined;
         for await (const chunk of stream) {
+          signal?.throwIfAborted();
           if (chunk.usageMetadata) {
             promptTokenCount = chunk.usageMetadata.promptTokenCount;
             candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;
@@ -314,7 +411,7 @@ export async function* sendMessageStream(
   }
 
   // Non-Gemini: replay capped history
-  const historyText = buildHistoryText(session.history);
+  const historyText = buildHistoryText(session.history, session.historyReplayCap);
 
   const contextParts: UserPart[] = [];
   if (historyText) {
@@ -327,8 +424,10 @@ export async function* sendMessageStream(
     model: session.model,
     systemPrompt: session.systemPrompt,
     userParts: contextParts,
-    reasoningProfile: "creative",
-    forceJsonObject: true,
+    maxOutputTokens: session.maxOutputTokens,
+    reasoningProfile: session.reasoningProfile,
+    forceJsonObject: session.responseMimeType === "application/json",
+    signal,
   })) {
     accumulated += chunk;
     yield chunk;
@@ -363,13 +462,13 @@ export function deleteSession(id: string): void {
 export function warmSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   if (!session) return;
-  if (!session.model.startsWith("claude-")) return;
+  if (session.purpose !== "bridge" && !session.model.startsWith("claude-")) return;
 
   generateText({
     model: session.model,
     systemPrompt: session.systemPrompt,
-    userParts: [{ text: "Acknowledge with a single word." }],
-    maxOutputTokens: 5,
+    userParts: [{ text: session.purpose === "bridge" ? "Answer: testing" : "Acknowledge with a single word." }],
+    maxOutputTokens: session.purpose === "bridge" ? session.maxOutputTokens : 5,
     reasoningProfile: "realtime-utility",
   }).catch(() => {
     /* best-effort warmup; cold first-turn just pays full latency */

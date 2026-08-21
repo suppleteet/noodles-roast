@@ -53,6 +53,7 @@ Use `main` as the default working branch. Short-lived branches are allowed when 
 |----------|----------|----------|
 | `VISION_MODEL` | `gemini-3.6-flash` | Webcam frame analysis (`/api/vision`, `/api/analyze`) |
 | `ROAST_MODEL` | `gemini-3.6-flash` | Default joke generation model (`/api/generate-joke`, `/api/generate-speak`, `/api/generate-question`, `/api/rephrase-question`). The dev UI also offers GPT-5.6 Terra/Luna, Claude Sonnet 4.6/Haiku 4.5, and Gemini 3.5 Flash/Flash-Lite; persisted legacy model IDs remain accepted |
+| `BRIDGE_MODEL` | `gemini-3.5-flash-lite` | Pinned low-latency conversational bridge model (`/api/generate-bridge`); never inherits the selectable joke model |
 | `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | TTS default voice — Rachel (Roast). Picked per-experience by `voiceIdForExperience()` |
 | `DEFAULT_ELEVENLABS_MODEL_ID` | `eleven_flash_v2_5` | Low-latency streaming TTS default; override via `ELEVENLABS_MODEL_ID` |
 | `TOAST_VOICE_ID` | `vamKBH1qWYogA4WG6UPB` | TTS voice for Toastie (drunk-wedding-toast character). Override via `ELEVENLABS_TOAST_VOICE_ID` env; synthesis settings intentionally match Roastie's defaults |
@@ -89,7 +90,8 @@ The landing screen is **Puppet Line**, a swipeable contact carousel. Its first t
 The slow startup paths are kicked off as early as their inputs exist, so a cold first session doesn't stack latencies (one log hit ~28s time-to-first-speech):
 
 - **Live token** — prefetched on `idle` (`page.tsx:ensureLiveTokenPrefetch`), overlapping the permission dialog.
-- **Comedian chat session** — prefetched at **button press** (`requesting-permissions`, `page.tsx:ensureComedianSessionPrefetch`), passed into `LiveSessionController` as `prefetchedComedianSessionPromise`; the controller consumes it (or creates one itself as fallback). Its cold latency overlaps the camera/mic grant.
+- **Comedian sessions** — the joke and bridge sessions are prefetched together at **button press** (`requesting-permissions`, `page.tsx:ensureComedianSessionPrefetch`), passed into `LiveSessionController` as `prefetchedComedianSessionPromise`; the controller consumes them (or creates the pair itself as fallback). Their cold latency overlaps the camera/mic grant.
+- **Acknowledgement audio** — after the opening TTS prefetch settles, two short acknowledgements are synthesized once in the selected character voice and retained as replayable PCM buffers. This avoids per-turn speculative fallback TTS without competing with opening TTFS.
 - **Warm spare token** — `LiveSessionController` keeps a pre-minted ephemeral token (`spareTokenRef`/`mintSpareToken`) off the critical path, consumed + refilled by `rotateSession`, so an unexpected-drop reconnect or scheduled rotation skips the `/api/live-token` round-trip (`openSession` falls back to `fetchToken` if the spare is missing/expired).
 - **Landing-screen prewarm** — `LandingScreen` mount fires `/api/prewarm-tts` (always; warms EL DNS/TLS host-level for both voices) and `/api/live-token` (dev only — compiles the cold route; gated to avoid minting throwaway tokens for every prod visitor).
 - **Vision opening** — direct-image vision-joke generation and detailed vision analysis run in parallel immediately after permission (the first point a camera frame exists). TTS starts as soon as the vision joke text lands. The prefetch lives in `src/lib/greetingPrefetch.ts`, with TTS chunks buffered via `TtsChunkBuffer`. `enterGreeting()` consumes that prefetch; if it exceeds the brief timeout, the brain may speak only the minimal bridge from `scriptLines.ts`, then waits for and delivers the actual vision joke before advancing. The bridge never counts as the substantive opening.
@@ -105,6 +107,7 @@ Silero VAD ─────── mic audio ────→ onSpeechEnd → Comed
                                    (fast ~200ms end-of-speech, primary detector)
 
 ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
+             ├──→ /api/generate-bridge (Flash-Lite) → short safe bridge + ElevenLabs PCM
              └──→ /api/tts (ElevenLabs) → gapless playback via usePcmPlayback
 
 /api/comedian-session → creates multi-turn Gemini Chat (persona loaded once)
@@ -119,6 +122,8 @@ ComedianBrain ──→ /api/generate-joke (Gemini Flash) → joke text + motion
 **Question selection**: All questions come from `QUESTION_BANK` (`src/lib/questionBank.ts`). The joke LLM is told NOT to emit follow-up questions — its job is jokes + tags + redirect/callback only. Personalization happens at delivery time via `/api/rephrase-question`, which gets `knownFacts` from the ledger and is told to use the user's name once if known (e.g., "Alright — what's your name?" → "So Tyler, what's your job?"). This makes the conversation feel responsive without letting the LLM go off-script and accidentally repeat topics.
 
 **Yes/no branch prefetch**: when the final spoken question is conservatively identified as genuinely binary, `ComedianBrain` starts two stateless joke requests for hypothetical Yes and No answers while the question plays and the user responds. Only a short, confidently binary answer can select a branch; answers carrying new details or ambiguity cancel both and use the normal generation path. Branches are tied to the exact question id/text, timeout independently, abort on state/session changes, and never consume the foreground chat session.
+
+**Dual-lane answer handoff**: ordinary repaired answers dispatch the joke and a separate `gemini-3.5-flash-lite` conversational bridge concurrently for both Roastie and Toastie. Joke work uses the `comedy-deliberate` reasoning profile (medium where the provider supports it); the bridge is a validated 2–9 word non-joke reaction using minimal reasoning. If the joke wins before bridge audio, it cancels the bridge. Otherwise the bridge finishes before the joke. A replayable cached “Mm-hmm.” guarantees audio at 450ms; a personalized bridge already in flight may follow it if the joke is still late, and a second cached line covers a further provider gap. A ready, confidently selected yes/no prefetch bypasses all acknowledgement audio. The developer UI can disable dual-lane responses live and restore the legacy filler pump.
 
 **End-of-speech detection**: Silero VAD (`useVad`) is the primary detector (~300ms redemption). The brain's `answerSilenceMs` timer (300ms) is a fallback if VAD fails to load or misses. VAD end-of-speech defers to the length-aware silence timer (`_answerNeedsMoreStt`) whenever the transcript reads as unfinished, so breath pauses don't commit partial answers.
 

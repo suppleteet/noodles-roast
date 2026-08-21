@@ -5,6 +5,7 @@ export const FRAME_INTERVAL_MS = 8000; // how often to grab a webcam frame for v
 export const ROAST_PAUSE_MS = 2000;    // pause between roast cycles
 export const VISION_MODEL = "gemini-3.6-flash";
 export const ROAST_MODEL = "gemini-3.6-flash";
+export const BRIDGE_MODEL = "gemini-3.5-flash-lite";
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "EXAVITQu4vr4xnSDxMaL"; // Rachel (default, Roast)
 export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
 

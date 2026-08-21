@@ -324,7 +324,8 @@ export async function POST(req: NextRequest) {
             systemPrompt,
             userParts,
             maxOutputTokens: 1024,
-            reasoningProfile: "creative",
+            reasoningProfile:
+              body.context === "answer_roast" ? "comedy-deliberate" : "creative",
             forceJsonObject: true,
           });
         }

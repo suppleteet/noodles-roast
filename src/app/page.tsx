@@ -11,6 +11,8 @@ import VideoRecorder, { type VideoRecorderHandle } from "@/components/recording/
 import { useCompositor } from "@/components/recording/useCompositor";
 import { PERSONA_IDS, PERSONA_NAMES } from "@/lib/personaMetadata";
 import type { TtsChunkBuffer } from "@/lib/ttsChunkBuffer";
+import type { ComedianSessionIds } from "@/lib/comedianSessionIds";
+import type { AcknowledgementAudioCache } from "@/lib/greetingPrefetch";
 import { captureSquareJpegFromStream } from "@/lib/captureSquareJpegFromStream";
 import { isMp4RecordingSupported } from "@/lib/mediaRecorderSupport";
 import { currentMediaCaptureBlockMessage } from "@/lib/mediaCaptureSupport";
@@ -95,6 +97,8 @@ function MainApp() {
   const isEnding = useSessionStore((s) => s.isEnding);
   const brainState = useSessionStore((s) => s.brainState);
   const modelUnavailable = useSessionStore((s) => s.modelUnavailable);
+  const dualLaneResponses = useSessionStore((s) => s.dualLaneResponses);
+  const setDualLaneResponses = useSessionStore((s) => s.setDualLaneResponses);
   const setModelUnavailable = useSessionStore((s) => s.setModelUnavailable);
   const acceptModelFallback = useSessionStore((s) => s.acceptModelFallback);
   const IS_DEV = useDevUnlock();
@@ -121,10 +125,13 @@ function MainApp() {
   // Pre-created comedian chat session — the longest-cold start path. Fired at
   // button press (settings are locked by then) so its latency overlaps the
   // permission dialog instead of stacking after it. Consumed by LiveSessionController.
-  const comedianSessionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const comedianSessionPromiseRef = useRef<Promise<ComedianSessionIds | null> | null>(null);
   /** Vision analyze + greeting joke — starts as soon as we have a MediaStream, before phase is roasting */
   const warmupGreetingPromiseRef = useRef<Promise<JokeResponse | null> | null>(null);
   const warmupGreetingAudioRef = useRef<Promise<TtsChunkBuffer | null> | null>(null);
+  const warmupAcknowledgementAudioRef = useRef<
+    Promise<AcknowledgementAudioCache | null> | null
+  >(null);
   /** Canned-intro opener (text + streaming TTS audio) — picked + fired at the same
    *  warmup point so the EL round-trip overlaps the permission/connect window.
    *  Promise-shaped because the greetingPrefetch module is dynamically imported. */
@@ -213,12 +220,12 @@ function MainApp() {
     comedianSessionPromiseRef.current = null;
     if (abandonedSession) {
       void abandonedSession
-        .then((sessionId) => {
-          if (!sessionId) return;
+        .then((sessionIds) => {
+          if (!sessionIds) return;
           return fetch("/api/comedian-session", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId }),
+            body: JSON.stringify(sessionIds),
           });
         })
         .catch(() => {
@@ -228,6 +235,7 @@ function MainApp() {
 
     warmupGreetingPromiseRef.current = null;
     warmupGreetingAudioRef.current = null;
+    warmupAcknowledgementAudioRef.current = null;
     warmupCannedOpenerRef.current = null;
   }
 
@@ -251,10 +259,10 @@ function MainApp() {
       }),
     })
       .then((r) => r.json())
-      .then((d: { sessionId?: string }) => {
+      .then((d: { sessionId?: string; bridgeSessionId?: string }) => {
         if (!d.sessionId) return null;
-        logTiming("prefetch: comedian session ready");
-        return d.sessionId;
+        logTiming(`prefetch: dual sessions ready bridge=${d.bridgeSessionId ? "yes" : "no"}`);
+        return { sessionId: d.sessionId, bridgeSessionId: d.bridgeSessionId };
       })
       .catch((e) => {
         console.warn("[comedian-session-prefetch] failed:", e);
@@ -310,6 +318,17 @@ function MainApp() {
         warmupCannedOpenerRef.current = greetingPrefetchModulePromise
           .then((m) => m.prefetchCannedOpener())
           .catch(() => null);
+        warmupAcknowledgementAudioRef.current = Promise.all([
+          warmupCannedOpenerRef.current,
+          greetingPrefetchModulePromise,
+        ]).then(async ([opener, module]) => {
+          while (opener?.audio && !opener.audio.done) await opener.audio.waitForUpdate();
+          const current = useSessionStore.getState();
+          return module.prefetchAcknowledgementAudioCache(
+            current.voiceSettings,
+            current.experienceType,
+          );
+        }).catch(() => null);
         return;
       }
     }
@@ -347,6 +366,21 @@ function MainApp() {
         );
       })
       .catch(() => null);
+
+    // Do not compete with the opening line for ElevenLabs capacity. As soon as
+    // its audio prefetch settles, build a reusable acknowledgement cache; the
+    // first answer is still one full question away.
+    warmupAcknowledgementAudioRef.current = Promise.all([
+      warmupGreetingAudioRef.current,
+      greetingPrefetchModulePromise,
+    ]).then(async ([openingAudio, module]) => {
+      while (openingAudio && !openingAudio.done) await openingAudio.waitForUpdate();
+      const current = useSessionStore.getState();
+      return module.prefetchAcknowledgementAudioCache(
+        current.voiceSettings,
+        current.experienceType,
+      );
+    }).catch(() => null);
   }
 
   const handleStartSession = async () => {
@@ -706,6 +740,17 @@ function MainApp() {
               mock
             </label>
           )}
+          {debugMode && (
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dualLaneResponses}
+                onChange={(e) => setDualLaneResponses(e.target.checked)}
+                className="accent-cyan-400"
+              />
+              dual lane
+            </label>
+          )}
           <label className="flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
@@ -747,6 +792,7 @@ function MainApp() {
           warmupGreetingPrefetch={warmupGreetingPromiseRef.current}
           warmupGreetingAudio={warmupGreetingAudioRef.current}
           warmupCannedOpener={warmupCannedOpenerRef.current}
+          warmupAcknowledgementAudio={warmupAcknowledgementAudioRef.current}
           modelTroubleContinueSignal={modelTroubleContinueSignal}
           mockMode={mockMode}
         />

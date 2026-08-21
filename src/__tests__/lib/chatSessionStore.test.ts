@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { compactStableContext, createSession, deleteSession } from "@/lib/chatSessionStore";
+import {
+  BRIDGE_MODEL,
+  compactStableContext,
+  createBridgeSession,
+  createSession,
+  deleteSession,
+  getSession,
+} from "@/lib/chatSessionStore";
 
 // Using a Claude model so createSession doesn't touch the Gemini SDK
 // (it only instantiates GoogleGenAI for gemini-* models).
@@ -75,5 +82,34 @@ describe("compactStableContext", () => {
     const second: { townFlavor?: string } = { townFlavor: "redwoods" };
     compactStableContext(sessionId, second);
     expect(second.townFlavor).toBeUndefined();
+  });
+});
+
+describe("session purposes", () => {
+  it("configures joke sessions for deliberate structured comedy", () => {
+    const id = createSession(DUMMY_KEY, "kvetch", 3, "clean", MODEL);
+    const session = getSession(id);
+    expect(session).toMatchObject({
+      purpose: "joke",
+      reasoningProfile: "comedy-deliberate",
+      responseMimeType: "application/json",
+      maxOutputTokens: 1024,
+    });
+    deleteSession(id);
+  });
+
+  it("pins bridge sessions to the minimal plain-text model", () => {
+    // Pass a non-Gemini-shaped dummy key; constructing a Gemini Chat is local
+    // and does not perform network I/O.
+    const id = createBridgeSession(DUMMY_KEY, "kvetch", 3, "clean");
+    const session = getSession(id);
+    expect(session).toMatchObject({
+      model: BRIDGE_MODEL,
+      purpose: "bridge",
+      reasoningProfile: "realtime-utility",
+      responseMimeType: "text/plain",
+      maxOutputTokens: 24,
+    });
+    deleteSession(id);
   });
 });

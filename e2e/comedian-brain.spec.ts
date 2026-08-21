@@ -211,7 +211,9 @@ test.describe("Comedian Brain — Q&A Cycle", () => {
 
     const handoff = await page.evaluate(() => {
       const timing = JSON.parse(localStorage.getItem("roastie-timing-log") ?? "[]") as string[];
-      const heard = timing.findLastIndex((line) => line.includes('brain: heard "Yes."'));
+      const heard = timing.findLastIndex(
+        (line) => line.includes("brain: heard") && line.includes('"Yes."'),
+      );
       const selected = timing.findIndex(
         (line, index) => index > heard && line.includes("yes/no branch hit=yes cached"),
       );

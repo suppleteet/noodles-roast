@@ -17,6 +17,12 @@ describe("geminiThinkingConfig", () => {
     });
   });
 
+  it("uses medium thinking for deliberate Gemini 3 comedy turns", () => {
+    expect(geminiThinkingConfig("gemini-3.6-flash", "comedy-deliberate")).toEqual({
+      thinkingLevel: ThinkingLevel.MEDIUM,
+    });
+  });
+
   it("supports the retained Gemini 3.1 Flash-Lite option", () => {
     expect(geminiThinkingConfig("gemini-3.1-flash-lite", "realtime-utility")).toEqual({
       thinkingLevel: ThinkingLevel.MINIMAL,

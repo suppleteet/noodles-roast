@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSession, deleteSession, warmSession } from "@/lib/chatSessionStore";
+import {
+  createBridgeSession,
+  createSession,
+  deleteSession,
+  warmSession,
+} from "@/lib/chatSessionStore";
 import { PERSONA_IDS, DEFAULT_PERSONA, type PersonaId } from "@/lib/personas";
 import type { BurnIntensity } from "@/lib/prompts";
 import { ApiRequestError, readLimitedJson } from "@/lib/apiRequest";
@@ -7,7 +12,8 @@ import { isRoastModelId } from "@/lib/modelCatalog";
 
 /**
  * POST /api/comedian-session — Create a new multi-turn chat session.
- * Returns { sessionId } to be passed on subsequent joke requests.
+ * Returns { sessionId, bridgeSessionId }. `sessionId` remains the joke-session
+ * identifier for backwards-compatible callers.
  *
  * DELETE /api/comedian-session — End a session (cleanup).
  * Body: { sessionId }
@@ -54,16 +60,24 @@ export async function POST(req: NextRequest) {
     body.model,
     experienceType,
   );
+  const bridgeSessionId = createBridgeSession(
+    apiKey,
+    persona,
+    burnIntensity,
+    contentMode,
+    experienceType,
+  );
 
   // Prime provider prompt caches with the session's system prompt so the
   // user's first turn isn't paying cold-cache latency. Best-effort, async.
   warmSession(sessionId);
+  warmSession(bridgeSessionId);
 
-  return NextResponse.json({ sessionId });
+  return NextResponse.json({ sessionId, bridgeSessionId });
 }
 
 export async function DELETE(req: NextRequest) {
-  let body: { sessionId?: string };
+  let body: { sessionId?: string; bridgeSessionId?: string };
   try {
     body = await readLimitedJson<typeof body>(req, 10_000);
   } catch (error) {
@@ -73,6 +87,9 @@ export async function DELETE(req: NextRequest) {
 
   if (body.sessionId) {
     deleteSession(body.sessionId);
+  }
+  if (body.bridgeSessionId) {
+    deleteSession(body.bridgeSessionId);
   }
 
   return NextResponse.json({ ok: true });

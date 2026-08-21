@@ -132,6 +132,11 @@ export interface ComedianBrainDeps {
       handoff?: "filler-to-joke";
     },
   ) => JokeStreamSink;
+  /** Streaming sink for the lightweight conversational bridge. It shares the
+   *  serialized audio chain with jokes but is claimed only after first PCM. */
+  openBridgeStream?: () => JokeStreamSink;
+  /** Replay one of the session-prefetched neutral acknowledgement clips. */
+  playCachedAcknowledgement?: (slot: "primary" | "secondary") => string;
   /** Base voice settings for streaming TTS (sent server-side as baseVoiceSettings). */
   getVoiceSettings?: () => import("@/store/useSessionStore").VoiceSettings;
   /** Last queued speech context, used to make server-streamed joke audio sound
@@ -169,6 +174,8 @@ export interface ComedianBrainDeps {
   getInputAmplitude: () => number;
   /** Multi-turn chat session ID — if set, API routes reuse the session instead of sending the full persona. */
   getSessionId: () => string | null;
+  getBridgeSessionId?: () => string | null;
+  getDualLaneResponses?: () => boolean;
   setBrainState: (state: BrainState | null) => void;
   setCurrentQuestion: (q: string | null) => void;
   setUserAnswer: (ans: string) => void;
@@ -435,6 +442,20 @@ export class ComedianBrain {
   private fillerMotion: MotionState = "thinking";
   private fillerIntensity = 0.6;
 
+  // Dual-lane answer handoff. Only one claimant may enter the serialized audio
+  // queue before the joke: dynamic bridge PCM, cached fallback, or the joke itself.
+  private bridgeTurnSequence = 0;
+  private bridgeTurnId: string | null = null;
+  private bridgeClaim: "pending" | "bridge" | "cached" | "joke" | null = null;
+  private bridgeAbort: AbortController | null = null;
+  private bridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private bridgeText: string | null = null;
+  private bridgeSink: JokeStreamSink | null = null;
+  private bridgeSecondaryPlayed = false;
+  private bridgeClaimedAt: number | null = null;
+  private bridgeDrainedAt: number | null = null;
+  private recentBridgeLines: string[] = [];
+
   /** The user's name once captured. Used by Toast's running wrong-name bit. */
   private knownName: string | null = null;
 
@@ -554,6 +575,8 @@ export class ComedianBrain {
     this.modelTroubleExited = false;
     this.awaitingModelTroubleChoice = false;
     this.technicalDifficultiesLine = null;
+    this._clearBridgeTurn("session-start");
+    this.recentBridgeLines = [];
 
     // Latency experiment: skip greeting entirely
     if (COMEDIAN_CONFIG.skipGreeting) {
@@ -1211,6 +1234,7 @@ export class ComedianBrain {
         }
         break;
       case "generating":
+        if (this._queueSecondaryBridgeIfNeeded()) break;
         // Filler audio drained — queue the next filler directly so the audio chain stays
         // continuous until the joke arrives. Bails inside _queueNextPumpFiller if the pump was
         // already stopped (joke is on its way) or we hit fillerMaxStack.
@@ -2288,6 +2312,258 @@ export class ComedianBrain {
     // The next filler is scheduled when the queue drains (see onTtsQueueDrained "generating").
   }
 
+  private _dualLaneEnabled(): boolean {
+    return !COMEDIAN_CONFIG.skipFiller &&
+      this.deps.getDualLaneResponses?.() === true &&
+      !!this.deps.openBridgeStream &&
+      !!this.deps.playCachedAcknowledgement;
+  }
+
+  private _clearBridgeTurn(reason: string): void {
+    const hadTurn = this.bridgeTurnId !== null;
+    if (this.bridgeFallbackTimer) {
+      clearTimeout(this.bridgeFallbackTimer);
+      this.bridgeFallbackTimer = null;
+    }
+    try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
+    this.bridgeAbort = null;
+    this.bridgeSink?.cancel();
+    this.bridgeSink = null;
+    this.bridgeTurnId = null;
+    this.bridgeClaim = null;
+    this.bridgeText = null;
+    this.bridgeSecondaryPlayed = false;
+    this.bridgeClaimedAt = null;
+    this.bridgeDrainedAt = null;
+    if (hadTurn && reason !== "session-start") {
+      this.deps.logTiming(`bridge: cleared (${reason})`);
+    }
+  }
+
+  private _prepareBridgeTurn(generation: number): string {
+    this._clearBridgeTurn("new-turn");
+    this.bridgeTurnId = `turn_${Date.now()}_${++this.bridgeTurnSequence}`;
+    this.bridgeClaim = "pending";
+    this.bridgeSecondaryPlayed = false;
+    const turnId = this.bridgeTurnId;
+    this.bridgeFallbackTimer = setTimeout(() => {
+      this.bridgeFallbackTimer = null;
+      if (
+        this.deliveryGeneration !== generation ||
+        this.state !== "generating" ||
+        this.bridgeTurnId !== turnId ||
+        this.bridgeClaim !== "pending"
+      ) return;
+      this.bridgeClaim = "cached";
+      this.bridgeClaimedAt = Date.now();
+      const text = this.deps.playCachedAcknowledgement?.("primary") ?? "Mm-hmm.";
+      this.fillerFirstText = text;
+      this.deps.logTiming(
+        `bridge: cached primary claimed at ${COMEDIAN_CONFIG.bridgeFallbackMs}ms turn=${turnId}`,
+      );
+    }, COMEDIAN_CONFIG.bridgeFallbackMs);
+    this.deps.logTiming(`bridge: race armed turn=${turnId} fallback=${COMEDIAN_CONFIG.bridgeFallbackMs}ms`);
+    return "brief acknowledgement";
+  }
+
+  private _startBridgeRequest(answer: string, generation: number): void {
+    const turnId = this.bridgeTurnId;
+    const bridgeSessionId = this.deps.getBridgeSessionId?.();
+    if (!turnId || this.bridgeClaim !== "pending" || !bridgeSessionId) {
+      this.deps.logTiming(
+        `bridge: dynamic lane unavailable turn=${turnId ?? "none"} session=${bridgeSessionId ? "yes" : "no"}`,
+      );
+      return;
+    }
+
+    const abort = new AbortController();
+    this.bridgeAbort = abort;
+    const startedAt = Date.now();
+    const speechContext = this.deps.getSpeechContext?.();
+    this.deps.logLlm?.("→", "bridge", `Q:"${this.currentQuestion?.question ?? ""}" A:"${answer}"`);
+    this.deps.logTiming(`bridge: dispatched turn=${turnId} model=gemini-3.5-flash-lite`);
+
+    void fetch("/api/generate-bridge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: abort.signal,
+      body: JSON.stringify({
+        turnId,
+        bridgeSessionId,
+        question: this.currentQuestion?.question ?? "",
+        answer,
+        persona: this.deps.getPersona(),
+        knownFacts: this._getThrowbackContext(),
+        recentBridges: this.recentBridgeLines,
+        experienceType: this._getExperienceType(),
+        previousText: speechContext?.previousText || undefined,
+        baseVoiceSettings:
+          speechContext?.previousVoiceSettings ?? this.deps.getVoiceSettings?.(),
+      }),
+    }).then(async (response) => {
+      if (!response.ok || !response.body) {
+        this.deps.logTiming(`bridge: route unavailable status=${response.status} turn=${turnId}`);
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const audioChunks: string[] = [];
+      let firstAudioAt: number | null = null;
+
+      const handleEvent = (event: { type: string; turnId?: string; [key: string]: unknown }) => {
+        if (
+          event.turnId !== turnId ||
+          this.deliveryGeneration !== generation ||
+          this.bridgeTurnId !== turnId ||
+          this.state !== "generating"
+        ) return;
+        if (event.type === "bridge-meta") {
+          this.bridgeText = typeof event.text === "string" ? event.text : null;
+          const modelMs = typeof event.modelMs === "number" ? event.modelMs : Date.now() - startedAt;
+          const firstTokenMs = typeof event.firstTokenMs === "number" ? event.firstTokenMs : modelMs;
+          this.deps.logTiming(
+            `bridge: model first-token=${firstTokenMs}ms complete=${modelMs}ms turn=${turnId} text="${this.bridgeText ?? ""}"`,
+          );
+        } else if (event.type === "audio" && typeof event.chunk === "string") {
+          if (firstAudioAt === null) {
+            firstAudioAt = Date.now();
+            this.deps.logTiming(
+              `bridge: TTS first audio ${firstAudioAt - startedAt}ms turn=${turnId}`,
+            );
+          }
+          audioChunks.push(event.chunk);
+        } else if (event.type === "audio-end") {
+          if (
+            event.failed === true ||
+            audioChunks.length === 0 ||
+            (this.bridgeClaim !== "pending" && this.bridgeClaim !== "cached")
+          ) return;
+          // Claim only once the full short utterance is buffered and therefore
+          // immediately playable. First PCM arrival is not enough: the shared
+          // scheduler intentionally integrity-gates partial buffers.
+          const followedCachedBackchannel = this.bridgeClaim === "cached";
+          let sink: JokeStreamSink;
+          try {
+            sink = this.deps.openBridgeStream!();
+          } catch {
+            this.deps.logTiming(`bridge: sink open failed turn=${turnId}`);
+            return;
+          }
+          this.bridgeClaim = "bridge";
+          this.bridgeClaimedAt = Date.now();
+          this.bridgeSink = sink;
+          if (this.bridgeFallbackTimer) {
+            clearTimeout(this.bridgeFallbackTimer);
+            this.bridgeFallbackTimer = null;
+          }
+          const text = this.bridgeText ?? "Mm-hmm.";
+          sink.finalize(text);
+          for (const chunk of audioChunks) sink.pushAudio(chunk);
+          sink.endAudio(false);
+          this.bridgeSink = null;
+          this.fillerFirstText = text;
+          this.recentBridgeLines.push(text);
+          this.recentBridgeLines = this.recentBridgeLines.slice(-4);
+          this.deps.logLlm?.("←", "bridge", text);
+          this.deps.logTiming(
+            `bridge: dynamic audio playable ${Date.now() - startedAt}ms turn=${turnId} afterCached=${followedCachedBackchannel} chunks=${audioChunks.length}`,
+          );
+        } else if (event.type === "error") {
+          this.deps.logTiming(`bridge: failed ${String(event.error ?? "unknown")} turn=${turnId}`);
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            handleEvent(JSON.parse(line.slice(6)) as { type: string; turnId?: string; [key: string]: unknown });
+          } catch { /* malformed SSE */ }
+        }
+      }
+    }).catch((error: unknown) => {
+      if ((error as Error).name !== "AbortError") {
+        this.deps.logTiming(`bridge: request failed turn=${turnId}`);
+      }
+    }).finally(() => {
+      if (this.bridgeAbort === abort) {
+        this.bridgeAbort = null;
+        // If the primary cache already drained while the dynamic request was
+        // still pending and that request produced no playable audio, there is
+        // no future drain edge to schedule the secondary safety line.
+        if (
+          this.bridgeClaim === "cached" &&
+          this.bridgeDrainedAt !== null &&
+          this.state === "generating"
+        ) {
+          this._queueSecondaryBridgeIfNeeded();
+        }
+      }
+    });
+  }
+
+  /** Called when the joke stream can open its audio sink. */
+  private _claimJokeAgainstBridge(): boolean {
+    if (!this.bridgeTurnId) return this._stopFillerPump().fillerQueued;
+    if (this.bridgeClaim === "pending") {
+      this.bridgeClaim = "joke";
+      if (this.bridgeFallbackTimer) {
+        clearTimeout(this.bridgeFallbackTimer);
+        this.bridgeFallbackTimer = null;
+      }
+      try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
+      this.bridgeAbort = null;
+      this.deps.logTiming(`bridge: joke won turn=${this.bridgeTurnId}`);
+      return false;
+    }
+    if (this.bridgeClaim === "bridge" || this.bridgeClaim === "cached") {
+      if (this.bridgeClaim === "cached") {
+        try { this.bridgeAbort?.abort(); } catch { /* best-effort */ }
+        this.bridgeAbort = null;
+      }
+      const readyAfterClaim = this.bridgeClaimedAt === null ? null : Date.now() - this.bridgeClaimedAt;
+      const readyAfterDrain = this.bridgeDrainedAt === null ? null : Date.now() - this.bridgeDrainedAt;
+      this.deps.logTiming(
+        `bridge: joke ready turn=${this.bridgeTurnId} afterClaim=${readyAfterClaim ?? "?"}ms afterDrain=${readyAfterDrain ?? "not-drained"}${readyAfterDrain === null ? "" : "ms"}`,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private _queueSecondaryBridgeIfNeeded(): boolean {
+    if (
+      !this.bridgeTurnId ||
+      (this.bridgeClaim !== "bridge" && this.bridgeClaim !== "cached") ||
+      this.state !== "generating"
+    ) return false;
+    const drainedAt = Date.now();
+    this.bridgeDrainedAt = drainedAt;
+    this.deps.logTiming(
+      `bridge: audio drained turn=${this.bridgeTurnId} duration=${this.bridgeClaimedAt === null ? "?" : `${drainedAt - this.bridgeClaimedAt}ms`} secondary=${this.bridgeSecondaryPlayed}`,
+    );
+    if (this.bridgeSecondaryPlayed) return false;
+    // The primary cache has now drained. A still-pending dynamic request has
+    // missed its useful handoff window; abort it before the secondary so a
+    // provider hang cannot turn into a multi-second silent gap.
+    if (this.bridgeClaim === "cached" && this.bridgeAbort !== null) {
+      try { this.bridgeAbort.abort(); } catch { /* best-effort */ }
+      this.bridgeAbort = null;
+      this.deps.logTiming(`bridge: dynamic cancelled after primary drain turn=${this.bridgeTurnId}`);
+    }
+    this.bridgeSecondaryPlayed = true;
+    const text = this.deps.playCachedAcknowledgement?.("secondary");
+    if (!text) return false;
+    this.deps.logTiming(`bridge: cached secondary queued turn=${this.bridgeTurnId}`);
+    return true;
+  }
+
   private _removeEchoedAnswerLead(text: string, answer: string, fillerAlreadySaid?: string): string {
     const cleanedAnswer = ComedianBrain._stripLeadingHesitation(
       answer.trim().replace(/[.?!,]+$/, "").trim(),
@@ -2381,9 +2657,12 @@ export class ComedianBrain {
     const readyYesNoBranch = shouldRepair
       ? null
       : this._getReadyYesNoBranch(rawAnswer, this.currentQuestion);
+    const useDualLane = !readyYesNoBranch && this._dualLaneEnabled();
     const fillerAlreadySaid = readyYesNoBranch
       ? undefined
-      : this._startAnswerFiller(rawAnswer, shouldRepair);
+      : useDualLane
+        ? this._prepareBridgeTurn(generation)
+        : this._startAnswerFiller(rawAnswer, shouldRepair);
     if (readyYesNoBranch) {
       this.deps.logTiming(
         `brain: yes/no branch ready=${readyYesNoBranch.answer} — bypassing filler`,
@@ -2405,8 +2684,9 @@ export class ComedianBrain {
       } else if (shouldRepair) {
         this.deps.logTiming("brain: STT repair checked — unchanged");
       }
+      if (useDualLane) this._startBridgeRequest(answer, generation);
       this._startJokeGeneration(answer, fillerAlreadySaid);
-      if (resumeFillerPump && this.fillerPumpActive && this.state === "generating") {
+      if (!useDualLane && resumeFillerPump && this.fillerPumpActive && this.state === "generating") {
         this._queueNextPumpFiller();
       }
     };
@@ -2604,7 +2884,9 @@ export class ComedianBrain {
           // Stop the filler pump; any in-flight filler audio finishes naturally on the TTS
           // chain. _stopFillerPump also cancels a pending breath (pumpTimer) so no further
           // filler queues ahead of the joke. The joke text itself stays unmodified.
-          fillerContinuityActive = this._stopFillerPump().fillerQueued;
+          // The complete-audio streaming path already claimed the race at the
+          // moment it opened its sink. Browser-TTS fallback claims here.
+          if (!sinkOpened) fillerContinuityActive = this._claimJokeAgainstBridge();
           // Retarget puppet body language to anticipate the joke's mood while the last
           // filler audio is still draining. The motion-inferred-from-user-answer pose
           // (smug/conspiratorial/etc.) was a reaction to the user; this swaps to the
@@ -2767,12 +3049,35 @@ export class ComedianBrain {
 
   private enterDelivering(answer: string, response: JokeResponse, fillerAlreadySaid?: string): void {
     this._markAnswerGenerationSettled();
+    // Every non-streaming delivery path owns the race here, including repaired
+    // yes/no branches, redirects, callbacks, and canned recovery. This prevents
+    // a late bridge response from leaking behind substantive audio.
+    const fillerContinuityActive = this._claimJokeAgainstBridge();
+    const firstHandoff = fillerContinuityActive
+      ? { voiceContinuity: "smooth" as const, handoff: "filler-to-joke" as const }
+      : undefined;
+    const queueDelivery = (
+      text: string,
+      motion: MotionState,
+      intensity: number,
+      appendToPrev = false,
+      first = false,
+      includeAppendArgument = false,
+    ) => {
+      if (first && firstHandoff) {
+        this.deps.queueSpeak(text, motion, intensity, appendToPrev, undefined, firstHandoff);
+      } else if (includeAppendArgument || appendToPrev) {
+        this.deps.queueSpeak(text, motion, intensity, appendToPrev);
+      } else {
+        this.deps.queueSpeak(text, motion, intensity);
+      }
+    };
     this._transition("delivering");
     this.deps.setMotion("energetic", 0.8);
 
     if (!response.relevant && response.redirect) {
       // Irrelevant answer — play redirect and re-ask
-      this.deps.queueSpeak(response.redirect, "smug", 0.7);
+      queueDelivery(response.redirect, "smug", 0.7, false, true);
       this._addLedger("joke", response.redirect, []);
       this._transition("redirecting");
       return;
@@ -2788,7 +3093,13 @@ export class ComedianBrain {
 
     // Check for a callback
     if (response.callback) {
-      this.deps.queueSpeak(response.callback.text, response.callback.motion, response.callback.intensity);
+      queueDelivery(
+        response.callback.text,
+        response.callback.motion,
+        response.callback.intensity,
+        false,
+        true,
+      );
       this._addLedger("joke", response.callback.text, []);
       queued++;
     }
@@ -2796,7 +3107,14 @@ export class ComedianBrain {
     // Queue all jokes — same delivery batch renders as a single transcript paragraph
     for (const joke of response.jokes) {
       const jokeText = this._removeEchoedAnswerLead(joke.text, answer, fillerAlreadySaid);
-      this.deps.queueSpeak(jokeText, joke.motion, joke.intensity, queued > 0);
+      queueDelivery(
+        jokeText,
+        joke.motion,
+        joke.intensity,
+        queued > 0,
+        queued === 0,
+        true,
+      );
       this._addLedger("joke", jokeText, []);
       queued++;
     }
@@ -2814,7 +3132,13 @@ export class ComedianBrain {
       }
       const fallback = this._pickFallbackRoast(answer);
       this.deps.logTiming(`brain: enterDelivering empty — fallback "${fallback.text.slice(0, 60)}"`);
-      this.deps.queueSpeak(fallback.text, fallback.motion as MotionState, fallback.intensity);
+      queueDelivery(
+        fallback.text,
+        fallback.motion as MotionState,
+        fallback.intensity,
+        false,
+        true,
+      );
       this._addLedger("joke", fallback.text, []);
       return;
     }
@@ -4255,6 +4579,7 @@ export class ComedianBrain {
     this.fillerPumpActive = false;
     this.fillerResumeAfterTranscriptRepair = false;
     if (this.pumpTimer) { clearTimeout(this.pumpTimer); this.pumpTimer = null; }
+    this._clearBridgeTurn("timers-cleared");
   }
 
   private _rhetoricalVersion(question: string): string {
@@ -4289,14 +4614,26 @@ export class ComedianBrain {
      *  fallback already landed. */
     gen?: number,
   ): void {
-    const streamingTtsEnabled = !!this.deps.openJokeStream;
+    // Server-streamed joke audio is part of the dual-lane coordinator because
+    // it provides a truthful "complete PCM is playable" race signal. The live
+    // kill switch must restore the legacy browser-TTS/filler path unchanged.
+    const streamingTtsEnabled = !!this.deps.openJokeStream && this._dualLaneEnabled();
     const baseVoiceSettings = streamingTtsEnabled ? this.deps.getVoiceSettings?.() : undefined;
     const speechContext = streamingTtsEnabled ? this.deps.getSpeechContext?.() : undefined;
     /** Per-joke audio sinks, keyed by index from the server SSE stream. */
     const jokeSinks: Map<number, JokeStreamSink> = new Map();
-    /** Whether the brain has emitted a transcript entry for this joke yet. */
-    const jokeAppendState: Map<number, boolean> = new Map();
+    /** Integrity-gated PCM and metadata. The race is decided only after a
+     * complete buffer is available, never at model text or first-byte time. */
+    const jokeAudio = new Map<number, string[]>();
+    const jokeAudioEnded = new Set<number>();
+    const jokeAudioFailed = new Set<number>();
+    const jokeMeta = new Map<number, { motion: MotionState; intensity: number }>();
+    const pendingJokes = new Map<number, JokeItem>();
+    const deliveredJokeIndexes = new Set<number>();
+    const jokeFallbackWaits = new Set<number>();
+    let nextJokeIndex = 0;
     let jokesSeen = 0;
+    let jokeEventsSeen = 0;
 
     // Debug LLM log: legible record of what we're asking for.
     {
@@ -4346,13 +4683,94 @@ export class ComedianBrain {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        type StreamMeta = {
+          relevant: boolean;
+          redirect?: string;
+          tags?: string[];
+          callback?: { text: string; motion: string; intensity: number };
+        };
+        let deferredMeta: StreamMeta | null = null;
+        const flushDeferredMeta = () => {
+          if (!deferredMeta || deliveredJokeIndexes.size < pendingJokes.size) return;
+          const readyMeta = deferredMeta;
+          deferredMeta = null;
+          onMeta(readyMeta);
+        };
+
+        const maybeDeliverJoke = (index: number) => {
+          if (
+            index !== nextJokeIndex ||
+            deliveredJokeIndexes.has(index) ||
+            !jokeAudioEnded.has(index) ||
+            (gen !== undefined && this.deliveryGeneration !== gen) ||
+            (this.state !== "generating" && this.state !== "delivering")
+          ) return;
+          const joke = pendingJokes.get(index);
+          if (!joke) return;
+
+          let sinkOpened = false;
+          const chunks = jokeAudio.get(index) ?? [];
+          if (!jokeAudioFailed.has(index) && chunks.length > 0 && this.deps.openJokeStream) {
+            const streamMeta = jokeMeta.get(index) ?? {
+              motion: joke.motion as MotionState,
+              intensity: joke.intensity,
+            };
+            const fillerQueued = index === 0 ? this._claimJokeAgainstBridge() : false;
+            try {
+              const sink = this.deps.openJokeStream(
+                streamMeta.motion,
+                streamMeta.intensity,
+                {
+                  appendToPrev: index > 0,
+                  ...(fillerQueued
+                    ? { voiceContinuity: "smooth" as const, handoff: "filler-to-joke" as const }
+                    : {}),
+                },
+              );
+              jokeSinks.set(index, sink);
+              sink.finalize(joke.text);
+              for (const chunk of chunks) sink.pushAudio(chunk);
+              sink.endAudio(false);
+              jokeSinks.delete(index);
+              sinkOpened = true;
+              this.deps.logTiming(
+                `brain: joke audio playable index=${index} chunks=${chunks.length}`,
+              );
+            } catch (error) {
+              console.error("[brain] openJokeStream failed:", error);
+            }
+          } else if (this.bridgeTurnId && this.bridgeClaim === "pending") {
+            // Server-side joke TTS failed before becoming playable. Do not let
+            // model text cancel the fast lane and strand the caller during a
+            // fresh browser TTS round-trip. Wait for bridge/cache ownership,
+            // then queue the browser fallback behind that audible response.
+            if (!jokeFallbackWaits.has(index)) {
+              jokeFallbackWaits.add(index);
+              setTimeout(() => {
+                jokeFallbackWaits.delete(index);
+                maybeDeliverJoke(index);
+              }, 10);
+            }
+            return;
+          }
+
+          deliveredJokeIndexes.add(index);
+          onJoke(joke, sinkOpened);
+          jokesSeen++;
+          nextJokeIndex++;
+          maybeDeliverJoke(nextJokeIndex);
+          flushDeferredMeta();
+        };
 
         const handleEvent = (event: { type: string; [key: string]: unknown }): boolean => {
           // Stale stream — the brain has moved on (barge-in / watchdog fired).
           // Cancel any sinks already opened (they were enqueued into the TTS
           // chain) and stop processing further events so we don't queue audio
           // that the user shouldn't hear.
-          if (gen !== undefined && this.deliveryGeneration !== gen) {
+          if (
+            (gen !== undefined && this.deliveryGeneration !== gen) ||
+            (this.state !== "generating" && this.state !== "delivering")
+          ) {
             if (jokeSinks.size > 0) {
               for (const s of jokeSinks.values()) s.cancel();
               jokeSinks.clear();
@@ -4360,70 +4778,38 @@ export class ComedianBrain {
             return true; // signal caller to stop reading more SSE chunks
           }
           if (event.type === "joke-meta" && streamingTtsEnabled) {
-            // Server opened EL WS — open a sink on our side to absorb audio.
+            // Opening the server-side EL stream is not yet audible readiness.
+            // Retain only motion metadata until audio-end confirms a complete
+            // playable transaction.
             const index = (event.index as number) ?? 0;
-            const motion = (event.motion as string) ?? "idle";
+            const motion = ((event.motion as string) ?? "idle") as MotionState;
             const intensity = (event.intensity as number) ?? 0.7;
-            const appendToPrev = index > 0;
-            jokeAppendState.set(index, appendToPrev);
-            // Motion/intensity are known at joke-start, earlier than the full
-            // joke event. Stop the filler breath/pump now so no acknowledgement
-            // can be appended behind audio that is already streaming in.
-            const fillerQueued = index === 0
-              ? this._stopFillerPump().fillerQueued
-              : false;
-            try {
-              const sink = this.deps.openJokeStream!(
-                motion as MotionState,
-                intensity,
-                {
-                  appendToPrev,
-                  ...(fillerQueued
-                    ? { voiceContinuity: "smooth" as const, handoff: "filler-to-joke" as const }
-                    : {}),
-                },
-              );
-              jokeSinks.set(index, sink);
-            } catch (err) {
-              console.error("[brain] openJokeStream failed:", err);
-            }
+            jokeMeta.set(index, { motion, intensity });
           } else if (event.type === "audio" && streamingTtsEnabled) {
             const index = (event.index as number) ?? 0;
             const chunk = event.chunk as string | undefined;
-            const sink = jokeSinks.get(index);
-            if (sink && chunk) sink.pushAudio(chunk);
-          } else if (event.type === "audio-end" && streamingTtsEnabled) {
-            // EL has finished producing audio for this joke. Close the buffer
-            // so the playback chain can advance. Transcript was already
-            // recorded when the `joke` event arrived earlier.
-            const index = (event.index as number) ?? 0;
-            const sink = jokeSinks.get(index);
-            if (sink) {
-              sink.endAudio(event.failed === true);
-              jokeSinks.delete(index);
+            if (chunk) {
+              const chunks = jokeAudio.get(index) ?? [];
+              chunks.push(chunk);
+              jokeAudio.set(index, chunks);
             }
+          } else if (event.type === "audio-end" && streamingTtsEnabled) {
+            const index = (event.index as number) ?? 0;
+            jokeAudioEnded.add(index);
+            if (event.failed === true) jokeAudioFailed.add(index);
+            maybeDeliverJoke(index);
           } else if (event.type === "joke") {
             const joke = event as unknown as JokeItem & { index?: number };
             this.deps.logLlm?.("←", "joke", joke.text);
-            // Streaming path: record transcript now (LLM has all the text),
-            // but DO NOT close the audio buffer — EL is still synthesizing.
-            // The buffer is closed by the `audio-end` event above.
-            let sinkOpened = false;
+            const index = joke.index ?? jokeEventsSeen;
+            jokeEventsSeen++;
             if (streamingTtsEnabled) {
-              const idx = joke.index ?? jokesSeen;
-              const sink = jokeSinks.get(idx);
-              if (sink) {
-                sink.finalize(joke.text);
-                sinkOpened = true;
-              }
+              pendingJokes.set(index, joke);
+              maybeDeliverJoke(index);
+            } else {
+              onJoke(joke, false);
+              jokesSeen++;
             }
-            // Either path: still notify the caller so brain bookkeeping
-            // (jokesAlreadyDelivered, ledger, etc.) runs. sinkOpened=false tells
-            // the caller no audio is in flight for this joke (server never sent
-            // joke-meta — e.g. EL WS failed to open) so it must queueSpeak the
-            // text itself or the show hangs in `delivering` with a silent joke.
-            onJoke(joke, sinkOpened);
-            jokesSeen++;
           } else if (event.type === "error" && event.error === "quota_exceeded") {
             const provider = (event.provider as string) ?? "unknown";
             this.deps.setError?.(`${provider} credits exhausted — add billing or switch models`);
@@ -4444,14 +4830,12 @@ export class ComedianBrain {
             return true;
           } else if (event.type === "meta") {
             metaSeen = true;
-            onMeta(
-              event as unknown as {
-                relevant: boolean;
-                redirect?: string;
-                tags?: string[];
-                callback?: { text: string; motion: string; intensity: number };
-              },
-            );
+            const streamMeta = event as unknown as StreamMeta;
+            if (streamingTtsEnabled && deliveredJokeIndexes.size < pendingJokes.size) {
+              deferredMeta = streamMeta;
+            } else {
+              onMeta(streamMeta);
+            }
           }
           return false;
         };
@@ -4483,15 +4867,13 @@ export class ComedianBrain {
 
         if (buffer.trim() && parseLines(buffer.split("\n"))) return;
 
-        // Safety net: SSE ended but some sinks never received audio-end (EL
-        // hung or server dropped the event). Close them so the playback
-        // chain can advance instead of waiting forever.
-        if (jokeSinks.size > 0) {
-          this.deps.logTiming(
-            `brain: stream ended with ${jokeSinks.size} sink(s) still open — closing`,
-          );
-          for (const s of jokeSinks.values()) s.endAudio();
-          jokeSinks.clear();
+        // Safety net: if EL never produced audio-end, fall back to browser TTS
+        // for each complete joke instead of opening a partial sink or hanging.
+        for (const index of pendingJokes.keys()) {
+          if (deliveredJokeIndexes.has(index)) continue;
+          jokeAudioEnded.add(index);
+          jokeAudioFailed.add(index);
+          maybeDeliverJoke(index);
         }
 
         if (!metaSeen) {

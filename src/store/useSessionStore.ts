@@ -134,6 +134,9 @@ interface SessionState {
    *  aware of what's already been answered) instead of the fixed bank. Dev toggle
    *  on the landing screen can turn it off to compare against the bank. */
   llmQuestions: boolean;
+  /** Dual-model answer handoff: a minimal bridge response races the deliberate
+   *  joke lane, with cached acknowledgement audio as a latency ceiling. */
+  dualLaneResponses: boolean;
   experienceType: ExperienceType;
   burnIntensity: BurnIntensity;
   contentMode: ContentMode;
@@ -213,6 +216,7 @@ interface SessionState {
   setSessionMode: (mode: SessionMode) => void;
   setCannedIntro: (v: boolean) => void;
   setLlmQuestions: (v: boolean) => void;
+  setDualLaneResponses: (v: boolean) => void;
   setExperienceType: (type: ExperienceType) => void;
   setBurnIntensity: (intensity: BurnIntensity) => void;
   setContentMode: (mode: ContentMode) => void;
@@ -282,6 +286,7 @@ const initialState = {
   sessionMode: "conversation" as SessionMode,
   cannedIntro: cannedIntroDefault,
   llmQuestions: true,
+  dualLaneResponses: true,
   experienceType: "roast" as ExperienceType,
   burnIntensity: 5 as BurnIntensity,
   contentMode: "clean" as ContentMode,
@@ -343,6 +348,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setSessionMode: (sessionMode) => set({ sessionMode }),
   setCannedIntro: (cannedIntro) => set({ cannedIntro }),
   setLlmQuestions: (llmQuestions) => set({ llmQuestions }),
+  setDualLaneResponses: (dualLaneResponses) => set({ dualLaneResponses }),
   setExperienceType: (experienceType) =>
     set((s) =>
       // Only reseed the voice when the experience actually changes — protects any

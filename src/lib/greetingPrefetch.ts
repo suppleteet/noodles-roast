@@ -314,6 +314,34 @@ export function prefetchGreetingAudio(
   return buffer;
 }
 
+export interface AcknowledgementAudioCache {
+  primary: { text: string; audio: TtsChunkBuffer };
+  secondary: { text: string; audio: TtsChunkBuffer };
+}
+
+/**
+ * Synthesize the two neutral dual-lane safety clips once per call. TtsChunkBuffer
+ * retains completed PCM chunks, so the controller can replay a clip without
+ * another ElevenLabs request if the lightweight bridge misses its deadline.
+ */
+export function prefetchAcknowledgementAudioCache(
+  baseVoiceSettings: VoiceSettings,
+  experienceType: "roast" | "toast",
+): AcknowledgementAudioCache {
+  const primaryText = "Mm-hmm.";
+  const secondaryText = "Okay... yeah, I got something.";
+  return {
+    primary: {
+      text: primaryText,
+      audio: prefetchGreetingAudio(primaryText, "thinking", 0.55, baseVoiceSettings, experienceType),
+    },
+    secondary: {
+      text: secondaryText,
+      audio: prefetchGreetingAudio(secondaryText, "thinking", 0.65, baseVoiceSettings, experienceType),
+    },
+  };
+}
+
 /** Canned opener prefetch — the line text plus its already-streaming TTS audio. */
 export interface CannedOpenerPrefetch {
   text: string;

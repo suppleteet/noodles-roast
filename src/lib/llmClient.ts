@@ -16,6 +16,7 @@ import {
   recordLlmUsage,
 } from "@/lib/usageTracker";
 import { geminiThinkingConfig } from "@/lib/geminiThinking";
+import type { GeminiWorkload } from "@/lib/geminiThinking";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -35,9 +36,11 @@ export interface LlmRequest {
    * Creative turns get a small reasoning allowance; utility calls such as
    * question phrasing stay at the provider's minimum-latency setting.
    */
-  reasoningProfile?: "creative" | "realtime-utility";
+  reasoningProfile?: GeminiWorkload;
   /** OpenAI only: force JSON object response. Defaults to false. */
   forceJsonObject?: boolean;
+  /** Cancels client-side streaming and prevents stale response handling. */
+  signal?: AbortSignal;
 }
 
 type Provider = "gemini" | "openai" | "anthropic";
@@ -189,7 +192,8 @@ function estimatedInputTokens(req: LlmRequest): number {
 
 function openAiReasoningEffort(
   req: LlmRequest,
-): "none" | "low" {
+): "none" | "low" | "medium" {
+  if (req.reasoningProfile === "comedy-deliberate") return "medium";
   return req.reasoningProfile === "creative" ? "low" : "none";
 }
 
@@ -357,6 +361,7 @@ export async function* generateTextStream(
 ): AsyncGenerator<string> {
   const provider = getProvider(req.model);
   for (let attempt = 0; ; attempt++) {
+    req.signal?.throwIfAborted();
     let yielded = false;
     try {
       switch (provider) {
@@ -371,6 +376,7 @@ export async function* generateTextStream(
                 req.reasoningProfile ?? "realtime-utility",
               ),
               maxOutputTokens: req.maxOutputTokens,
+              abortSignal: req.signal,
               ...(req.forceJsonObject
                 ? { responseMimeType: "application/json" }
                 : {}),
@@ -382,6 +388,7 @@ export async function* generateTextStream(
           let candidatesTokenCount: number | undefined;
           let totalTokenCount: number | undefined;
           for await (const chunk of stream) {
+            req.signal?.throwIfAborted();
             if (chunk.usageMetadata) {
               promptTokenCount = chunk.usageMetadata.promptTokenCount;
               candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount;

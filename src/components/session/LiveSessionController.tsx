@@ -33,8 +33,11 @@ import type { JokeResponse } from "@/app/api/generate-joke/route";
 import {
   prefetchParallelVisionAndGreeting,
   prefetchCannedOpener,
+  prefetchAcknowledgementAudioCache,
+  type AcknowledgementAudioCache,
   type CannedOpenerPrefetch,
 } from "@/lib/greetingPrefetch";
+import type { ComedianSessionIds } from "@/lib/comedianSessionIds";
 import {
   voiceSettingsForMotion,
   gainForMotion,
@@ -80,7 +83,7 @@ interface Props {
   /** Comedian chat session pre-created at button press (page.tsx) so its cold
    *  latency overlaps the permission grant. Resolves to the sessionId, or null
    *  on failure — in which case the connect effect creates one itself. */
-  prefetchedComedianSessionPromise?: Promise<string | null> | null;
+  prefetchedComedianSessionPromise?: Promise<ComedianSessionIds | null> | null;
   /** Parallel vision + greeting jokes started in page.tsx as soon as the camera stream exists (before roasting). */
   warmupGreetingPrefetch?: Promise<JokeResponse | null> | null;
   /** Audio chunks already streaming in for the greeting joke — saves the
@@ -89,6 +92,8 @@ interface Props {
   /** Canned-intro opener picked + TTS-prefetched in page.tsx during the
    *  permission window. Null/absent when the canned intro doesn't apply. */
   warmupCannedOpener?: Promise<CannedOpenerPrefetch | null> | null;
+  /** Reusable neutral answer acknowledgements, synthesized after the opener. */
+  warmupAcknowledgementAudio?: Promise<AcknowledgementAudioCache | null> | null;
   /** Incremented by the recovery dialog when the caller continues the current
    *  live session instead of restarting with another model. */
   modelTroubleContinueSignal?: number;
@@ -105,6 +110,7 @@ export default function LiveSessionController({
   warmupGreetingPrefetch,
   warmupGreetingAudio,
   warmupCannedOpener,
+  warmupAcknowledgementAudio,
   modelTroubleContinueSignal = 0,
   mockMode = false,
 }: Props) {
@@ -139,6 +145,8 @@ export default function LiveSessionController({
 
   // Gemini multi-turn chat session ID (comedian persona loaded once)
   const comedianSessionIdRef = useRef<string | null>(null);
+  const bridgeSessionIdRef = useRef<string | null>(null);
+  const acknowledgementAudioRef = useRef<AcknowledgementAudioCache | null>(null);
 
   // TTS pipeline — brain-driven, sequential ElevenLabs requests
   const ttsChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -405,7 +413,7 @@ export default function LiveSessionController({
     options?: {
       appendToPrev?: boolean;
       voiceContinuity?: VoiceContinuityMode;
-      handoff?: "filler-to-joke";
+      handoff?: SpeechHandoff;
     },
   ): {
     pushAudio: (b64: string) => void;
@@ -465,6 +473,12 @@ export default function LiveSessionController({
           handoff: options?.handoff,
         });
         if (!queued && audio.failed) {
+          if (options?.handoff === "filler") {
+            useSessionStore.getState().logTiming(
+              `tts-stream: optional bridge failed — skipping REST "${finalizedText.slice(0, 40)}"`,
+            );
+            return;
+          }
           if (!finalizedText) {
             await Promise.race([
               finalizedTextReady,
@@ -606,6 +620,29 @@ export default function LiveSessionController({
       );
       await scheduleFromPrefetch(buffer, gen, profile, { text: text.trim() });
     });
+  }
+
+  function playCachedAcknowledgement(slot: "primary" | "secondary"): string {
+    const cached = acknowledgementAudioRef.current?.[slot];
+    const fallbackText = slot === "primary" ? "Mm-hmm." : "Okay... yeah, I got something.";
+    const text = cached?.text ?? fallbackText;
+    if (cached && !cached.audio.failed) {
+      useSessionStore.getState().logTiming(
+        `bridge-audio: cached ${slot} replay chunks=${cached.audio.chunks.length} done=${cached.audio.done}`,
+      );
+      playPrefetchedAudio(text, cached.audio, "thinking", slot === "primary" ? 0.55 : 0.65);
+    } else {
+      useSessionStore.getState().logTiming(`bridge-audio: ${slot} cache miss — live TTS fallback`);
+      queueSpeak(
+        text,
+        "thinking",
+        slot === "primary" ? 0.55 : 0.65,
+        false,
+        undefined,
+        { voiceContinuity: "inherit", handoff: "filler" },
+      );
+    }
+    return text;
   }
 
   /**
@@ -1566,6 +1603,8 @@ export default function LiveSessionController({
     lastAudibleTextRef.current = "";
     lastAudibleVoiceSettingsRef.current = null;
     lastAudibleGainRef.current = null;
+    comedianSessionIdRef.current = null;
+    bridgeSessionIdRef.current = null;
 
     userSpeakingSpanRef.current = null;
     geminiWaitingSpanRef.current = null;
@@ -1589,6 +1628,22 @@ export default function LiveSessionController({
     useSessionStore.getState().setTownFlavorBlurb(null);
     useSessionStore.getState().setTownFlavorRequested(false);
     useSessionStore.getState().logTiming("live: starting session");
+    acknowledgementAudioRef.current = null;
+    const acknowledgementPromise = warmupAcknowledgementAudio ?? Promise.resolve(
+      prefetchAcknowledgementAudioCache(
+        useSessionStore.getState().voiceSettings,
+        useSessionStore.getState().experienceType,
+      ),
+    );
+    void acknowledgementPromise.then((cache) => {
+      if (!isRunningRef.current || !cache) return;
+      acknowledgementAudioRef.current = cache;
+      useSessionStore.getState().logTiming(
+        `bridge-audio: cache ready primary=${cache.primary.audio.done && !cache.primary.audio.failed} secondary=${cache.secondary.audio.done && !cache.secondary.audio.failed}`,
+      );
+    }).catch(() => {
+      useSessionStore.getState().logTiming("bridge-audio: cache prefetch unavailable");
+    });
 
     // Prefetch the opening vision joke as early as the camera permits. Direct-image
     // generation and the reusable vision analysis run in parallel so the first
@@ -1667,7 +1722,20 @@ export default function LiveSessionController({
       getAmbientContext: () => useSessionStore.getState().ambientContext,
       getTownFlavor: () => useSessionStore.getState().townFlavorBlurb,
       getVoiceSettings: () => useSessionStore.getState().voiceSettings,
+      getSpeechContext: () => ({
+        previousText: lastSpokenTextRef.current,
+        previousVoiceSettings: lastQueuedVoiceSettingsRef.current,
+      }),
+      openJokeStream,
+      openBridgeStream: () => openJokeStream(
+        "thinking",
+        0.6,
+        { voiceContinuity: "inherit", handoff: "filler" },
+      ),
+      playCachedAcknowledgement,
       getSessionId: () => comedianSessionIdRef.current,
+      getBridgeSessionId: () => bridgeSessionIdRef.current,
+      getDualLaneResponses: () => useSessionStore.getState().dualLaneResponses,
       setBrainState: (s) => {
         useSessionStore.getState().setBrainState(s);
         if (s === "ask_question" || s === "delivering" || s === "check_vision") {
@@ -1806,7 +1874,7 @@ export default function LiveSessionController({
       // here if the prefetch is missing or resolved null. Non-blocking either
       // way — the brain falls back to stateless if no sessionId ever lands.
       const store = useSessionStore.getState();
-      const createComedianSession = (): Promise<string | null> =>
+      const createComedianSession = (): Promise<ComedianSessionIds | null> =>
         fetch("/api/comedian-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1819,19 +1887,26 @@ export default function LiveSessionController({
           }),
         })
           .then((r) => r.json())
-          .then((data: { sessionId?: string }) => data.sessionId ?? null)
+          .then((data: { sessionId?: string; bridgeSessionId?: string }) =>
+            data.sessionId
+              ? { sessionId: data.sessionId, bridgeSessionId: data.bridgeSessionId }
+              : null,
+          )
           .catch(() => null);
 
       (prefetchedComedianSessionPromise ?? createComedianSession())
-        .then((sessionId) => {
+        .then((sessionIds) => {
           // Prefetch may resolve null (failed) — create one here as a fallback.
-          if (!sessionId && prefetchedComedianSessionPromise) return createComedianSession();
-          return sessionId;
+          if (!sessionIds && prefetchedComedianSessionPromise) return createComedianSession();
+          return sessionIds;
         })
-        .then((sessionId) => {
-          if (sessionId && isRunningRef.current) {
-            comedianSessionIdRef.current = sessionId;
-            useSessionStore.getState().logTiming(`live: comedian chat session ready (${sessionId}) model=${store.roastModel} experience=${store.experienceType}`);
+        .then((sessionIds) => {
+          if (sessionIds && isRunningRef.current) {
+            comedianSessionIdRef.current = sessionIds.sessionId;
+            bridgeSessionIdRef.current = sessionIds.bridgeSessionId ?? null;
+            useSessionStore.getState().logTiming(
+              `live: dual chat sessions ready joke=${sessionIds.sessionId} bridge=${sessionIds.bridgeSessionId ?? "none"} model=${store.roastModel} experience=${store.experienceType}`,
+            );
           }
         })
         .catch(() => { /* stateless fallback — no action needed */ });
@@ -1943,14 +2018,19 @@ export default function LiveSessionController({
     spareTokenRef.current = null; // drop any warm spare; it'll expire on its own
 
     // Clean up comedian chat session (fire-and-forget)
-    if (comedianSessionIdRef.current) {
+    if (comedianSessionIdRef.current || bridgeSessionIdRef.current) {
       fetch("/api/comedian-session", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: comedianSessionIdRef.current }),
+        body: JSON.stringify({
+          sessionId: comedianSessionIdRef.current ?? undefined,
+          bridgeSessionId: bridgeSessionIdRef.current ?? undefined,
+        }),
       }).catch(() => {});
       comedianSessionIdRef.current = null;
+      bridgeSessionIdRef.current = null;
     }
+    acknowledgementAudioRef.current = null;
 
     store.setIsSpeaking(false);
     store.setIsListening(false);

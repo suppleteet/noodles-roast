@@ -1,6 +1,6 @@
 import { ThinkingLevel, type ThinkingConfig } from "@google/genai";
 
-export type GeminiWorkload = "creative" | "realtime-utility";
+export type GeminiWorkload = "creative" | "comedy-deliberate" | "realtime-utility";
 
 /**
  * Gemini 3.x replaced numeric thinking budgets with thinking levels. Creative
@@ -17,7 +17,11 @@ export function geminiThinkingConfig(
   if (model.startsWith("gemini-3")) {
     return {
       thinkingLevel:
-        workload === "creative" ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL,
+        workload === "comedy-deliberate"
+          ? ThinkingLevel.MEDIUM
+          : workload === "creative"
+            ? ThinkingLevel.LOW
+            : ThinkingLevel.MINIMAL,
     };
   }
 
